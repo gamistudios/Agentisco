@@ -1,0 +1,252 @@
+package com.example.ui.screens
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.outlined.Security
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.example.data.model.AppDestination
+import com.example.data.model.PermissionMode
+import com.example.ui.WorkspaceViewModel
+import com.example.ui.theme.*
+
+@Composable
+fun SettingsScreen(
+  viewModel: WorkspaceViewModel,
+  onNavigate: (AppDestination) -> Unit,
+  modifier: Modifier = Modifier
+) {
+  val permissions by viewModel.permissions.collectAsState()
+
+  LazyColumn(
+    modifier = modifier
+      .fillMaxSize()
+      .background(DarkBackground)
+      .padding(horizontal = 16.dp),
+    verticalArrangement = Arrangement.spacedBy(16.dp)
+  ) {
+    item {
+      Spacer(modifier = Modifier.height(10.dp))
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        IconButton(
+          onClick = { onNavigate(AppDestination.AGENT) },
+          modifier = Modifier.size(32.dp)
+        ) {
+          Icon(Icons.Default.ChevronLeft, contentDescription = "Back", tint = TextMuted)
+        }
+        Spacer(modifier = Modifier.width(6.dp))
+        Column {
+          Text("Agent Permissions & Settings", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+          Text("Control autonomous agent tool boundaries", color = TextMuted, fontSize = 12.sp)
+        }
+      }
+    }
+
+    // File Editing Permission Card (Section 22)
+    item {
+      Card(
+        modifier = Modifier
+          .fillMaxWidth()
+          .clip(RoundedCornerShape(12.dp))
+          .border(1.dp, DarkBorder, RoundedCornerShape(12.dp)),
+        colors = CardDefaults.cardColors(containerColor = DarkSurface)
+      ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+          Text("File Editing Permissions", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+          Spacer(modifier = Modifier.height(8.dp))
+
+          PermissionRadioItem(
+            title = "Always ask before editing",
+            selected = permissions.fileEditing == PermissionMode.ALWAYS_ASK,
+            onClick = { viewModel.updatePermissions { it.copy(fileEditing = PermissionMode.ALWAYS_ASK) } }
+          )
+          PermissionRadioItem(
+            title = "Auto-approve inside project workspace",
+            selected = permissions.fileEditing == PermissionMode.AUTO_APPROVE_PROJECT,
+            onClick = { viewModel.updatePermissions { it.copy(fileEditing = PermissionMode.AUTO_APPROVE_PROJECT) } }
+          )
+          PermissionRadioItem(
+            title = "Never allow file modifications",
+            selected = permissions.fileEditing == PermissionMode.NEVER_ALLOW,
+            onClick = { viewModel.updatePermissions { it.copy(fileEditing = PermissionMode.NEVER_ALLOW) } }
+          )
+        }
+      }
+    }
+
+    // Terminal Commands Permission Card
+    item {
+      Card(
+        modifier = Modifier
+          .fillMaxWidth()
+          .clip(RoundedCornerShape(12.dp))
+          .border(1.dp, DarkBorder, RoundedCornerShape(12.dp)),
+        colors = CardDefaults.cardColors(containerColor = DarkSurface)
+      ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+          Text("Terminal Execution Safety", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+          Spacer(modifier = Modifier.height(8.dp))
+
+          PermissionRadioItem(
+            title = "Always ask before running any command",
+            selected = permissions.terminalCommands == PermissionMode.ALWAYS_ASK,
+            onClick = { viewModel.updatePermissions { it.copy(terminalCommands = PermissionMode.ALWAYS_ASK) } }
+          )
+          PermissionRadioItem(
+            title = "Allow safe commands (ls, git, npm test)",
+            selected = permissions.terminalCommands == PermissionMode.ALLOW_SAFE,
+            onClick = { viewModel.updatePermissions { it.copy(terminalCommands = PermissionMode.ALLOW_SAFE) } }
+          )
+          PermissionRadioItem(
+            title = "Allow all commands (Dangerous)",
+            selected = permissions.terminalCommands == PermissionMode.ALLOW_ALL,
+            warning = true,
+            onClick = { viewModel.updatePermissions { it.copy(terminalCommands = PermissionMode.ALLOW_ALL) } }
+          )
+        }
+      }
+    }
+
+    // Network & Boundaries Card
+    item {
+      Card(
+        modifier = Modifier
+          .fillMaxWidth()
+          .clip(RoundedCornerShape(12.dp))
+          .border(1.dp, DarkBorder, RoundedCornerShape(12.dp)),
+        colors = CardDefaults.cardColors(containerColor = DarkSurface)
+      ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+          Text("Network & Tool Loop Limits", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+          Spacer(modifier = Modifier.height(10.dp))
+
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Column {
+              Text("Network Access", color = TextPrimary, fontSize = 13.sp)
+              Text("Allow agent to fetch web docs & packages", color = TextMuted, fontSize = 11.sp)
+            }
+            Switch(
+              checked = permissions.networkAccess,
+              onCheckedChange = { ch -> viewModel.updatePermissions { it.copy(networkAccess = ch) } },
+              colors = SwitchDefaults.colors(checkedThumbColor = ElectricBlue)
+            )
+          }
+
+          HorizontalDivider(color = DarkBorderSubtle, modifier = Modifier.padding(vertical = 10.dp))
+
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Column {
+              Text("Max Tool Iterations", color = TextPrimary, fontSize = 13.sp)
+              Text("Safety cutoff for agent reasoning loop", color = TextMuted, fontSize = 11.sp)
+            }
+            Box(
+              modifier = Modifier
+                .clip(RoundedCornerShape(6.dp))
+                .background(DarkSurfaceElevated)
+                .padding(horizontal = 10.dp, vertical = 6.dp)
+            ) {
+              Text("${permissions.maxToolIterations} iterations", color = ElectricBlueGlow, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            }
+          }
+        }
+      }
+    }
+
+    // Notifications Preferences Card
+    item {
+      Card(
+        modifier = Modifier
+          .fillMaxWidth()
+          .clip(RoundedCornerShape(12.dp))
+          .border(1.dp, DarkBorder, RoundedCornerShape(12.dp)),
+        colors = CardDefaults.cardColors(containerColor = DarkSurface)
+      ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+          Text("Push & In-App Alerts", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+          Spacer(modifier = Modifier.height(8.dp))
+
+          NotificationToggleRow("Task completed", true)
+          NotificationToggleRow("Build failed", true)
+          NotificationToggleRow("Approval requested", true)
+          NotificationToggleRow("Background task finished", true)
+        }
+      }
+    }
+
+    item {
+      Spacer(modifier = Modifier.height(24.dp))
+    }
+  }
+}
+
+@Composable
+private fun PermissionRadioItem(
+  title: String,
+  selected: Boolean,
+  warning: Boolean = false,
+  onClick: () -> Unit
+) {
+  Row(
+    modifier = Modifier
+      .fillMaxWidth()
+      .clickable(onClick = onClick)
+      .padding(vertical = 6.dp),
+    verticalAlignment = Alignment.CenterVertically
+  ) {
+    RadioButton(
+      selected = selected,
+      onClick = onClick,
+      colors = RadioButtonDefaults.colors(
+        selectedColor = if (warning) DangerRed else ElectricBlue
+      )
+    )
+    Spacer(modifier = Modifier.width(6.dp))
+    Text(
+      text = title,
+      color = if (warning && selected) DangerRed else TextPrimary,
+      fontSize = 13.sp,
+      fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
+    )
+  }
+}
+
+@Composable
+private fun NotificationToggleRow(label: String, initial: Boolean) {
+  var checked by remember { mutableStateOf(initial) }
+  Row(
+    modifier = Modifier
+      .fillMaxWidth()
+      .padding(vertical = 4.dp),
+    horizontalArrangement = Arrangement.SpaceBetween,
+    verticalAlignment = Alignment.CenterVertically
+  ) {
+    Text(label, color = TextSecondary, fontSize = 12.sp)
+    Switch(
+      checked = checked,
+      onCheckedChange = { checked = it },
+      colors = SwitchDefaults.colors(checkedThumbColor = ElectricBlue)
+    )
+  }
+}

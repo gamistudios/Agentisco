@@ -1,0 +1,6 @@
+{
+  "name": "Agent IDE",
+  "description": "Mobile-first AI Agentic IDE for Android to build, code, run, test, and ship software with an autonomous agent.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
