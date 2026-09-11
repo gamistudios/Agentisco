@@ -104,6 +104,10 @@ class WorkspaceRepository(
   private val _activeTerminalSessionId = MutableStateFlow("term-1")
   val activeTerminalSessionId: StateFlow<String> = _activeTerminalSessionId.asStateFlow()
 
+  // Terminal command history (shared across sessions, like a shell's ~/.bash_history)
+  private val _terminalCommandHistory = MutableStateFlow<List<String>>(emptyList())
+  val terminalCommandHistory: StateFlow<List<String>> = _terminalCommandHistory.asStateFlow()
+
   // AI Providers & Models
   private val _providers = MutableStateFlow<List<AIProvider>>(getInitialProviders())
   val providers: StateFlow<List<AIProvider>> = _providers.asStateFlow()
@@ -398,6 +402,14 @@ class WorkspaceRepository(
 
   private var pendingTerminalApprovalAction: ((Boolean) -> Unit)? = null
 
+  private fun appendTerminalHistory(command: String) {
+    if (command.isBlank()) return
+    _terminalCommandHistory.update { history ->
+      val next = if (history.lastOrNull() == command) history else history + command
+      if (next.size > MAX_HISTORY_SIZE) next.drop(next.size - MAX_HISTORY_SIZE) else next
+    }
+  }
+
   fun executeTerminalCommand(command: String, bypassGuard: Boolean = false) {
     val cleanCmd = command.trim()
     if (cleanCmd.isEmpty()) return
@@ -444,6 +456,7 @@ class WorkspaceRepository(
                 } else s
               }
             }
+            appendTerminalHistory(cleanCmd)
             executeTerminalCommandInternal(cleanCmd, currentId)
           } else {
             _terminalSessions.update { list ->
@@ -462,6 +475,9 @@ class WorkspaceRepository(
         return
       }
     }
+
+    // Record in history before echoing the command line (also covers `clear`)
+    appendTerminalHistory(cleanCmd)
 
     // Add command input line immediately
     _terminalSessions.update { list ->
@@ -586,6 +602,8 @@ class WorkspaceRepository(
   }
 
   companion object {
+    private const val MAX_HISTORY_SIZE = 500
+
     fun getInitialAgentSteps(): List<AgentTaskStep> {
       return listOf(
         AgentTaskStep("s1", "Understand project context", AgentStepStatus.COMPLETED, "Inspected package.json and workspace files", listOf("package.json", "tsconfig.json")),

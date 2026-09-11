@@ -7,11 +7,17 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.exclude
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.ScaffoldDefaults
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.data.model.AppDestination
 import com.example.ui.WorkspaceViewModel
@@ -58,9 +64,20 @@ fun AgentIDEApp(
     }
   }
 
+  // While the soft keyboard is open, drop the bottom nav bar and stop reserving
+  // the navigation-bar inset. Otherwise the Scaffold reserves the bar's height
+  // above the keyboard, leaving a large gap between the IME and screens' dev keybars.
+  val density = LocalDensity.current
+  val isImeVisible = WindowInsets.ime.getBottom(density) > 0
+
   Scaffold(
     modifier = Modifier.fillMaxSize(),
     containerColor = DarkBackground,
+    contentWindowInsets = if (isImeVisible) {
+      ScaffoldDefaults.contentWindowInsets.exclude(WindowInsets.navigationBars)
+    } else {
+      ScaffoldDefaults.contentWindowInsets
+    },
     topBar = {
       AgentIDETopAppBar(
         activeProject = activeProject,
@@ -72,11 +89,13 @@ fun AgentIDEApp(
       )
     },
     bottomBar = {
-      AgentIDEBottomBar(
-        currentDestination = currentDestination,
-        isAgentWorking = isAgentWorking,
-        onNavigate = { dest -> viewModel.navigateTo(dest) }
-      )
+      if (!isImeVisible) {
+        AgentIDEBottomBar(
+          currentDestination = currentDestination,
+          isAgentWorking = isAgentWorking,
+          onNavigate = { dest -> viewModel.navigateTo(dest) }
+        )
+      }
     }
   ) { innerPadding ->
     Box(

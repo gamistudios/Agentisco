@@ -32,6 +32,7 @@ class WorkspaceViewModel(
 
   val terminalSessions: StateFlow<List<TerminalSession>> = repository.terminalSessions
   val activeTerminalSessionId: StateFlow<String> = repository.activeTerminalSessionId
+  val terminalCommandHistory: StateFlow<List<String>> = repository.terminalCommandHistory
 
   val providers: StateFlow<List<AIProvider>> = repository.providers
   val selectedModel: StateFlow<AIModel> = repository.selectedModel

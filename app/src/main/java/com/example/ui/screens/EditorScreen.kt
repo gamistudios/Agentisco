@@ -50,6 +50,8 @@ fun EditorScreen(
     modifier = modifier
       .fillMaxSize()
       .background(DarkBackground)
+      // Keep the editor content and dev keybar above the soft keyboard.
+      .imePadding()
   ) {
     // Editor Top Bar
     Surface(
