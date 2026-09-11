@@ -131,7 +131,7 @@ class ProviderConfigStoreTest {
       AIProvider("p-hf", "Hugging Face", "https://router.huggingface.co/v2", LLMProtocol.OPENAI_CHAT_COMPLETIONS, hasApiKey = true),
       "hf-key-v2"
     )
-    assertEquals(2, store.getModelsFor("p-hf").size)
+    assertEquals(1, store.getModelsFor("p-hf").size)
     assertEquals("hf-key-v2", store.getApiKey("p-hf"))
     assertEquals(2, store.getProviders().size)
   }

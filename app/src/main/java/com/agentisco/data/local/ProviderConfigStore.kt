@@ -114,7 +114,11 @@ class ProviderConfigStore(private val context: Context? = null) {
     providersCache = providersCache.filterNot { it.id == providerId }
     modelsCache = modelsCache.filterNot { it.providerId == providerId }
     credentialsCache.remove(providerId)
-    if (selectedIdCache != null && selectedIdCache !in modelsCache.map { it.id }) selectedIdCache = null
+    // If the selected model was removed with the provider, fall back to another
+    // available model so the selection stays valid after restarts.
+    if (selectedIdCache != null && selectedIdCache !in modelsCache.map { it.id }) {
+      selectedIdCache = modelsCache.firstOrNull()?.id
+    }
     persistConfig()
     persistCredentials()
     return removedModels
