@@ -10,7 +10,9 @@ import java.io.File
 import java.io.InputStreamReader
 import java.util.concurrent.ConcurrentHashMap
 
-class TerminalProcessManager {
+class TerminalProcessManager(
+  val linuxEnv: LinuxEnvironmentManager = LinuxEnvironmentManager()
+) {
 
   private val activeProcesses = ConcurrentHashMap<String, Process>()
 
@@ -25,6 +27,11 @@ class TerminalProcessManager {
     // Handle 'clear' command
     if (clean == "clear") {
       return@withContext 0
+    }
+
+    // Check if LinuxEnvironmentManager handles this command directly
+    if (linuxEnv.canHandle(clean)) {
+      return@withContext linuxEnv.execute(session, clean, onLine)
     }
 
     val workingDirFile = File(session.currentDir).let {
@@ -62,7 +69,7 @@ class TerminalProcessManager {
 
       val env = processBuilder.environment()
       env["TERM"] = "xterm-256color"
-      env["PATH"] = (env["PATH"] ?: "") + ":/system/bin:/system/xbin:/vendor/bin:/bin:/usr/bin"
+      env["PATH"] = (env["PATH"] ?: "") + ":/data/data/com.termux/files/usr/bin:/system/bin:/system/xbin:/vendor/bin:/bin:/usr/bin"
 
       val process = processBuilder.start()
       activeProcesses[session.id] = process
@@ -102,13 +109,19 @@ class TerminalProcessManager {
 
       if (exitCode == 0) {
         onLine(TerminalLine("Process completed with exit code 0", TerminalLineType.SUCCESS))
+      } else if (exitCode == 127) {
+        val cmdName = clean.split("\\s+".toRegex()).firstOrNull() ?: clean
+        onLine(TerminalLine("sh: $cmdName: command not found", TerminalLineType.STDERR))
+        onLine(TerminalLine("Hint: Install it using 'apt install $cmdName' or type 'help' for available tools.", TerminalLineType.INFO))
       } else {
         onLine(TerminalLine("Process exited with code $exitCode", TerminalLineType.STDERR))
       }
       return@withContext exitCode
     } catch (e: Exception) {
       activeProcesses.remove(session.id)
-      onLine(TerminalLine("Error executing command: ${e.localizedMessage ?: "Unknown process error"}", TerminalLineType.STDERR))
+      val cmdName = clean.split("\\s+".toRegex()).firstOrNull() ?: clean
+      onLine(TerminalLine("sh: $cmdName: inaccessible or not found (${e.localizedMessage})", TerminalLineType.STDERR))
+      onLine(TerminalLine("Hint: Try 'apt install $cmdName' or 'help' for built-in tools.", TerminalLineType.INFO))
       return@withContext -1
     }
   }

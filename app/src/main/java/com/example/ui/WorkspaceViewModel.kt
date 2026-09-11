@@ -145,6 +145,10 @@ class WorkspaceViewModel(
     repository.createTerminalSession(name)
   }
 
+  fun closeTerminalSession(id: String) {
+    repository.closeTerminalSession(id)
+  }
+
   fun executeTerminalCommand(cmd: String) {
     repository.executeTerminalCommand(cmd)
   }

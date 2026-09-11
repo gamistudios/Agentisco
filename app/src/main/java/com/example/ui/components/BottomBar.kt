@@ -40,17 +40,16 @@ fun AgentIDEBottomBar(
   modifier: Modifier = Modifier
 ) {
   Surface(
-    modifier = modifier
-      .fillMaxWidth()
-      .windowInsetsPadding(WindowInsets.navigationBars),
+    modifier = modifier.fillMaxWidth(),
     color = DarkSurface,
-    tonalElevation = 6.dp,
+    tonalElevation = 8.dp,
     border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorderSubtle)
   ) {
     Row(
       modifier = Modifier
         .fillMaxWidth()
-        .height(64.dp)
+        .navigationBarsPadding()
+        .defaultMinSize(minHeight = 64.dp)
         .padding(horizontal = 16.dp, vertical = 6.dp),
       horizontalArrangement = Arrangement.SpaceAround,
       verticalAlignment = Alignment.CenterVertically
@@ -102,14 +101,14 @@ private fun BottomNavItem(
 
   Box(
     modifier = Modifier
-      .height(52.dp)
+      .defaultMinSize(minWidth = 72.dp, minHeight = 52.dp)
       .clip(RoundedCornerShape(16.dp))
       .clickable(
         interactionSource = interactionSource,
         indication = ripple(color = ElectricBlue),
         onClick = onClick
       )
-      .padding(horizontal = 16.dp, vertical = 4.dp)
+      .padding(horizontal = 12.dp, vertical = 4.dp)
       .testTag(testTag),
     contentAlignment = Alignment.Center
   ) {
@@ -123,9 +122,9 @@ private fun BottomNavItem(
           Modifier
             .clip(RoundedCornerShape(12.dp))
             .background(if (isHero) ElectricBlue.copy(alpha = 0.22f) else DarkSurfaceElevated)
-            .padding(horizontal = 12.dp, vertical = 4.dp)
+            .padding(horizontal = 14.dp, vertical = 4.dp)
         } else {
-          Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+          Modifier.padding(horizontal = 14.dp, vertical = 4.dp)
         }
       ) {
         Icon(
@@ -136,7 +135,7 @@ private fun BottomNavItem(
             selected -> TextPrimary
             else -> TextMuted
           },
-          modifier = Modifier.size(22.dp)
+          modifier = Modifier.size(24.dp)
         )
 
         // Working pulse badge
@@ -157,8 +156,9 @@ private fun BottomNavItem(
       Text(
         text = label,
         fontSize = 11.sp,
-        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-        color = if (selected) TextPrimary else TextMuted
+        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+        color = if (selected) TextPrimary else TextSecondary,
+        maxLines = 1
       )
     }
   }

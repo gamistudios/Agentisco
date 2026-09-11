@@ -22,8 +22,18 @@ class WorkspaceRepository(
   private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
 
   val fileSystem = ProjectFileSystem(baseDir)
-  val terminalManager = TerminalProcessManager()
   val gitManager = GitRepositoryManager(fileSystem)
+  val linuxEnv = LinuxEnvironmentManager(
+    fileSystem = fileSystem,
+    gitManager = gitManager,
+    activeProjectProvider = { _activeProject.value },
+    stagedFilesProvider = { _stagedFiles.value },
+    onStageFile = { f -> toggleFileStaged(f) },
+    onStageAll = { stageAll() },
+    onCommit = { msg -> commitStagedChanges() },
+    onRevertFile = { f -> rejectDiff(f) }
+  )
+  val terminalManager = TerminalProcessManager(linuxEnv)
   val agentRuntime = AgentRuntime(fileSystem, terminalManager, gitManager)
 
   // Current Projects
@@ -351,21 +361,107 @@ class WorkspaceRepository(
       name = name,
       currentDir = _activeProject.value.path,
       lines = listOf(
-        TerminalLine("ScoOS Terminal Environment v2.4 (Android sh)", TerminalLineType.INFO),
+        TerminalLine("ScoOS Terminal Environment v2.4 (Android Linux)", TerminalLineType.INFO),
         TerminalLine("Current Dir: ${_activeProject.value.path}", TerminalLineType.INFO),
-        TerminalLine("Type shell commands like 'ls', 'pwd', 'cat <file>', 'mkdir', 'git status'", TerminalLineType.INFO)
+        TerminalLine("Available: git, ssh, apt, pkg, termux-bridge, curl, node, python, sudo", TerminalLineType.INFO),
+        TerminalLine("Type 'help' for available commands, or 'apt install <pkg>' to install packages.", TerminalLineType.SUCCESS)
       )
     )
     _terminalSessions.update { it + newSession }
     _activeTerminalSessionId.value = newId
   }
 
-  fun executeTerminalCommand(command: String) {
+  fun closeTerminalSession(id: String) {
+    val currentList = _terminalSessions.value
+    if (currentList.size <= 1) {
+      val resetSession = TerminalSession(
+        id = "term-${System.currentTimeMillis()}",
+        name = "main",
+        currentDir = _activeProject.value.path,
+        lines = listOf(
+          TerminalLine("ScoOS Terminal Environment v2.4 (Android Linux)", TerminalLineType.INFO),
+          TerminalLine("Current Dir: ${_activeProject.value.path}", TerminalLineType.INFO),
+          TerminalLine("Session cleared. Type 'help' for developer tools.", TerminalLineType.SUCCESS)
+        )
+      )
+      _terminalSessions.value = listOf(resetSession)
+      _activeTerminalSessionId.value = resetSession.id
+      return
+    }
+
+    val remaining = currentList.filter { it.id != id }
+    _terminalSessions.value = remaining
+    if (_activeTerminalSessionId.value == id) {
+      _activeTerminalSessionId.value = remaining.first().id
+    }
+  }
+
+  private var pendingTerminalApprovalAction: ((Boolean) -> Unit)? = null
+
+  fun executeTerminalCommand(command: String, bypassGuard: Boolean = false) {
     val cleanCmd = command.trim()
     if (cleanCmd.isEmpty()) return
 
     val currentId = _activeTerminalSessionId.value
     val session = _terminalSessions.value.firstOrNull { it.id == currentId } ?: return
+
+    if (!bypassGuard) {
+      val assessment = DestructiveCommandGuard.assess(cleanCmd)
+      if (assessment != null) {
+        _terminalSessions.update { list ->
+          list.map { s ->
+            if (s.id == currentId) {
+              s.copy(
+                lines = s.lines + listOf(
+                  TerminalLine("$ $cleanCmd", TerminalLineType.COMMAND),
+                  TerminalLine("⚠️ DESTRUCTIVE ACTION GUARD TRIGGERED", TerminalLineType.STDERR),
+                  TerminalLine("Command: $cleanCmd", TerminalLineType.STDERR),
+                  TerminalLine("Impact: ${assessment.reason}", TerminalLineType.STDERR),
+                  TerminalLine("A safety confirmation is required. Please review the dialog to proceed.", TerminalLineType.INFO)
+                ),
+                isRunning = false
+              )
+            } else s
+          }
+        }
+
+        val approval = PendingApproval(
+          id = "guard-${System.currentTimeMillis()}",
+          command = cleanCmd,
+          title = assessment.title,
+          impactDescription = assessment.reason,
+          isDestructive = true
+        )
+
+        pendingTerminalApprovalAction = { allowed ->
+          if (allowed) {
+            _terminalSessions.update { list ->
+              list.map { s ->
+                if (s.id == currentId) {
+                  s.copy(
+                    lines = s.lines + TerminalLine("✓ Safety confirmation granted by user. Executing...", TerminalLineType.SUCCESS)
+                  )
+                } else s
+              }
+            }
+            executeTerminalCommandInternal(cleanCmd, currentId)
+          } else {
+            _terminalSessions.update { list ->
+              list.map { s ->
+                if (s.id == currentId) {
+                  s.copy(
+                    lines = s.lines + TerminalLine("✗ Aborted: Destructive execution cancelled by user.", TerminalLineType.STDERR)
+                  )
+                } else s
+              }
+            }
+          }
+        }
+
+        requestApproval(approval)
+        return
+      }
+    }
 
     // Add command input line immediately
     _terminalSessions.update { list ->
@@ -384,6 +480,18 @@ class WorkspaceRepository(
     }
 
     if (cleanCmd == "clear") return
+
+    executeTerminalCommandInternal(cleanCmd, currentId)
+  }
+
+  private fun executeTerminalCommandInternal(cleanCmd: String, currentId: String) {
+    val session = _terminalSessions.value.firstOrNull { it.id == currentId } ?: return
+
+    _terminalSessions.update { list ->
+      list.map { s ->
+        if (s.id == currentId) s.copy(isRunning = true) else s
+      }
+    }
 
     repositoryScope.launch {
       val exitCode = terminalManager.executeCommand(session, cleanCmd) { line ->
@@ -431,6 +539,9 @@ class WorkspaceRepository(
 
   fun resolveApproval(allowed: Boolean) {
     _pendingApproval.value = null
+    val terminalAction = pendingTerminalApprovalAction
+    pendingTerminalApprovalAction = null
+    terminalAction?.invoke(allowed)
     agentRuntime.resolvePendingApproval(allowed)
   }
 
