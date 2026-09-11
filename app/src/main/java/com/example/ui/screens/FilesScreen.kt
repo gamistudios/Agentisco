@@ -8,6 +8,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.Article
+import androidx.compose.material.icons.automirrored.outlined.InsertDriveFile
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
@@ -294,9 +296,9 @@ private fun FileTreeRow(
       val icon = when {
         file.isDirectory -> Icons.Filled.Folder
         file.name.endsWith(".json") -> Icons.Outlined.DataObject
-        file.name.endsWith(".md") -> Icons.Outlined.Article
+        file.name.endsWith(".md") -> Icons.AutoMirrored.Outlined.Article
         file.name.endsWith(".tsx") || file.name.endsWith(".ts") -> Icons.Outlined.Code
-        else -> Icons.Outlined.InsertDriveFile
+        else -> Icons.AutoMirrored.Outlined.InsertDriveFile
       }
       val iconColor = when {
         file.isDirectory -> ElectricBlueGlow

@@ -12,6 +12,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -231,7 +232,7 @@ fun TerminalScreen(
             .background(ElectricBlue)
             .testTag("btn_run_terminal_command")
         ) {
-          Icon(Icons.Filled.Send, contentDescription = "Run", tint = Color.White, modifier = Modifier.size(14.dp))
+          Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Run", tint = Color.White, modifier = Modifier.size(14.dp))
         }
       }
     }
