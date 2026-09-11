@@ -335,7 +335,10 @@ class InterruptTerminalTool(private val tm: TerminalProcessManager) : AgentTool 
 
 // ================= Development tools =================
 
-internal abstract class ScriptTool(
+// Kotlin forbids a public subclass exposing an internal supertype, and the
+// build/test/run tools are referenced through the public AgentTool interface,
+// so ScriptTool is public too. It is only instantiated inside this file.
+abstract class ScriptTool(
   private val tm: TerminalProcessManager,
   toolName: String,
   private val script: String,
