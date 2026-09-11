@@ -52,14 +52,14 @@ class LlmService(
 }
 
 /** Shared HTTP/SSE plumbing for both protocol clients. */
-internal abstract class BaseLlmClient(private val http: OkHttpClient) {
+internal abstract class BaseLlmClient(protected val http: OkHttpClient) {
 
   protected abstract fun buildRequest(provider: AIProvider, model: AIModel, apiKey: String, request: LlmRequest, stream: Boolean): Request
 
   /** Parses one SSE data payload; returns true when the stream is complete. */
   protected abstract fun handleData(data: String, state: StreamState, onEvent: (LlmStreamEvent) -> Unit): Boolean
 
-  protected abstract suspend fun testConnection(provider: AIProvider, apiKey: String): Pair<Boolean, String>
+  internal abstract suspend fun testConnection(provider: AIProvider, apiKey: String): Pair<Boolean, String>
 
   protected class StreamState {
     val content = StringBuilder()
@@ -278,7 +278,7 @@ internal class OpenAIChatCompletionsClient(http: OkHttpClient) : BaseLlmClient(h
           response.isSuccessful -> true to "Connected"
           else -> {
             val body = response.body?.string().orEmpty().take(2000)
-            false to httpError(response.code, body).message ?: "Connection failed"
+            false to (httpError(response.code, body).message ?: "Connection failed")
           }
         }
       }
@@ -421,7 +421,7 @@ internal class AnthropicMessagesClient(http: OkHttpClient) : BaseLlmClient(http)
           response.isSuccessful -> true to "Connected"
           else -> {
             val body = response.body?.string().orEmpty().take(2000)
-            false to httpError(response.code, body).message ?: "Connection failed"
+            false to (httpError(response.code, body).message ?: "Connection failed")
           }
         }
       }

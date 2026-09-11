@@ -168,7 +168,7 @@ class AgentRuntime(
         modifiedFiles = modifiedFiles.toList()
       )
     } catch (e: LlmException) {
-      markFailed(steps, onStepUpdate, e.message, onStatus)
+      markFailed(steps, onStepUpdate, e.message ?: "LLM request failed", onStatus)
       AgentTaskResult(success = false, summary = e.message, modifiedFiles = modifiedFiles.toList())
     } catch (e: Exception) {
       markFailed(steps, onStepUpdate, "Agent failed: ${e.message ?: e.javaClass.simpleName}", onStatus)

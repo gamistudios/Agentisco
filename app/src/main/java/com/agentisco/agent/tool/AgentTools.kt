@@ -335,7 +335,7 @@ class InterruptTerminalTool(private val tm: TerminalProcessManager) : AgentTool 
 
 // ================= Development tools =================
 
-private abstract class ScriptTool(
+internal abstract class ScriptTool(
   private val tm: TerminalProcessManager,
   toolName: String,
   private val script: String,
