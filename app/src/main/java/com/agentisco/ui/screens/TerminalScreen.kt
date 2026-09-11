@@ -607,7 +607,7 @@ private fun TerminalPromptRow(
         cursorBrush = SolidColor(TerminalGreen),
         keyboardOptions = KeyboardOptions(
           capitalization = KeyboardCapitalization.None,
-          autoCorrect = false,
+          autoCorrectEnabled = false,
           keyboardType = KeyboardType.Ascii
         ),
         modifier = Modifier
