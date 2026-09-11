@@ -131,7 +131,7 @@ class AgentRuntime(
 
           onEvent(AgentStreamEvent.ToolStarted(call.name, call.argumentsJson))
           val result: ToolResult = try {
-            tool.execute(call.argumentsJson, buildToolContext(project, permissions, terminalSession, onRequestApproval))
+            tool.execute(call.argumentsJson, buildToolContext(project, permissions, terminalSession, onRequestApproval, onEvent))
           } catch (e: ToolArgumentError) {
             ToolResult(success = false, error = e.message ?: "Invalid tool arguments")
           }
@@ -191,7 +191,8 @@ class AgentRuntime(
     project: Project,
     permissions: AgentPermissions,
     terminalSession: TerminalSession,
-    onRequestApproval: (PendingApproval) -> Unit
+    onRequestApproval: (PendingApproval) -> Unit,
+    onEvent: (AgentStreamEvent) -> Unit
   ): ToolContext = ToolContext(
     project = project,
     permissions = permissions,

@@ -19,10 +19,12 @@ import kotlinx.coroutines.launch
 
 /** One chronological entry in the live agent stream, rendered by AgentScreen. */
 sealed class AgentStreamItem {
-  data class Status(val id: Long, val text: String, val running: Boolean) : AgentStreamItem()
-  data class AssistantText(val id: Long, val text: String, val running: Boolean) : AgentStreamItem()
+  abstract val id: Long
+
+  data class Status(override val id: Long, val text: String, val running: Boolean) : AgentStreamItem()
+  data class AssistantText(override val id: Long, val text: String, val running: Boolean) : AgentStreamItem()
   data class ToolCall(
-    val id: Long,
+    override val id: Long,
     val name: String,
     val argsJson: String,
     val running: Boolean,
@@ -33,7 +35,7 @@ sealed class AgentStreamItem {
   ) : AgentStreamItem()
 
   data class Approval(
-    val id: Long,
+    override val id: Long,
     val approvalId: String,
     val command: String,
     val title: String,
@@ -42,7 +44,7 @@ sealed class AgentStreamItem {
     val allowed: Boolean
   ) : AgentStreamItem()
 
-  data class Final(val id: Long, val text: String, val success: Boolean) : AgentStreamItem()
+  data class Final(override val id: Long, val text: String, val success: Boolean) : AgentStreamItem()
 }
 
 class WorkspaceViewModel(
