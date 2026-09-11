@@ -1,4 +1,4 @@
-name: Build & Release ScoOS
+name: Build & Release Agentisco
 
 on:
   push:
@@ -93,7 +93,7 @@ jobs:
           if [ -n "$CUSTOM_TITLE" ]; then
             TITLE="$CUSTOM_TITLE"
           else
-            TITLE="ScoOS $TAG"
+            TITLE="Agentisco $TAG"
           fi
 
           echo "tag=$TAG" >> $GITHUB_OUTPUT
@@ -129,12 +129,12 @@ jobs:
               -keyalg RSA \
               -keysize 2048 \
               -validity 10000 \
-              -storepass "scoos-release-password" \
-              -keypass "scoos-release-password" \
-              -dname "CN=ScoOS, OU=Android, O=ScoOS, L=Global, S=Mobile, C=US"
+              -storepass "agentisco-release-password" \
+              -keypass "agentisco-release-password" \
+              -dname "CN=Agentisco, OU=Android, O=Agentisco, L=Global, S=Mobile, C=US"
             echo "KEYSTORE_PATH=${GITHUB_WORKSPACE}/my-upload-key.jks" >> $GITHUB_ENV
-            echo "STORE_PASSWORD=scoos-release-password" >> $GITHUB_ENV
-            echo "KEY_PASSWORD=scoos-release-password" >> $GITHUB_ENV
+            echo "STORE_PASSWORD=agentisco-release-password" >> $GITHUB_ENV
+            echo "KEY_PASSWORD=agentisco-release-password" >> $GITHUB_ENV
           fi
 
       - name: Grant Execute Permission for Gradlew
@@ -168,17 +168,17 @@ jobs:
 
           # Copy and rename Release APK
           if compgen -G "app/build/outputs/apk/release/*.apk" > /dev/null; then
-            cp app/build/outputs/apk/release/*.apk "release-artifacts/ScoOS-${TAG}-release.apk"
+            cp app/build/outputs/apk/release/*.apk "release-artifacts/Agentisco-${TAG}-release.apk"
           fi
 
           # Copy and rename Release AAB (Android App Bundle for Google Play)
           if compgen -G "app/build/outputs/bundle/release/*.aab" > /dev/null; then
-            cp app/build/outputs/bundle/release/*.aab "release-artifacts/ScoOS-${TAG}-release.aab"
+            cp app/build/outputs/bundle/release/*.aab "release-artifacts/Agentisco-${TAG}-release.aab"
           fi
 
           # Copy and rename Debug APK (for quick testing)
           if compgen -G "app/build/outputs/apk/debug/*.apk" > /dev/null; then
-            cp app/build/outputs/apk/debug/*.apk "release-artifacts/ScoOS-${TAG}-debug.apk"
+            cp app/build/outputs/apk/debug/*.apk "release-artifacts/Agentisco-${TAG}-debug.apk"
           fi
 
           ls -lah release-artifacts/
@@ -186,7 +186,7 @@ jobs:
       - name: Upload Artifacts to Workflow
         uses: actions/upload-artifact@v4
         with:
-          name: scoos-build-${{ steps.vars.outputs.tag }}
+          name: agentisco-build-${{ steps.vars.outputs.tag }}
           path: release-artifacts/*
           if-no-files-found: error
 
@@ -196,7 +196,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           TAG="${{ steps.vars.outputs.tag }}"
           if ! git rev-parse "$TAG" >/dev/null 2>&1; then
-            git tag -a "$TAG" -m "ScoOS Release $TAG"
+            git tag -a "$TAG" -m "Agentisco Release $TAG"
             git push origin "$TAG" || true
           fi
 

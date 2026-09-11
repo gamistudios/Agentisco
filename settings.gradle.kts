@@ -22,6 +22,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "ScoOS"
+rootProject.name = "Agentisco"
 
 include(":app")
