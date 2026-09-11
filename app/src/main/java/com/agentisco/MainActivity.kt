@@ -95,7 +95,6 @@ fun AgentIDEApp(
     topBar = {
       AgentIDETopAppBar(
         activeProject = activeProject,
-        selectedModel = selectedModel,
         currentDestination = currentDestination,
         onNavigate = { dest -> viewModel.navigateTo(dest) },
         onOpenModelSheet = { viewModel.toggleModelSheet(true) },

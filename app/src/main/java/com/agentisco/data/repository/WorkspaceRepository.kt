@@ -7,7 +7,6 @@ import com.agentisco.agent.model.PendingApproval
 import com.agentisco.agent.model.ToolExecution
 import com.agentisco.agent.model.ToolType
 import com.agentisco.agent.model.AgentTaskStep
-import com.agentisco.agent.model.AgentStepStatus
 import com.agentisco.core.model.AppDestination
 import com.agentisco.agent.permission.DestructiveCommandGuard
 import com.agentisco.agent.runtime.AgentRuntime
@@ -23,6 +22,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -107,10 +107,21 @@ class WorkspaceRepository(
   private val _agentWorkingDurationSeconds = MutableStateFlow(0)
   val agentWorkingDurationSeconds: StateFlow<Int> = _agentWorkingDurationSeconds.asStateFlow()
 
-  private val _agentSteps = MutableStateFlow<List<AgentTaskStep>>(getInitialAgentSteps())
+  /**
+   * Live agent event stream. Every event is emitted by the real runtime as it
+   * happens (status, streamed tokens, tool calls, approvals, results) — the UI
+   * renders it chronologically; nothing here is simulated.
+   */
+  private val _agentEvents = MutableSharedFlow<com.agentisco.agent.model.AgentStreamEvent>(
+    replay = 0, extraBufferCapacity = 128
+  )
+  val agentEvents = _agentEvents.asSharedFlow()
+
+  // Real activity only: empty until the agent actually performs something.
+  private val _agentSteps = MutableStateFlow<List<AgentTaskStep>>(emptyList())
   val agentSteps: StateFlow<List<AgentTaskStep>> = _agentSteps.asStateFlow()
 
-  private val _toolExecutions = MutableStateFlow<List<ToolExecution>>(getInitialToolExecutions())
+  private val _toolExecutions = MutableStateFlow<List<ToolExecution>>(emptyList())
   val toolExecutions: StateFlow<List<ToolExecution>> = _toolExecutions.asStateFlow()
 
   private val _pendingApproval = MutableStateFlow<PendingApproval?>(null)
@@ -284,17 +295,22 @@ class WorkspaceRepository(
     _isModelSheetOpen.value = false
   }
 
-  /** Real connection test: contacts the provider endpoint with the stored credentials. */
+  /** Real connection test: probe the endpoint first, then fall back to an actual model request. */
   fun testProviderConnection(providerId: String) {
     val provider = _providers.value.firstOrNull { it.id == providerId } ?: return
     val apiKey = providerStore?.getApiKey(providerId)
+    // Test with the selected model when it belongs to this provider, otherwise
+    // the provider's first configured model (the one the agent would use).
+    val testModel = sequenceOf(_selectedModel.value, _aiModels.value.firstOrNull { it.providerId == providerId })
+      .filterNotNull()
+      .firstOrNull { it.providerId == providerId }
     _connectionTests.update { it + (providerId to ConnectionTestState.Testing) }
     repositoryScope.launch {
       val state = try {
-        val (ok, message) = llmService.testConnection(provider, apiKey ?: "")
+        val (ok, message) = llmService.testConnection(provider, testModel, apiKey ?: "")
         if (ok) {
           val modelCount = _aiModels.value.count { it.providerId == providerId }
-          val note = if (modelCount == 0) "Connected, but no models configured — add a model before using the agent." else "Connected · $modelCount model(s)"
+          val note = message + if (modelCount == 0) " (no models configured — add one before using the agent)" else ""
           ConnectionTestState.Connected(note)
         } else ConnectionTestState.Failed(message)
       } catch (e: Exception) {
@@ -756,11 +772,27 @@ class WorkspaceRepository(
       apiKey = apiKey,
       permissions = _permissions.value,
       terminalSession = currentSession,
-      onStatus = { _agentStatusText.value = it },
-      onStepUpdate = { _agentSteps.value = it },
-      onToolExecuted = { tool -> _toolExecutions.update { listOf(tool) + it } },
       onRequestApproval = { approval -> _pendingApproval.value = approval },
-      onToken = { token -> _agentResponse.value += token }
+      onEvent = { event ->
+        _agentEvents.tryEmit(event)
+        when (event) {
+          is com.agentisco.agent.model.AgentStreamEvent.Status -> _agentStatusText.value = event.text
+          is com.agentisco.agent.model.AgentStreamEvent.Token -> _agentResponse.value += event.text
+          is com.agentisco.agent.model.AgentStreamEvent.ToolFinished -> _toolExecutions.update { list ->
+            listOf(
+              ToolExecution(
+                id = "tool-${System.currentTimeMillis()}-${event.name}",
+                type = com.agentisco.agent.tool.toolTypeFor(event.name),
+                title = event.name,
+                subtitle = event.summary.take(80),
+                exitCode = event.exitCode,
+                output = event.detail.take(4000)
+              )
+            ) + list
+          }
+          else -> Unit
+        }
+      }
     )
 
     _isAgentWorking.value = false
@@ -782,45 +814,6 @@ class WorkspaceRepository(
 
   companion object {
     private const val MAX_HISTORY_SIZE = 500
-
-    fun getInitialAgentSteps(): List<AgentTaskStep> {
-      return listOf(
-        AgentTaskStep("s1", "Understand project context", AgentStepStatus.COMPLETED, "Inspected package.json and workspace files", listOf("package.json", "tsconfig.json")),
-        AgentTaskStep("s2", "Locate relevant source files", AgentStepStatus.COMPLETED, "Searched for chat components and state handlers", listOf("Chat.tsx", "chatStore.ts")),
-        AgentTaskStep("s3", "Trace message store lifecycle", AgentStepStatus.COMPLETED, "Analyzed zustand hooks and cache mapping"),
-        AgentTaskStep("s4", "Identify root state bug", AgentStepStatus.COMPLETED, finding = "Message state was reset to empty array on conversation mount without checking cached map"),
-        AgentTaskStep("s5", "Implement code fix", AgentStepStatus.COMPLETED, "Updated Chat.tsx and chatStore.ts with memoized selectors"),
-        AgentTaskStep("s6", "Run project test suite", AgentStepStatus.COMPLETED, "Ran vitest unit tests with exit code 0"),
-        AgentTaskStep("s7", "Verify diff & build", AgentStepStatus.COMPLETED, "Confirmed clean compilation and diff generation")
-      )
-    }
-
-    fun getInitialToolExecutions(): List<ToolExecution> {
-      return listOf(
-        ToolExecution(
-          id = "init-1",
-          type = ToolType.TERMINAL,
-          title = "$ npm test",
-          subtitle = "42 tests passed · Exit code 0",
-          exitCode = 0,
-          output = "PASS src/components/Chat.test.tsx\nTests: 42 passed, 42 total"
-        ),
-        ToolExecution(
-          id = "init-2",
-          type = ToolType.EDIT_FILE,
-          title = "write_file src/components/Chat.tsx",
-          subtitle = "+14 lines, -6 lines applied",
-          details = "Updated chat component with cached memo selectors"
-        ),
-        ToolExecution(
-          id = "init-3",
-          type = ToolType.READ_FILE,
-          title = "read_file src/store/chatStore.ts",
-          subtitle = "62 lines inspected",
-          details = "Inspected Zustand cachedMap handler"
-        )
-      )
-    }
 
     fun getInitialTerminalSessions(): List<TerminalSession> {
       return listOf(

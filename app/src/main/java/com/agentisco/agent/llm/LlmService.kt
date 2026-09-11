@@ -44,10 +44,57 @@ class LlmService(
     LLMProtocol.ANTHROPIC_MESSAGES -> AnthropicMessagesClient(http).streamChat(provider, model, apiKey, request, onEvent)
   }
 
-  /** Real connection test against the provider endpoint. Returns a user-safe message on failure. */
-  suspend fun testConnection(provider: AIProvider, apiKey: String): Pair<Boolean, String> = when (provider.protocol) {
-    LLMProtocol.OPENAI_CHAT_COMPLETIONS -> OpenAIChatCompletionsClient(http).testConnection(provider, apiKey)
-    LLMProtocol.ANTHROPIC_MESSAGES -> AnthropicMessagesClient(http).testConnection(provider, apiKey)
+  /**
+   * Real connection verification: first a free model-listing probe, then — only
+   * if that fails — a minimal chat request through the same protocol
+   * implementation the agent runtime uses. Never exposes the API key.
+   */
+  suspend fun testConnection(provider: AIProvider, model: AIModel?, apiKey: String): Pair<Boolean, String> {
+    if (apiKey.isBlank()) return false to "No API key configured for \"${provider.name}\"."
+    if (provider.baseUrl.isBlank()) return false to "No base URL configured for \"${provider.name}\"."
+
+    val client = when (provider.protocol) {
+      LLMProtocol.OPENAI_CHAT_COMPLETIONS -> OpenAIChatCompletionsClient(http)
+      LLMProtocol.ANTHROPIC_MESSAGES -> AnthropicMessagesClient(http)
+    }
+
+    // Stage 1: free credential/endpoint probe via the provider's model listing.
+    val (probeOk, probeMessage) = client.probeModels(provider, apiKey)
+    if (probeOk) {
+      return true to (model?.let { "Connected · ${it.displayName}" } ?: "Connected")
+    }
+
+    if (model == null) {
+      return false to "$probeMessage Also add a model to this provider before using the agent."
+    }
+
+    // Stage 2 fallback: end-to-end request via the agent's own request path —
+    // covers routers that don't implement /models and validates the model itself.
+    val collected = StringBuilder()
+    return try {
+      streamChat(
+        provider = provider,
+        model = model,
+        apiKey = apiKey,
+        request = LlmRequest(
+          messages = listOf(LlmMessage(LlmRole.USER, "Connection test. Reply with exactly: PONG")),
+          tools = emptyList(),
+          maxOutputTokens = 16
+        )
+      ) { event ->
+        if (event is LlmStreamEvent.Token) collected.append(event.text)
+      }
+      val reply = collected.toString().trim()
+      if (reply.isNotEmpty()) {
+        true to "Connected · ${model.displayName}"
+      } else {
+        false to "Provider returned an empty response for ${model.displayName}."
+      }
+    } catch (e: LlmException) {
+      false to (e.message ?: probeMessage)
+    } catch (e: IOException) {
+      false to "Network error: ${e.message ?: probeMessage}"
+    }
   }
 }
 
@@ -59,7 +106,8 @@ internal abstract class BaseLlmClient(protected val http: OkHttpClient) {
   /** Parses one SSE data payload; returns true when the stream is complete. */
   protected abstract fun handleData(data: String, state: StreamState, onEvent: (LlmStreamEvent) -> Unit): Boolean
 
-  internal abstract suspend fun testConnection(provider: AIProvider, apiKey: String): Pair<Boolean, String>
+  /** Free credential/endpoint probe via the provider's model listing (no tokens billed). */
+  internal abstract suspend fun probeModels(provider: AIProvider, apiKey: String): Pair<Boolean, String>
 
   protected class StreamState {
     val content = StringBuilder()
@@ -266,7 +314,7 @@ internal class OpenAIChatCompletionsClient(http: OkHttpClient) : BaseLlmClient(h
     return false
   }
 
-  override suspend fun testConnection(provider: AIProvider, apiKey: String): Pair<Boolean, String> {
+  override suspend fun probeModels(provider: AIProvider, apiKey: String): Pair<Boolean, String> {
     return try {
       val request = Request.Builder()
         .url(provider.baseUrl.trimEnd('/') + "/models")
@@ -408,7 +456,7 @@ internal class AnthropicMessagesClient(http: OkHttpClient) : BaseLlmClient(http)
     return false
   }
 
-  override suspend fun testConnection(provider: AIProvider, apiKey: String): Pair<Boolean, String> {
+  override suspend fun probeModels(provider: AIProvider, apiKey: String): Pair<Boolean, String> {
     return try {
       val request = Request.Builder()
         .url(provider.baseUrl.trimEnd('/') + "/v1/models")

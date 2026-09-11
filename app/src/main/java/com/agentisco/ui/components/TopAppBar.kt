@@ -20,7 +20,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.agentisco.settings.model.AIModel
 import com.agentisco.core.model.AppDestination
 import com.agentisco.data.model.Project
 import com.agentisco.ui.theme.*
@@ -28,7 +27,6 @@ import com.agentisco.ui.theme.*
 @Composable
 fun AgentIDETopAppBar(
   activeProject: Project,
-  selectedModel: AIModel?,
   currentDestination: AppDestination,
   onNavigate: (AppDestination) -> Unit,
   onOpenModelSheet: () -> Unit,
@@ -97,33 +95,6 @@ fun AgentIDETopAppBar(
           verticalAlignment = Alignment.CenterVertically,
           horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-          // Model chip
-          Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier
-              .clip(RoundedCornerShape(8.dp))
-              .background(DarkSurface)
-              .border(1.dp, DarkBorder, RoundedCornerShape(8.dp))
-              .clickable { onOpenModelSheet() }
-              .padding(horizontal = 8.dp, vertical = 5.dp)
-              .testTag("top_model_selector")
-          ) {
-            Text(
-              text = selectedModel?.displayName ?: "No model selected",
-              color = if (selectedModel == null) TextMuted else ElectricBlueGlow,
-              fontSize = 11.sp,
-              fontWeight = FontWeight.Medium,
-              maxLines = 1
-            )
-            Spacer(modifier = Modifier.width(2.dp))
-            Icon(
-              imageVector = Icons.Default.KeyboardArrowDown,
-              contentDescription = "Select Model",
-              tint = ElectricBlueGlow,
-              modifier = Modifier.size(14.dp)
-            )
-          }
-
           // Command Palette Shortcut Button (>)
           IconButton(
             onClick = onOpenCommandPalette,

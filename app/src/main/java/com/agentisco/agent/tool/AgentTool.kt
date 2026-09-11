@@ -2,9 +2,9 @@ package com.agentisco.agent.tool
 
 import com.agentisco.agent.model.AgentPermissions
 import com.agentisco.agent.model.PendingApproval
+import com.agentisco.agent.model.ToolType
 import com.agentisco.data.model.Project
 import com.agentisco.data.model.TerminalSession
-import kotlinx.coroutines.flow.StateFlow
 
 /** Structured result returned to the model after a tool executes. */
 data class ToolResult(
@@ -25,9 +25,17 @@ class ToolContext(
   val permissions: AgentPermissions,
   val terminalSession: TerminalSession,
   val requestApproval: suspend (PendingApproval) -> Boolean,
-  val onToolExecuted: (com.agentisco.agent.model.ToolExecution) -> Unit,
   val activeSessions: () -> List<TerminalSession>
 )
+
+/** Maps a tool name to the UI tool category used in activity streams. */
+fun toolTypeFor(name: String): ToolType = when {
+  name.startsWith("git_") -> ToolType.GIT
+  name == "run_command" || name == "build" || name == "test" || name == "run" ||
+    name.startsWith("terminal") -> ToolType.TERMINAL
+  name == "write_file" || name == "create_file" || name == "move_file" || name == "delete_file" -> ToolType.EDIT_FILE
+  else -> ToolType.READ_FILE
+}
 
 /**
  * A tool the model may request. Execution belongs to the application: the

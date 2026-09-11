@@ -46,27 +46,6 @@ class AgentToolRegistry(
 
   fun get(name: String): AgentTool? = byName[name]
 
-  fun recordExecution(name: String, argsSummary: String, result: ToolResult, ctx: ToolContext) {
-    ctx.onToolExecuted(
-      ToolExecution(
-        id = "tool-${System.currentTimeMillis()}-$name",
-        type = toolTypeFor(name),
-        title = "$name $argsSummary".trim().take(120),
-        subtitle = if (result.success) "Completed" else "Failed",
-        exitCode = result.exitCode,
-        output = (result.output + (result.error?.let { "\n$it" } ?: "")).take(4000)
-      )
-    )
-  }
-
-  private fun toolTypeFor(name: String): ToolType = when {
-    name.startsWith("git_") -> ToolType.GIT
-    name == "run_command" || name == "build" || name == "test" || name == "run" ||
-      name.startsWith("terminal") -> ToolType.TERMINAL
-    name == "write_file" || name == "create_file" || name == "move_file" -> ToolType.EDIT_FILE
-    else -> ToolType.READ_FILE
-  }
-
   // ---- Permission gates shared by tools ----
 
   internal suspend fun checkFileWrite(ctx: ToolContext, path: String): ToolResult? {

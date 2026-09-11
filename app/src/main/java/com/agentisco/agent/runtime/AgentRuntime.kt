@@ -8,19 +8,22 @@ import com.agentisco.agent.llm.LlmRole
 import com.agentisco.agent.llm.LlmService
 import com.agentisco.agent.llm.LlmStreamEvent
 import com.agentisco.agent.model.AgentPermissions
+import com.agentisco.agent.model.AgentStreamEvent
 import com.agentisco.agent.model.PendingApproval
-import com.agentisco.agent.model.AgentStepStatus
-import com.agentisco.agent.model.AgentTaskStep
-import com.agentisco.agent.model.ToolExecution
 import com.agentisco.agent.tool.AgentToolRegistry
 import com.agentisco.agent.tool.ToolContext
+import com.agentisco.agent.tool.ToolArgumentError
 import com.agentisco.agent.tool.ToolResult
 import com.agentisco.data.model.Project
+import com.agentisco.data.model.ProjectFile
 import com.agentisco.data.model.TerminalSession
 import com.agentisco.settings.model.AIModel
 import com.agentisco.settings.model.AIProvider
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 
 /**
@@ -28,7 +31,9 @@ import kotlinx.coroutines.withContext
  * tool calls → validation → permission policy → real tool execution → tool
  * results back to the model → repeat, until a final answer or the iteration cap.
  *
- * The model never executes tools itself and never sees provider credentials.
+ * Everything the UI shows comes from the [AgentStreamEvent]s emitted here —
+ * there is no simulated activity. The model never executes tools itself and
+ * never sees provider credentials.
  */
 class AgentRuntime(
   private val fileSystem: com.agentisco.workspace.filesystem.ProjectFileSystem,
@@ -54,23 +59,15 @@ class AgentRuntime(
     apiKey: String,
     permissions: AgentPermissions,
     terminalSession: TerminalSession,
-    onStatus: (String) -> Unit,
-    onStepUpdate: (List<AgentTaskStep>) -> Unit,
-    onToolExecuted: (ToolExecution) -> Unit,
     onRequestApproval: (PendingApproval) -> Unit,
-    onToken: (String) -> Unit
+    onEvent: (AgentStreamEvent) -> Unit
   ): AgentTaskResult = withContext(Dispatchers.IO) {
-    val steps = mutableListOf(
-      AgentTaskStep("s1", "Understand task & workspace", AgentStepStatus.RUNNING, "Building workspace context"),
-      AgentTaskStep("s2", "Reason & act with tools", AgentStepStatus.PENDING, "Model-driven tool loop"),
-      AgentTaskStep("s3", "Summarize results", AgentStepStatus.PENDING, "Collecting final answer and changes")
-    )
-    onStepUpdate(steps)
+    onEvent(AgentStreamEvent.TaskStarted(prompt))
 
     // Pre-flight capability validation: never silently send tool calls a model can't honor.
     val useTools = model.capabilities.tools
     if (!useTools) {
-      onStatus("⚠ Selected model does not support tool calling — running in text-only mode.")
+      onEvent(AgentStreamEvent.Status("Selected model does not support tool calling — running in text-only mode."))
     }
 
     val systemPrompt = buildSystemPrompt(project, useTools)
@@ -81,10 +78,8 @@ class AgentRuntime(
     try {
       var finalText = ""
       for (iteration in 1..maxIterations) {
-        if (iteration == 2) {
-          steps[1] = steps[1].copy(status = AgentStepStatus.RUNNING)
-          onStepUpdate(steps)
-        }
+        if (!currentCoroutineContext().isActive) throw CancellationException("Agent task cancelled")
+
         val assistantText = StringBuilder()
         var completedMessage: LlmMessage? = null
         var failure: LlmException? = null
@@ -100,13 +95,13 @@ class AgentRuntime(
           )
         ) { event ->
           when (event) {
-            is LlmStreamEvent.Started -> if (iteration == 1) onStatus("Contacting ${provider.name} · ${model.displayName}…")
+            is LlmStreamEvent.Started -> if (iteration == 1) onEvent(AgentStreamEvent.Status("Contacting ${provider.name} · ${model.displayName}…"))
             is LlmStreamEvent.Token -> {
               assistantText.append(event.text)
-              onToken(event.text)
+              onEvent(AgentStreamEvent.Token(event.text))
             }
-            is LlmStreamEvent.ReasoningToken -> Unit // reasoning traces are not surfaced
-            is LlmStreamEvent.ToolCallRequested -> onStatus("Model requested tool: ${event.call.name}")
+            is LlmStreamEvent.ReasoningToken -> Unit // private reasoning is never surfaced
+            is LlmStreamEvent.ToolCallRequested -> onEvent(AgentStreamEvent.Status("Model requested ${event.call.name}"))
             is LlmStreamEvent.Completed -> completedMessage = event.message
             is LlmStreamEvent.Interrupted -> failure = LlmException("Response stream was interrupted.", LlmErrorKind.CANCELLED)
             is LlmStreamEvent.Failed -> failure = event.error
@@ -125,19 +120,35 @@ class AgentRuntime(
         // then feed structured results back to the model.
         messages.add(message)
         for (call in message.toolCalls) {
+          if (!currentCoroutineContext().isActive) throw CancellationException("Agent task cancelled")
+
           val tool = toolRegistry.get(call.name)
           if (tool == null) {
             messages.add(LlmMessage(LlmRole.TOOL, "Error: unknown tool \"${call.name}\".", toolCallId = call.id, toolName = call.name))
+            onEvent(AgentStreamEvent.ToolFinished(call.name, false, "Unknown tool \"${call.name}\"", "", null))
             continue
           }
-          onStatus("Running ${call.name}…")
+
+          onEvent(AgentStreamEvent.ToolStarted(call.name, call.argumentsJson))
           val result: ToolResult = try {
-            tool.execute(call.argumentsJson, buildToolContext(project, permissions, terminalSession, onRequestApproval, onToolExecuted))
-          } catch (e: com.agentisco.agent.tool.ToolArgumentError) {
+            tool.execute(call.argumentsJson, buildToolContext(project, permissions, terminalSession, onRequestApproval))
+          } catch (e: ToolArgumentError) {
             ToolResult(success = false, error = e.message ?: "Invalid tool arguments")
           }
           result.metadata["file"]?.let { modifiedFiles.add(it) }
-          toolRegistry.recordExecution(call.name, call.argumentsJson.take(80), result, buildToolContext(project, permissions, terminalSession, onRequestApproval, onToolExecuted))
+
+          val summary = when {
+            !result.success -> result.error?.take(180) ?: "Failed"
+            else -> result.output.lineSequence().firstOrNull()?.take(140)?.ifBlank { null }
+              ?: result.exitCode?.let { "exit code $it" } ?: "Done"
+          }
+          val detail = listOfNotNull(
+            result.output.takeIf { it.isNotBlank() },
+            result.error?.takeIf { it.isNotBlank() },
+            result.exitCode?.let { "exit code: $it" }
+          ).joinToString("\n")
+          onEvent(AgentStreamEvent.ToolFinished(call.name, result.success, summary, detail, result.exitCode))
+
           messages.add(
             LlmMessage(
               LlmRole.TOOL,
@@ -156,66 +167,58 @@ class AgentRuntime(
         }
       }
 
-      steps[0] = steps[0].copy(status = AgentStepStatus.COMPLETED, details = "Workspace context: ${project.name}")
-      steps[1] = steps[1].copy(status = AgentStepStatus.COMPLETED, details = "${modifiedFiles.size} file(s) changed via tools")
-      steps[2] = steps[2].copy(status = AgentStepStatus.COMPLETED, details = "Final response received")
-      onStepUpdate(steps)
-      onStatus("Task completed")
-
+      onEvent(AgentStreamEvent.Completed(finalText.ifBlank { "Task completed." }))
       AgentTaskResult(
         success = true,
         summary = finalText.take(500).ifBlank { "Task completed." },
         modifiedFiles = modifiedFiles.toList()
       )
+    } catch (e: CancellationException) {
+      onEvent(AgentStreamEvent.Cancelled())
+      throw e
     } catch (e: LlmException) {
       val reason = e.message ?: "LLM request failed"
-      markFailed(steps, onStepUpdate, reason, onStatus)
+      onEvent(AgentStreamEvent.Failed(reason))
       AgentTaskResult(success = false, summary = reason, modifiedFiles = modifiedFiles.toList())
     } catch (e: Exception) {
-      markFailed(steps, onStepUpdate, "Agent failed: ${e.message ?: e.javaClass.simpleName}", onStatus)
-      AgentTaskResult(success = false, summary = "Agent failed: ${e.message ?: e.javaClass.simpleName}", modifiedFiles = modifiedFiles.toList())
+      val reason = "Agent failed: ${e.message ?: e.javaClass.simpleName}"
+      onEvent(AgentStreamEvent.Failed(reason))
+      AgentTaskResult(success = false, summary = reason, modifiedFiles = modifiedFiles.toList())
     }
-  }
-
-  private fun markFailed(
-    steps: MutableList<AgentTaskStep>,
-    onStepUpdate: (List<AgentTaskStep>) -> Unit,
-    reason: String,
-    onStatus: (String) -> Unit
-  ) {
-    steps.forEachIndexed { i, s ->
-      if (s.status == AgentStepStatus.RUNNING || s.status == AgentStepStatus.PENDING) {
-        steps[i] = s.copy(status = AgentStepStatus.FAILED, details = reason.take(160))
-      }
-    }
-    onStepUpdate(steps)
-    onStatus(reason)
   }
 
   private fun buildToolContext(
     project: Project,
     permissions: AgentPermissions,
     terminalSession: TerminalSession,
-    onRequestApproval: (PendingApproval) -> Unit,
-    onToolExecuted: (ToolExecution) -> Unit
+    onRequestApproval: (PendingApproval) -> Unit
   ): ToolContext = ToolContext(
     project = project,
     permissions = permissions,
     terminalSession = terminalSession,
     requestApproval = { approval ->
+      onEvent(
+        AgentStreamEvent.ApprovalRequested(
+          approvalId = approval.id,
+          command = approval.command,
+          title = approval.title,
+          impact = approval.impactDescription
+        )
+      )
       val deferred = CompletableDeferred<Boolean>()
       pendingApprovalDeferred = deferred
       onRequestApproval(approval)
-      deferred.await()
+      val allowed = deferred.await()
+      onEvent(AgentStreamEvent.ApprovalResolved(approval.id, allowed))
+      allowed
     },
-    onToolExecuted = onToolExecuted,
     activeSessions = { listOf(terminalSession) }
   )
 
   private fun buildSystemPrompt(project: Project, toolsAvailable: Boolean): String {
     val files = fileSystem.getFileTree(project)
     val paths = StringBuilder()
-    fun walk(items: List<com.agentisco.data.model.ProjectFile>, depth: Int) {
+    fun walk(items: List<ProjectFile>, depth: Int) {
       if (depth > 2) return
       for (f in items) {
         paths.appendLine(f.path)

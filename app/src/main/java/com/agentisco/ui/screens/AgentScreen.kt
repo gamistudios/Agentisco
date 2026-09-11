@@ -1,36 +1,55 @@
 package com.agentisco.ui.screens
 
-import com.agentisco.agent.model.ToolExecution
-import com.agentisco.agent.model.ToolType
-import com.agentisco.agent.model.AgentStepStatus
-import com.agentisco.core.model.AppDestination
-import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.outlined.*
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Psychology
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.outlined.Build
+import androidx.compose.material.icons.outlined.Commit
+import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.agentisco.data.model.*
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import com.agentisco.agent.model.PermissionMode
+import com.agentisco.agent.model.ToolType
+import com.agentisco.core.model.AppDestination
+import com.agentisco.data.model.Project
+import com.agentisco.ui.AgentStreamItem
 import com.agentisco.ui.WorkspaceViewModel
 import com.agentisco.ui.theme.*
+import kotlinx.coroutines.launch
+import org.json.JSONObject
 
 @Composable
 fun AgentScreen(
@@ -40,691 +59,664 @@ fun AgentScreen(
 ) {
   val activeProject by viewModel.activeProject.collectAsState()
   val selectedModel by viewModel.selectedModel.collectAsState()
+  val providers by viewModel.providers.collectAsState()
   val isWorking by viewModel.isAgentWorking.collectAsState()
-  val statusText by viewModel.agentStatusText.collectAsState()
-  val agentResponse by viewModel.agentResponse.collectAsState()
-  val steps by viewModel.agentSteps.collectAsState()
-  val tools by viewModel.toolExecutions.collectAsState()
+  val stream by viewModel.agentStream.collectAsState()
+  val permissions by viewModel.permissions.collectAsState()
 
   var promptText by remember { mutableStateOf("") }
-  var expandedStepId by remember { mutableStateOf<String?>("s4") }
-  var showTaskTimeline by remember { mutableStateOf(true) }
+  val listState = rememberLazyListState()
+  val scope = rememberCoroutineScope()
 
-  LazyColumn(
+  // Auto-follow: scroll as new events arrive, but only while the user is at the
+  // bottom; otherwise they keep their position and get a "Jump to latest" chip.
+  val autoFollow by remember { derivedStateOf {
+    val info = listState.layoutInfo
+    val last = info.visibleItemsInfo.lastOrNull()?.index ?: 0
+    val total = info.totalItemsCount
+    total <= 2 || last >= total - 3
+  } }
+  LaunchedEffect(stream) {
+    if (stream.isNotEmpty() && autoFollow) {
+      listState.animateScrollToItem(stream.size) // bottom spacer item
+    }
+  }
+
+  Column(
     modifier = modifier
       .fillMaxSize()
       .background(DarkBackground)
-      .padding(horizontal = 14.dp),
-    verticalArrangement = Arrangement.spacedBy(14.dp)
+      // Keep the composer usable above the soft keyboard.
+      .imePadding()
   ) {
-    // Header & Command Center Prompt Box
-    item {
-      Spacer(modifier = Modifier.height(10.dp))
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-      ) {
-        Column {
-          Text(
-            text = "What are we building?",
-            color = TextPrimary,
-            fontSize = 20.sp,
-            fontWeight = FontWeight.Bold,
-            letterSpacing = (-0.3).sp
-          )
-          Text(
-            text = "Describe a task or let the agent navigate ${activeProject.name}",
-            color = TextMuted,
-            fontSize = 12.sp
-          )
-        }
+    // Compact agent header: model (name + provider) and live agent state.
+    Row(
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(horizontal = 14.dp, vertical = 8.dp),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically
+    ) {
+      ModelChip(
+        model = selectedModel,
+        providers = providers,
+        onClick = { viewModel.toggleModelSheet(true) }
+      )
 
-        // Split view toggle button
-        IconButton(
-          onClick = { onNavigate(AppDestination.EDITOR) },
-          modifier = Modifier
-            .size(36.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(DarkSurfaceElevated)
-            .border(1.dp, DarkBorder, RoundedCornerShape(8.dp))
-            .testTag("btn_split_editor")
-        ) {
-          Icon(
-            imageVector = Icons.Outlined.VerticalSplit,
-            contentDescription = "Open Editor",
-            tint = CyanAccent,
-            modifier = Modifier.size(18.dp)
-          )
-        }
-      }
-    }
-
-    // Command Center Input Box
-    item {
-      Card(
-        modifier = Modifier
-          .fillMaxWidth()
-          .clip(RoundedCornerShape(14.dp))
-          .border(1.dp, if (isWorking) ElectricBlue else DarkBorder, RoundedCornerShape(14.dp)),
-        colors = CardDefaults.cardColors(containerColor = DarkSurface)
-      ) {
-        Column(modifier = Modifier.padding(12.dp)) {
-          TextField(
-            value = promptText,
-            onValueChange = { promptText = it },
-            placeholder = {
-              Text(
-                "Describe a task, e.g. 'Fix the chat loading issue'...",
-                color = TextMuted,
-                fontSize = 13.sp
-              )
-            },
-            modifier = Modifier
-              .fillMaxWidth()
-              .heightIn(min = 80.dp)
-              .testTag("agent_prompt_input"),
-            colors = TextFieldDefaults.colors(
-              focusedContainerColor = Color.Transparent,
-              unfocusedContainerColor = Color.Transparent,
-              focusedIndicatorColor = Color.Transparent,
-              unfocusedIndicatorColor = Color.Transparent,
-              focusedTextColor = TextPrimary,
-              unfocusedTextColor = TextPrimary
-            )
-          )
-
-          Spacer(modifier = Modifier.height(8.dp))
-
-          // Accessory attachment tags & Send button
-          Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-          ) {
-            Row(
-              horizontalArrangement = Arrangement.spacedBy(6.dp),
-              verticalAlignment = Alignment.CenterVertically
-            ) {
-              PromptTagChip("+ Files") {
-                promptText = if (promptText.contains("@files")) promptText else "$promptText @files"
-              }
-              PromptTagChip("+ Images") {
-                promptText = "$promptText @ui-mockup"
-              }
-              PromptTagChip("@") {
-                promptText = "$promptText @Chat.tsx"
-              }
-            }
-
-            IconButton(
-              onClick = {
-                val task = promptText.ifBlank { "Fix the chat loading issue" }
-                viewModel.runAgentTask(task)
-                promptText = ""
-              },
-              enabled = !isWorking,
-              modifier = Modifier
-                .size(38.dp)
-                .clip(CircleShape)
-                .background(if (isWorking) DarkSurfaceHighlight else ElectricBlue)
-                .testTag("btn_send_agent_task")
-            ) {
-              Icon(
-                imageVector = Icons.AutoMirrored.Filled.Send,
-                contentDescription = "Send Task",
-                tint = Color.White,
-                modifier = Modifier.size(16.dp)
-              )
-            }
-          }
-        }
-      }
-    }
-
-    // Quick Command Chips
-    item {
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-      ) {
-        QuickPromptCard(
-          title = "Fix bug",
-          subtitle = "Chat loading state",
-          icon = Icons.Outlined.BugReport,
-          modifier = Modifier.weight(1f),
-          onClick = {
-            viewModel.runAgentTask("Fix the chat loading and message persistence bug")
-          }
-        )
-        QuickPromptCard(
-          title = "Build feature",
-          subtitle = "Add group invite",
-          icon = Icons.Outlined.AddCircleOutline,
-          modifier = Modifier.weight(1f),
-          onClick = {
-            viewModel.runAgentTask("Build group invitations flow and route")
-          }
-        )
-      }
-      Spacer(modifier = Modifier.height(6.dp))
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-      ) {
-        QuickPromptCard(
-          title = "Explain code",
-          subtitle = "Chat.tsx & Zustand",
-          icon = Icons.Outlined.Psychology,
-          modifier = Modifier.weight(1f),
-          onClick = {
-            viewModel.runAgentTask("Explain how message caching and listeners work in Chat.tsx")
-          }
-        )
-        QuickPromptCard(
-          title = "Review changes",
-          subtitle = "3 files modified",
-          icon = Icons.Outlined.Difference,
-          modifier = Modifier.weight(1f),
-          onClick = {
-            onNavigate(AppDestination.DIFF)
-          }
-        )
-      }
-    }
-
-    // Working State Banner / Status
-    item {
-      AnimatedVisibility(visible = isWorking) {
-        Card(
-          modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .border(1.dp, ElectricBlue.copy(alpha = 0.5f), RoundedCornerShape(12.dp)),
-          colors = CardDefaults.cardColors(containerColor = DarkSurfaceElevated)
-        ) {
-          Row(
-            modifier = Modifier
-              .fillMaxWidth()
-              .padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-          ) {
-            Row(
-              verticalAlignment = Alignment.CenterVertically,
-              modifier = Modifier.weight(1f)
-            ) {
-              CircularProgressIndicator(
-                modifier = Modifier.size(18.dp),
-                color = ElectricBlueGlow,
-                strokeWidth = 2.5.dp
-              )
-              Spacer(modifier = Modifier.width(12.dp))
-              Column {
-                Text(
-                  text = "Agent Working",
-                  color = ElectricBlueGlow,
-                  fontSize = 13.sp,
-                  fontWeight = FontWeight.Bold
-                )
-                Text(
-                  text = statusText,
-                  color = TextSecondary,
-                  fontSize = 11.sp,
-                  maxLines = 1
-                )
-              }
-            }
-
-            TextButton(
-              onClick = { viewModel.requestSampleApproval() },
-              modifier = Modifier.testTag("btn_trigger_sample_approval")
-            ) {
-              Text("Test Approval", fontSize = 10.sp, color = WarningAmber)
-            }
-          }
-        }
-      }
-    }
-
-    // Section: Streamed Agent Response (progressive, from the selected model)
-    if (agentResponse.isNotBlank()) {
-      item {
-        Column(
-          modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(DarkSurface)
-            .border(1.dp, DarkBorder, RoundedCornerShape(12.dp))
-            .padding(12.dp)
-            .testTag("agent_response_card")
-        ) {
-          Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(
-              imageVector = Icons.Default.AutoAwesome,
-              contentDescription = null,
-              tint = ElectricBlueGlow,
-              modifier = Modifier.size(13.dp)
-            )
-            Spacer(modifier = Modifier.width(6.dp))
-            Text(
-              "Agent Response",
-              color = TextPrimary,
-              fontSize = 12.sp,
-              fontWeight = FontWeight.SemiBold
-            )
-          }
-          Spacer(modifier = Modifier.height(6.dp))
-          Text(
-            text = agentResponse,
-            color = TextCode,
-            fontSize = 12.sp,
-            lineHeight = 17.sp
-          )
-        }
-      }
-    }
-
-    // Section: Agent Task Progress Timeline
-    item {
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-      ) {
+      if (isWorking) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-          Text(
-            text = "Task Progress",
-            color = TextPrimary,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.SemiBold
-          )
-          Spacer(modifier = Modifier.width(6.dp))
           Box(
             modifier = Modifier
-              .clip(RoundedCornerShape(4.dp))
-              .background(DarkSurfaceElevated)
-              .padding(horizontal = 6.dp, vertical = 2.dp)
+              .size(7.dp)
+              .clip(CircleShape)
+              .background(ElectricBlueGlow)
+          )
+          Spacer(modifier = Modifier.width(5.dp))
+          Text("Working…", color = ElectricBlueGlow, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+          Spacer(modifier = Modifier.width(8.dp))
+          IconButton(
+            onClick = { viewModel.cancelAgent() },
+            modifier = Modifier
+              .size(30.dp)
+              .clip(RoundedCornerShape(8.dp))
+              .background(DangerRed.copy(alpha = 0.15f))
+              .border(1.dp, DangerRed, RoundedCornerShape(8.dp))
+              .testTag("btn_stop_agent")
           ) {
-            Text(
-              text = "${steps.count { it.status == AgentStepStatus.COMPLETED }}/${steps.size}",
-              color = TextSecondary,
-              fontSize = 10.sp,
-              fontFamily = FontFamily.Monospace
-            )
+            Icon(Icons.Default.Stop, contentDescription = "Stop agent", tint = DangerRed, modifier = Modifier.size(15.dp))
           }
         }
-
-        IconButton(
-          onClick = { showTaskTimeline = !showTaskTimeline },
-          modifier = Modifier.size(28.dp)
-        ) {
-          Icon(
-            imageVector = if (showTaskTimeline) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
-            contentDescription = "Toggle Timeline",
-            tint = TextMuted
-          )
-        }
+      } else {
+        Text("Ready", color = TextMuted, fontSize = 11.sp)
       }
     }
 
-    if (showTaskTimeline) {
-      item {
-        Card(
-          modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .border(1.dp, DarkBorder, RoundedCornerShape(12.dp)),
-          colors = CardDefaults.cardColors(containerColor = DarkSurface)
-        ) {
-          Column(modifier = Modifier.padding(12.dp)) {
-            steps.forEachIndexed { idx, step ->
-              val isExpanded = expandedStepId == step.id
+    // Live agent event stream (the primary surface).
+    Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+      LazyColumn(
+        state = listState,
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+      ) {
+        if (stream.isEmpty()) {
+          item(key = "empty") {
+            AgentEmptyState(
+              project = activeProject,
+              onSuggestion = { promptText = it }
+            )
+          }
+        } else {
+          items(stream, key = { it.id }) { item ->
+            AgentStreamItemView(
+              item = item,
+              onAllow = { viewModel.resolveApproval(true) },
+              onDeny = { viewModel.resolveApproval(false) },
+              onNavigate = onNavigate
+            )
+          }
+        }
+        item(key = "bottom-spacer") { Spacer(modifier = Modifier.height(12.dp)) }
+      }
 
-              Row(
-                modifier = Modifier
-                  .fillMaxWidth()
-                  .clip(RoundedCornerShape(6.dp))
-                  .clickable {
-                    expandedStepId = if (isExpanded) null else step.id
-                  }
-                  .padding(vertical = 6.dp),
-                verticalAlignment = Alignment.Top
-              ) {
-                // Step status icon
-                Box(
-                  modifier = Modifier
-                    .padding(top = 2.dp)
-                    .size(16.dp),
-                  contentAlignment = Alignment.Center
-                ) {
-                  when (step.status) {
-                    AgentStepStatus.COMPLETED -> Icon(
-                      imageVector = Icons.Default.CheckCircle,
-                      contentDescription = "Completed",
-                      tint = TerminalGreen,
-                      modifier = Modifier.size(16.dp)
-                    )
-                    AgentStepStatus.RUNNING -> CircularProgressIndicator(
-                      modifier = Modifier.size(14.dp),
-                      color = ElectricBlueGlow,
-                      strokeWidth = 2.dp
-                    )
-                    AgentStepStatus.PENDING -> Box(
-                      modifier = Modifier
-                        .size(10.dp)
-                        .clip(CircleShape)
-                        .border(1.5.dp, DarkBorder, CircleShape)
-                    )
-                    AgentStepStatus.FAILED -> Icon(
-                      imageVector = Icons.Default.Cancel,
-                      contentDescription = "Failed",
-                      tint = DangerRed,
-                      modifier = Modifier.size(16.dp)
-                    )
-                  }
-                }
-
-                Spacer(modifier = Modifier.width(10.dp))
-
-                Column(modifier = Modifier.weight(1f)) {
-                  Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                  ) {
-                    Text(
-                      text = step.title,
-                      color = when (step.status) {
-                        AgentStepStatus.RUNNING -> ElectricBlueGlow
-                        AgentStepStatus.COMPLETED -> TextPrimary
-                        else -> TextMuted
-                      },
-                      fontSize = 13.sp,
-                      fontWeight = if (step.status == AgentStepStatus.RUNNING) FontWeight.SemiBold else FontWeight.Medium
-                    )
-
-                    Icon(
-                      imageVector = if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                      contentDescription = "Expand",
-                      tint = TextMuted,
-                      modifier = Modifier.size(16.dp)
-                    )
-                  }
-
-                  if (isExpanded) {
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Column(
-                      modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(DarkBackground)
-                        .padding(10.dp)
-                    ) {
-                      if (step.filesInspected.isNotEmpty()) {
-                        Text(
-                          text = "${step.filesInspected.size} files inspected:",
-                          color = TextMuted,
-                          fontSize = 11.sp
-                        )
-                        step.filesInspected.forEach { f ->
-                          Text(
-                            text = "• $f",
-                            color = CyanAccent,
-                            fontSize = 11.sp,
-                            fontFamily = FontFamily.Monospace
-                          )
-                        }
-                        Spacer(modifier = Modifier.height(6.dp))
-                      }
-
-                      if (step.finding != null) {
-                        Text(
-                          text = "Finding:",
-                          color = WarningAmber,
-                          fontSize = 11.sp,
-                          fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                          text = step.finding,
-                          color = TextPrimary,
-                          fontSize = 11.sp,
-                          lineHeight = 16.sp
-                        )
-                      } else {
-                        Text(
-                          text = step.details,
-                          color = TextSecondary,
-                          fontSize = 11.sp
-                        )
-                      }
-                    }
-                  }
-                }
-              }
-
-              if (idx < steps.size - 1) {
-                HorizontalDivider(
-                  color = DarkBorderSubtle,
-                  thickness = 0.5.dp,
-                  modifier = Modifier.padding(start = 26.dp, top = 2.dp, bottom = 2.dp)
-                )
-              }
+      // Don't fight the user's scroll: offer a jump control instead.
+      if (stream.isNotEmpty()) {
+        val showJump by remember(stream.size) { derivedStateOf {
+          val info = listState.layoutInfo
+          val last = info.visibleItemsInfo.lastOrNull()?.index ?: 0
+          last < stream.size - 1
+        } }
+        if (showJump) {
+          Surface(
+            onClick = {
+              scope.launch { listState.animateScrollToItem(stream.size) }
+            },
+            shape = CircleShape,
+            color = DarkSurfaceElevated,
+            border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder),
+            modifier = Modifier
+              .align(Alignment.BottomCenter)
+              .padding(bottom = 10.dp)
+              .testTag("btn_jump_to_latest")
+          ) {
+            Row(
+              modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              Icon(Icons.Default.Check, contentDescription = null, tint = ElectricBlueGlow, modifier = Modifier.size(12.dp))
+              Spacer(modifier = Modifier.width(4.dp))
+              Text("Jump to latest", color = TextSecondary, fontSize = 11.sp)
             }
           }
         }
       }
     }
 
-    // Section: Tool Execution Cards
-    item {
-      Text(
-        text = "Tool Executions",
-        color = TextPrimary,
-        fontSize = 14.sp,
-        fontWeight = FontWeight.SemiBold
-      )
-    }
-
-    items(tools) { tool ->
-      ToolExecutionCard(
-        tool = tool,
-        onInspect = {
-          when (tool.type) {
-            ToolType.EDIT_FILE -> onNavigate(AppDestination.DIFF)
-            ToolType.TERMINAL -> onNavigate(AppDestination.TERMINAL)
-            ToolType.READ_FILE -> onNavigate(AppDestination.EDITOR)
-            ToolType.SEARCH -> onNavigate(AppDestination.FILES)
-            else -> {}
-          }
+    // Sticky agent composer.
+    AgentComposer(
+      promptText = promptText,
+      onPromptChange = { promptText = it },
+      isWorking = isWorking,
+      permissions = permissions,
+      onSend = {
+        val p = promptText.trim()
+        if (p.isNotEmpty()) {
+          viewModel.runAgentTask(p)
+          promptText = ""
         }
+      },
+      onStop = { viewModel.cancelAgent() }
+    )
+  }
+}
+
+@Composable
+private fun ModelChip(
+  model: com.agentisco.settings.model.AIModel?,
+  providers: List<com.agentisco.settings.model.AIProvider>,
+  onClick: () -> Unit
+) {
+  val providerName = model?.let { m -> providers.firstOrNull { it.id == m.providerId }?.name }
+  Column(
+    modifier = Modifier
+      .clip(RoundedCornerShape(10.dp))
+      .background(DarkSurface)
+      .border(1.dp, DarkBorder, RoundedCornerShape(10.dp))
+      .clickable(onClick = onClick)
+      .padding(horizontal = 12.dp, vertical = 6.dp)
+      .testTag("top_model_selector")
+  ) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+      Text(
+        text = model?.displayName ?: "No model selected",
+        color = if (model == null) TextMuted else ElectricBlueGlow,
+        fontSize = 12.sp,
+        fontWeight = FontWeight.SemiBold,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis
+      )
+      Spacer(modifier = Modifier.width(4.dp))
+      Icon(
+        Icons.Default.Check, contentDescription = null,
+        tint = if (model == null) TextMuted else ElectricBlueGlow,
+        modifier = Modifier.size(10.dp)
       )
     }
+    Text(
+      text = providerName ?: "tap to configure",
+      color = TextMuted,
+      fontSize = 9.sp,
+      maxLines = 1,
+      overflow = TextOverflow.Ellipsis
+    )
+  }
+}
 
-    item {
-      Spacer(modifier = Modifier.height(24.dp))
+@Composable
+private fun AgentEmptyState(project: Project, onSuggestion: (String) -> Unit) {
+  Column(modifier = Modifier.fillMaxWidth()) {
+    Spacer(modifier = Modifier.height(20.dp))
+    Text(
+      text = "What are we building?",
+      color = TextPrimary,
+      fontSize = 20.sp,
+      fontWeight = FontWeight.Bold,
+      letterSpacing = (-0.3).sp
+    )
+    Text(
+      text = "Describe a task or let the agent navigate ${project.name}",
+      color = TextMuted,
+      fontSize = 12.sp
+    )
+
+    Spacer(modifier = Modifier.height(16.dp))
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+      listOf(
+        "Review the existing code and explain the architecture",
+        "Fix bugs in this project",
+        "Add a feature and run the tests",
+        "Run the build and report failures"
+      ).forEach { suggestion ->
+        Box(
+          modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(DarkSurface)
+            .border(1.dp, DarkBorderSubtle, RoundedCornerShape(8.dp))
+            .clickable { onSuggestion(suggestion) }
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+        ) {
+          Text(suggestion, color = TextSecondary, fontSize = 12.sp)
+        }
+      }
     }
   }
 }
 
 @Composable
-private fun PromptTagChip(text: String, onClick: () -> Unit) {
+private fun AgentStreamItemView(
+  item: AgentStreamItem,
+  onAllow: () -> Unit,
+  onDeny: () -> Unit,
+  onNavigate: (AppDestination) -> Unit
+) {
+  when (item) {
+    is AgentStreamItem.Status -> StatusRow(item)
+    is AgentStreamItem.AssistantText -> AssistantTextBlock(item)
+    is AgentStreamItem.ToolCall -> ToolCallRow(item)
+    is AgentStreamItem.Approval -> ApprovalCard(item, onAllow, onDeny)
+    is AgentStreamItem.Final -> FinalCard(item, onNavigate)
+  }
+}
+
+@Composable
+private fun StatusRow(item: AgentStreamItem.Status) {
+  Row(verticalAlignment = Alignment.Top) {
+    if (item.running) {
+      val transition = rememberInfiniteTransition(label = "thinking")
+      val alpha by transition.animateFloat(
+        initialValue = 0.35f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(700), RepeatMode.Reverse),
+        label = "thinking-alpha"
+      )
+      Icon(
+        Icons.Default.Psychology,
+        contentDescription = "Thinking",
+        tint = CyanAccent.copy(alpha = alpha),
+        modifier = Modifier.size(15.dp)
+      )
+    } else {
+      Icon(
+        Icons.Default.Psychology,
+        contentDescription = "Status",
+        tint = CyanAccent.copy(alpha = 0.6f),
+        modifier = Modifier.size(15.dp)
+      )
+    }
+    Spacer(modifier = Modifier.width(8.dp))
+    Column {
+      Text(
+        text = if (item.running) "Thinking" else "Status",
+        color = TextMuted,
+        fontSize = 10.sp,
+        fontWeight = FontWeight.SemiBold
+      )
+      Text(item.text, color = TextSecondary, fontSize = 12.sp, lineHeight = 16.sp)
+    }
+  }
+}
+
+@Composable
+private fun AssistantTextBlock(item: AgentStreamItem.AssistantText) {
+  Row(verticalAlignment = Alignment.Top) {
+    Icon(
+      Icons.Default.AutoAwesome,
+      contentDescription = null,
+      tint = ElectricBlueGlow,
+      modifier = Modifier
+        .size(14.dp)
+        .padding(top = 2.dp)
+    )
+    Spacer(modifier = Modifier.width(8.dp))
+    Text(
+      text = item.text + if (item.running) "▍" else "",
+      color = TextCode,
+      fontSize = 13.sp,
+      lineHeight = 18.sp
+    )
+  }
+}
+
+@Composable
+private fun ToolCallRow(item: AgentStreamItem.ToolCall) {
+  var expanded by remember(item.id) { mutableStateOf(false) }
+  val (verb, target) = friendlyToolLabel(item.name, item.argsJson)
+  val icon = toolIcon(item.name)
+  val iconColor = toolColor(item.name)
+
+  Column(
+    modifier = Modifier
+      .fillMaxWidth()
+      .clip(RoundedCornerShape(10.dp))
+      .background(DarkSurface.copy(alpha = 0.6f))
+      .border(
+        1.dp,
+        when {
+          item.running -> ElectricBlue.copy(alpha = 0.5f)
+          item.success == false -> DangerRed.copy(alpha = 0.5f)
+          else -> DarkBorderSubtle
+        },
+        RoundedCornerShape(10.dp)
+      )
+      .clickable { if (item.detail.isNotBlank() || item.argsJson.isNotBlank()) expanded = !expanded }
+      .padding(horizontal = 10.dp, vertical = 8.dp)
+      .testTag("stream_tool_${item.name}")
+  ) {
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+      Icon(icon, contentDescription = verb, tint = iconColor, modifier = Modifier.size(15.dp))
+      Spacer(modifier = Modifier.width(8.dp))
+      Text(verb, color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+      if (target.isNotBlank()) {
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+          target,
+          color = TextSecondary,
+          fontSize = 11.sp,
+          fontFamily = FontFamily.Monospace,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
+          modifier = Modifier.weight(1f, fill = false)
+        )
+      }
+      Spacer(modifier = Modifier.weight(1f))
+      when {
+        item.running -> CircularProgressIndicator(modifier = Modifier.size(12.dp), color = ElectricBlueGlow, strokeWidth = 1.8.dp)
+        item.success == true -> Icon(Icons.Default.CheckCircle, contentDescription = "Done", tint = TerminalGreen, modifier = Modifier.size(13.dp))
+        item.success == false -> Icon(Icons.Default.Close, contentDescription = "Failed", tint = DangerRed, modifier = Modifier.size(13.dp))
+      }
+    }
+
+    // Inline error/result one-liner
+    if (!item.running) {
+      Spacer(modifier = Modifier.height(3.dp))
+      Text(
+        text = item.summary,
+        color = if (item.success == false) DangerRed.copy(alpha = 0.9f) else TextMuted,
+        fontSize = 10.sp,
+        maxLines = if (expanded) Int.MAX_VALUE else 1,
+        overflow = TextOverflow.Ellipsis
+      )
+    }
+
+    if (expanded) {
+      Spacer(modifier = Modifier.height(6.dp))
+      Column(
+        modifier = Modifier
+          .fillMaxWidth()
+          .clip(RoundedCornerShape(6.dp))
+          .background(DarkBackground)
+          .padding(8.dp)
+      ) {
+        if (item.argsJson.isNotBlank() && item.argsJson != "{}") {
+          Text("Arguments", color = TextMuted, fontSize = 9.sp)
+          Text(prettyJson(item.argsJson), color = CyanAccent, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+          Spacer(modifier = Modifier.height(6.dp))
+        }
+        if (item.detail.isNotBlank()) {
+          Text("Output", color = TextMuted, fontSize = 9.sp)
+          Text(item.detail, color = TextCode, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+        }
+        item.exitCode?.let {
+          Spacer(modifier = Modifier.height(6.dp))
+          Text(
+            "exit code: $it",
+            color = if (it == 0) TerminalGreen else DangerRed,
+            fontSize = 10.sp,
+            fontFamily = FontFamily.Monospace
+          )
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun ApprovalCard(item: AgentStreamItem.Approval, onAllow: () -> Unit, onDeny: () -> Unit) {
+  Column(
+    modifier = Modifier
+      .fillMaxWidth()
+      .clip(RoundedCornerShape(10.dp))
+      .background(WarningAmber.copy(alpha = 0.08f))
+      .border(1.dp, WarningAmber, RoundedCornerShape(10.dp))
+      .padding(12.dp)
+      .testTag("stream_approval")
+  ) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+      Box(
+        modifier = Modifier
+          .size(7.dp)
+          .clip(CircleShape)
+          .background(WarningAmber)
+      )
+      Spacer(modifier = Modifier.width(6.dp))
+      Text(item.title, color = WarningAmber, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+    }
+    Spacer(modifier = Modifier.height(6.dp))
+    Text(item.command, color = TextCode, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+    Spacer(modifier = Modifier.height(4.dp))
+    Text(item.impact, color = TextSecondary, fontSize = 11.sp, lineHeight = 15.sp)
+    Spacer(modifier = Modifier.height(8.dp))
+    if (item.resolved) {
+      Text(
+        if (item.allowed) "✓ Allowed" else "✗ Denied",
+        color = if (item.allowed) TerminalGreen else DangerRed,
+        fontSize = 11.sp,
+        fontWeight = FontWeight.SemiBold
+      )
+    } else {
+      Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Button(
+          onClick = onAllow,
+          colors = ButtonDefaults.buttonColors(containerColor = TerminalGreen),
+          contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+          modifier = Modifier.height(30.dp).testTag("btn_allow_tool")
+        ) { Text("Allow", color = Color.White, fontSize = 11.sp) }
+        Button(
+          onClick = onDeny,
+          colors = ButtonDefaults.buttonColors(containerColor = DangerRed),
+          contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+          modifier = Modifier.height(30.dp).testTag("btn_deny_tool")
+        ) { Text("Deny", color = Color.White, fontSize = 11.sp) }
+      }
+    }
+  }
+}
+
+@Composable
+private fun FinalCard(item: AgentStreamItem.Final, onNavigate: (AppDestination) -> Unit) {
+  Column(
+    modifier = Modifier
+      .fillMaxWidth()
+      .clip(RoundedCornerShape(12.dp))
+      .background(DarkSurface)
+      .border(
+        1.dp,
+        if (item.success) TerminalGreen.copy(alpha = 0.6f) else DangerRed,
+        RoundedCornerShape(12.dp)
+      )
+      .padding(12.dp)
+      .testTag("stream_final_response")
+  ) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+      Icon(
+        if (item.success) Icons.Default.CheckCircle else Icons.Default.Close,
+        contentDescription = null,
+        tint = if (item.success) TerminalGreen else DangerRed,
+        modifier = Modifier.size(15.dp)
+      )
+      Spacer(modifier = Modifier.width(6.dp))
+      Text(
+        if (item.success) "Completed" else "Failed",
+        color = if (item.success) TerminalGreen else DangerRed,
+        fontSize = 11.sp,
+        fontWeight = FontWeight.Bold
+      )
+    }
+    Spacer(modifier = Modifier.height(6.dp))
+    Text(item.text, color = TextPrimary, fontSize = 13.sp, lineHeight = 18.sp)
+
+    if (item.success) {
+      Spacer(modifier = Modifier.height(8.dp))
+      Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        MiniAction("Review changes") { onNavigate(AppDestination.DIFF) }
+        MiniAction("Open files") { onNavigate(AppDestination.FILES) }
+      }
+    }
+  }
+}
+
+@Composable
+private fun MiniAction(label: String, onClick: () -> Unit) {
   Box(
     modifier = Modifier
       .clip(RoundedCornerShape(6.dp))
       .background(DarkSurfaceElevated)
       .border(1.dp, DarkBorderSubtle, RoundedCornerShape(6.dp))
       .clickable(onClick = onClick)
-      .padding(horizontal = 8.dp, vertical = 4.dp)
+      .padding(horizontal = 10.dp, vertical = 4.dp)
   ) {
-    Text(
-      text = text,
-      color = TextSecondary,
-      fontSize = 11.sp,
-      fontFamily = FontFamily.Monospace
-    )
+    Text(label, color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Medium)
   }
 }
 
 @Composable
-private fun QuickPromptCard(
-  title: String,
-  subtitle: String,
-  icon: androidx.compose.ui.graphics.vector.ImageVector,
-  modifier: Modifier = Modifier,
-  onClick: () -> Unit
+private fun AgentComposer(
+  promptText: String,
+  onPromptChange: (String) -> Unit,
+  isWorking: Boolean,
+  permissions: com.agentisco.agent.model.AgentPermissions,
+  onSend: () -> Unit,
+  onStop: () -> Unit
 ) {
-  Card(
-    modifier = modifier
-      .clip(RoundedCornerShape(10.dp))
-      .border(1.dp, DarkBorderSubtle, RoundedCornerShape(10.dp))
-      .clickable(onClick = onClick),
-    colors = CardDefaults.cardColors(containerColor = DarkSurface)
+  Surface(
+    modifier = Modifier.fillMaxWidth(),
+    color = DarkSurface,
+    border = androidx.compose.foundation.BorderStroke(0.5.dp, DarkBorder)
   ) {
-    Row(
-      modifier = Modifier.padding(10.dp),
-      verticalAlignment = Alignment.CenterVertically
-    ) {
-      Box(
-        modifier = Modifier
-          .size(32.dp)
-          .clip(RoundedCornerShape(8.dp))
-          .background(DarkSurfaceElevated),
-        contentAlignment = Alignment.Center
-      ) {
-        Icon(
-          imageVector = icon,
-          contentDescription = title,
-          tint = ElectricBlueGlow,
-          modifier = Modifier.size(16.dp)
-        )
-      }
-      Spacer(modifier = Modifier.width(8.dp))
-      Column {
-        Text(
-          text = title,
-          color = TextPrimary,
-          fontSize = 12.sp,
-          fontWeight = FontWeight.SemiBold
-        )
-        Text(
-          text = subtitle,
-          color = TextMuted,
-          fontSize = 10.sp,
-          maxLines = 1
-        )
-      }
-    }
-  }
-}
-
-@Composable
-private fun ToolExecutionCard(
-  tool: ToolExecution,
-  onInspect: () -> Unit
-) {
-  var isExpanded by remember { mutableStateOf(false) }
-
-  Card(
-    modifier = Modifier
-      .fillMaxWidth()
-      .clip(RoundedCornerShape(10.dp))
-      .border(1.dp, DarkBorder, RoundedCornerShape(10.dp))
-      .clickable { isExpanded = !isExpanded },
-    colors = CardDefaults.cardColors(containerColor = DarkSurface)
-  ) {
-    Column(modifier = Modifier.padding(12.dp)) {
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-      ) {
-        Row(
-          verticalAlignment = Alignment.CenterVertically,
-          modifier = Modifier.weight(1f)
-        ) {
-          // Tool Type Icon
-          val icon = when (tool.type) {
-            ToolType.READ_FILE -> Icons.Outlined.Description
-            ToolType.SEARCH -> Icons.Outlined.Search
-            ToolType.TERMINAL -> Icons.Outlined.Terminal
-            ToolType.EDIT_FILE -> Icons.Outlined.Edit
-            ToolType.GIT -> Icons.Outlined.Commit
-            ToolType.BUILD -> Icons.Outlined.Build
-          }
-          val iconColor = when (tool.type) {
-            ToolType.READ_FILE -> CyanAccent
-            ToolType.SEARCH -> WarningAmber
-            ToolType.TERMINAL -> TerminalGreen
-            ToolType.EDIT_FILE -> ElectricBlueGlow
-            ToolType.GIT -> IndigoAccent
-            ToolType.BUILD -> WarningAmber
-          }
-
-          Icon(
-            imageVector = icon,
-            contentDescription = tool.title,
-            tint = iconColor,
-            modifier = Modifier.size(18.dp)
-          )
-
-          Spacer(modifier = Modifier.width(10.dp))
-
-          Column {
-            Text(
-              text = tool.title,
-              color = TextPrimary,
-              fontSize = 13.sp,
-              fontWeight = FontWeight.SemiBold,
-              fontFamily = if (tool.type == ToolType.TERMINAL) FontFamily.Monospace else FontFamily.Default
-            )
-            Text(
-              text = tool.subtitle,
-              color = TextSecondary,
-              fontSize = 11.sp
-            )
-          }
-        }
-
-        IconButton(onClick = onInspect, modifier = Modifier.size(28.dp)) {
-          Icon(
-            imageVector = Icons.Default.ChevronRight,
-            contentDescription = "Inspect",
-            tint = TextMuted,
-            modifier = Modifier.size(18.dp)
-          )
-        }
-      }
-
-      if (isExpanded && (tool.details.isNotBlank() || tool.output.isNotBlank())) {
-        Spacer(modifier = Modifier.height(8.dp))
-        Box(
+    Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
+      Row(verticalAlignment = Alignment.Bottom) {
+        TextField(
+          value = promptText,
+          onValueChange = onPromptChange,
+          placeholder = { Text("Ask for follow-up changes…", color = TextMuted, fontSize = 13.sp) },
           modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
-            .background(DarkBackground)
-            .padding(10.dp)
-        ) {
-          Column {
-            if (tool.details.isNotBlank()) {
-              Text(
-                text = tool.details,
-                color = TextSecondary,
-                fontSize = 11.sp
-              )
-            }
-            if (tool.output.isNotBlank()) {
-              Spacer(modifier = Modifier.height(4.dp))
-              Text(
-                text = tool.output,
-                color = TerminalGreen,
-                fontSize = 11.sp,
-                fontFamily = FontFamily.Monospace
-              )
-            }
+            .weight(1f)
+            .heightIn(min = 48.dp, max = 120.dp)
+            .testTag("agent_prompt_input"),
+          colors = TextFieldDefaults.colors(
+            focusedContainerColor = Color.Transparent,
+            unfocusedContainerColor = Color.Transparent,
+            focusedIndicatorColor = Color.Transparent,
+            unfocusedIndicatorColor = Color.Transparent,
+            focusedTextColor = TextPrimary,
+            unfocusedTextColor = TextPrimary
+          ),
+          textStyle = LocalTextStyle.current.copy(fontSize = 13.sp, lineHeight = 18.sp)
+        )
+
+        if (isWorking) {
+          IconButton(
+            onClick = onStop,
+            modifier = Modifier
+              .size(40.dp)
+              .clip(CircleShape)
+              .background(DangerRed)
+              .testTag("btn_composer_stop")
+          ) {
+            Icon(Icons.Default.Stop, contentDescription = "Stop", tint = Color.White, modifier = Modifier.size(18.dp))
+          }
+        } else {
+          IconButton(
+            onClick = onSend,
+            enabled = promptText.isNotBlank(),
+            modifier = Modifier
+              .size(40.dp)
+              .clip(CircleShape)
+              .background(if (promptText.isBlank()) DarkSurfaceElevated else ElectricBlue)
+              .testTag("btn_send_agent_prompt")
+          ) {
+            Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send", tint = Color.White, modifier = Modifier.size(17.dp))
           }
         }
+      }
+
+      Spacer(modifier = Modifier.height(2.dp))
+
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+          text = when (permissions.terminalCommands) {
+            PermissionMode.ALLOW_ALL -> "Full access"
+            PermissionMode.ALLOW_SAFE -> "Safe commands"
+            PermissionMode.NEVER_ALLOW -> "Read-only"
+            else -> "Ask first"
+          },
+          color = when (permissions.terminalCommands) {
+            PermissionMode.ALLOW_ALL -> WarningAmber
+            PermissionMode.NEVER_ALLOW -> TextMuted
+            else -> TerminalGreen
+          },
+          fontSize = 10.sp,
+          fontWeight = FontWeight.Medium
+        )
+        Spacer(modifier = Modifier.weight(1f))
+        Text(
+          text = "Agent tools require approval per Settings",
+          color = TextMuted,
+          fontSize = 9.sp
+        )
       }
     }
   }
 }
+
+// ---- helpers ----
+
+private fun friendlyToolLabel(name: String, argsJson: String): Pair<String, String> {
+  val args = runCatching { JSONObject(argsJson) }.getOrNull()
+  fun arg(key: String) = args?.optString(key).orEmpty().take(80)
+  return when (name) {
+    "read_file" -> "Reading" to arg("path")
+    "write_file" -> "Editing" to arg("path")
+    "create_file" -> "Creating" to arg("path")
+    "delete_file" -> "Deleting" to arg("path")
+    "move_file" -> "Moving" to arg("new_path")
+    "list_files" -> "Listing" to arg("path").ifBlank { "workspace" }
+    "search_files" -> "Searching" to arg("query")
+    "run_command" -> "Running" to arg("command")
+    "write_terminal_input" -> "Terminal input" to ""
+    "interrupt_terminal" -> "Interrupting" to ""
+    "git_status" -> "Git status" to ""
+    "git_diff" -> "Git diff" to arg("path")
+    "git_stage" -> "Staging" to arg("path").ifBlank { "all changes" }
+    "git_unstage" -> "Unstaging" to ""
+    "git_commit" -> "Committing" to arg("message")
+    "build" -> "Building" to arg("args")
+    "test" -> "Testing" to arg("args")
+    "run" -> "Starting" to "dev server"
+    else -> name to ""
+  }
+}
+
+private fun toolIcon(name: String): ImageVector = when (toolTypeForUi(name)) {
+  ToolType.READ_FILE -> Icons.Outlined.Description
+  ToolType.SEARCH -> Icons.Outlined.Search
+  ToolType.TERMINAL -> Icons.Outlined.Terminal
+  ToolType.EDIT_FILE -> Icons.Outlined.Edit
+  ToolType.GIT -> Icons.Outlined.Commit
+  ToolType.BUILD -> Icons.Outlined.Build
+}
+
+private fun toolColor(name: String): Color = when (toolTypeForUi(name)) {
+  ToolType.READ_FILE -> CyanAccent
+  ToolType.SEARCH -> WarningAmber
+  ToolType.TERMINAL -> TerminalGreen
+  ToolType.EDIT_FILE -> ElectricBlueGlow
+  ToolType.GIT -> IndigoAccent
+  ToolType.BUILD -> WarningAmber
+}
+
+private fun toolTypeForUi(name: String): ToolType = when {
+  name.startsWith("git_") -> ToolType.GIT
+  name == "run_command" || name == "build" || name == "test" || name == "run" ||
+    name.startsWith("terminal") -> ToolType.TERMINAL
+  name == "write_file" || name == "create_file" || name == "move_file" || name == "delete_file" -> ToolType.EDIT_FILE
+  name == "search_files" -> ToolType.SEARCH
+  name == "build" -> ToolType.BUILD
+  else -> ToolType.READ_FILE
+}
+
+private fun prettyJson(raw: String): String = runCatching {
+  JSONObject(raw).toString(2)
+}.getOrDefault(raw)

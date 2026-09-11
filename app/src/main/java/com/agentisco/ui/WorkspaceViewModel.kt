@@ -11,8 +11,39 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.agentisco.data.model.*
 import com.agentisco.data.repository.WorkspaceRepository
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+
+/** One chronological entry in the live agent stream, rendered by AgentScreen. */
+sealed class AgentStreamItem {
+  data class Status(val id: Long, val text: String, val running: Boolean) : AgentStreamItem()
+  data class AssistantText(val id: Long, val text: String, val running: Boolean) : AgentStreamItem()
+  data class ToolCall(
+    val id: Long,
+    val name: String,
+    val argsJson: String,
+    val running: Boolean,
+    val success: Boolean?,
+    val summary: String,
+    val detail: String,
+    val exitCode: Int?
+  ) : AgentStreamItem()
+
+  data class Approval(
+    val id: Long,
+    val approvalId: String,
+    val command: String,
+    val title: String,
+    val impact: String,
+    val resolved: Boolean,
+    val allowed: Boolean
+  ) : AgentStreamItem()
+
+  data class Final(val id: Long, val text: String, val success: Boolean) : AgentStreamItem()
+}
 
 class WorkspaceViewModel(
   val repository: WorkspaceRepository = WorkspaceRepository()
@@ -46,6 +77,102 @@ class WorkspaceViewModel(
   val selectedModel: StateFlow<AIModel?> = repository.selectedModel
   val connectionTests: StateFlow<Map<String, WorkspaceRepository.ConnectionTestState>> = repository.connectionTests
   val agentResponse: StateFlow<String> = repository.agentResponse
+
+  /**
+   * Hierarchical live agent stream, reduced from the runtime's real events:
+   * status summaries, streamed text, tool calls with results, approvals, and
+   * the final answer — all in chronological order.
+   */
+  private val _agentStream = MutableStateFlow<List<AgentStreamItem>>(emptyList())
+  val agentStream: StateFlow<List<AgentStreamItem>> = _agentStream.asStateFlow()
+
+  private val _isAgentCancelled = MutableStateFlow(false)
+  val isAgentCancelled: StateFlow<Boolean> = _isAgentCancelled.asStateFlow()
+
+  private var agentJob: kotlinx.coroutines.Job? = null
+  private var streamItemId = 0L
+
+  init {
+    viewModelScope.launch {
+      repository.agentEvents.collect { event ->
+        _agentStream.update { items -> reduceAgentStream(items, event) }
+      }
+    }
+  }
+
+  private fun nextItemId() = ++streamItemId
+
+  private fun reduceAgentStream(items: List<AgentStreamItem>, event: com.agentisco.agent.model.AgentStreamEvent): List<AgentStreamItem> {
+    val closed = items.map { item ->
+      when {
+        item is AgentStreamItem.Status && item.running -> item.copy(running = false)
+        item is AgentStreamItem.AssistantText && item.running -> item.copy(running = false)
+        else -> item
+      }
+    }
+    return when (event) {
+      is com.agentisco.agent.model.AgentStreamEvent.TaskStarted -> emptyList()
+      is com.agentisco.agent.model.AgentStreamEvent.Status -> {
+        val last = items.lastOrNull()
+        if (last is AgentStreamItem.Status && last.running) {
+          items.dropLast(1) + last.copy(text = event.text)
+        } else {
+          closed + AgentStreamItem.Status(nextItemId(), event.text, running = true)
+        }
+      }
+      is com.agentisco.agent.model.AgentStreamEvent.Token -> {
+        val last = items.lastOrNull()
+        if (last is AgentStreamItem.AssistantText && last.running) {
+          items.dropLast(1) + last.copy(text = last.text + event.text)
+        } else {
+          closed + AgentStreamItem.AssistantText(nextItemId(), event.text, running = true)
+        }
+      }
+      is com.agentisco.agent.model.AgentStreamEvent.ToolStarted ->
+        closed + AgentStreamItem.ToolCall(
+          id = nextItemId(), name = event.name, argsJson = event.argsJson,
+          running = true, success = null, summary = "Running…", detail = "", exitCode = null
+        )
+      is com.agentisco.agent.model.AgentStreamEvent.ToolFinished -> {
+        val index = items.indexOfLast { it is AgentStreamItem.ToolCall && it.name == event.name && it.running }
+        val existing = items.getOrNull(index) as? AgentStreamItem.ToolCall
+        val updated = AgentStreamItem.ToolCall(
+          id = existing?.id ?: nextItemId(),
+          name = event.name, argsJson = existing?.argsJson ?: "",
+          running = false, success = event.success, summary = event.summary,
+          detail = event.detail, exitCode = event.exitCode
+        )
+        if (index >= 0) {
+          items.subList(0, index) + updated + items.subList(index + 1, items.size)
+        } else {
+          closed + updated
+        }
+      }
+      is com.agentisco.agent.model.AgentStreamEvent.ApprovalRequested ->
+        closed + AgentStreamItem.Approval(
+          id = nextItemId(), approvalId = event.approvalId, command = event.command,
+          title = event.title, impact = event.impact, resolved = false, allowed = false
+        )
+      is com.agentisco.agent.model.AgentStreamEvent.ApprovalResolved ->
+        items.map { item ->
+          if (item is AgentStreamItem.Approval && item.approvalId == event.approvalId) {
+            item.copy(resolved = true, allowed = event.allowed)
+          } else item
+        }
+      is com.agentisco.agent.model.AgentStreamEvent.Completed ->
+        closed + AgentStreamItem.Final(nextItemId(), event.summary, success = true)
+      is com.agentisco.agent.model.AgentStreamEvent.Failed ->
+        closed + AgentStreamItem.Final(nextItemId(), event.message, success = false)
+      is com.agentisco.agent.model.AgentStreamEvent.Cancelled ->
+        closed + AgentStreamItem.Final(nextItemId(), event.message, success = false)
+    }
+  }
+
+  /** Interrupts the running agent task (streamed request cancellation + tool loop stop). */
+  fun cancelAgent() {
+    _isAgentCancelled.value = true
+    agentJob?.cancel()
+  }
   val permissions: StateFlow<AgentPermissions> = repository.permissions
   val searchQuery: StateFlow<String> = repository.searchQuery
   val isCommandPaletteOpen: StateFlow<Boolean> = repository.isCommandPaletteOpen
@@ -201,23 +328,13 @@ class WorkspaceViewModel(
     repository.resolveApproval(allowed)
   }
 
-  fun requestSampleApproval() {
-    repository.requestApproval(
-      PendingApproval(
-        id = "demo-appr",
-        command = "npm install @tanstack/react-query",
-        title = "Agent wants to run",
-        impactDescription = "This will modify package.json and download npm packages over the network."
-      )
-    )
-  }
-
   fun updatePermissions(transform: (AgentPermissions) -> AgentPermissions) {
     repository.updatePermissions(transform)
   }
 
   fun runAgentTask(prompt: String) {
-    viewModelScope.launch {
+    _isAgentCancelled.value = false
+    agentJob = viewModelScope.launch {
       repository.runAgentTask(prompt)
     }
   }
