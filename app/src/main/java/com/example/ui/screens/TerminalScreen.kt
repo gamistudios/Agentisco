@@ -239,6 +239,9 @@ fun TerminalScreen(
     modifier = modifier
       .fillMaxSize()
       .background(DarkBackground)
+      // Push the input row and dev keybar up above the soft keyboard instead of
+      // letting the keyboard overlap/hide them at the bottom of the screen.
+      .imePadding()
   ) {
     // Terminal Top Header & Session Switcher Tabs (Section 15)
     Surface(

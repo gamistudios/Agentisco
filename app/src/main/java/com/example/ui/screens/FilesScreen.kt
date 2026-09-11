@@ -8,6 +8,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.outlined.Article
 import androidx.compose.material.icons.automirrored.outlined.InsertDriveFile
 import androidx.compose.material.icons.filled.*
@@ -149,20 +150,39 @@ fun FilesScreen(
       }
     }
 
-    // Flat file list or recursive tree
-    val flattened = remember(rootFiles, searchQuery) {
-      val result = mutableListOf<ProjectFile>()
-      fun flatten(files: List<ProjectFile>) {
-        for (f in files) {
-          if (searchQuery.isBlank() || f.name.contains(searchQuery, ignoreCase = true)) {
-            result.add(f)
-          }
-          if (f.isDirectory) {
-            flatten(f.children)
+    // Which directories are expanded. Collapsed by default, so nested files stay
+    // inside their own folder instead of being listed alongside the root.
+    var expandedDirs by remember(activeProject) { mutableStateOf(setOf<String>()) }
+
+    // Rows currently visible in the tree, each paired with its indent depth.
+    val visibleFiles = remember(rootFiles, searchQuery, expandedDirs) {
+      val result = mutableListOf<Pair<ProjectFile, Int>>()
+      if (searchQuery.isNotBlank()) {
+        // While searching, match against every file in the project (not just expanded
+        // folders) — each row's own path label still shows where it lives.
+        fun collectMatches(files: List<ProjectFile>) {
+          for (f in files) {
+            if (f.name.contains(searchQuery, ignoreCase = true)) {
+              result.add(f to 0)
+            }
+            if (f.isDirectory) {
+              collectMatches(f.children)
+            }
           }
         }
+        collectMatches(rootFiles)
+      } else {
+        // Normal browsing: only descend into a folder's children once it's expanded.
+        fun addVisible(files: List<ProjectFile>, depth: Int) {
+          for (f in files) {
+            result.add(f to depth)
+            if (f.isDirectory && expandedDirs.contains(f.path)) {
+              addVisible(f.children, depth + 1)
+            }
+          }
+        }
+        addVisible(rootFiles, 0)
       }
-      flatten(rootFiles)
       result
     }
 
@@ -173,11 +193,19 @@ fun FilesScreen(
         .padding(horizontal = 14.dp, vertical = 8.dp),
       verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-      items(flattened) { file ->
+      items(visibleFiles) { (file, depth) ->
         FileTreeRow(
           file = file,
+          depth = depth,
+          isExpanded = expandedDirs.contains(file.path),
           onClick = {
-            if (!file.isDirectory) {
+            if (file.isDirectory) {
+              expandedDirs = if (expandedDirs.contains(file.path)) {
+                expandedDirs - file.path
+              } else {
+                expandedDirs + file.path
+              }
+            } else {
               viewModel.openFile(file)
             }
           },
@@ -474,6 +502,8 @@ fun FilesScreen(
 @Composable
 private fun FileTreeRow(
   file: ProjectFile,
+  depth: Int,
+  isExpanded: Boolean,
   onClick: () -> Unit,
   onLongClick: () -> Unit,
   onAskAgent: () -> Unit
@@ -484,7 +514,7 @@ private fun FileTreeRow(
       .clip(RoundedCornerShape(8.dp))
       .background(DarkSurfaceElevated)
       .clickable(onClick = onClick)
-      .padding(horizontal = 12.dp, vertical = 10.dp),
+      .padding(start = (12 + depth * 16).dp, top = 10.dp, bottom = 10.dp, end = 12.dp),
     horizontalArrangement = Arrangement.SpaceBetween,
     verticalAlignment = Alignment.CenterVertically
   ) {
@@ -492,8 +522,17 @@ private fun FileTreeRow(
       verticalAlignment = Alignment.CenterVertically,
       modifier = Modifier.weight(1f)
     ) {
+      if (file.isDirectory) {
+        Icon(
+          imageVector = if (isExpanded) Icons.Default.ExpandMore else Icons.AutoMirrored.Filled.KeyboardArrowRight,
+          contentDescription = if (isExpanded) "Collapse" else "Expand",
+          tint = TextMuted,
+          modifier = Modifier.size(16.dp)
+        )
+        Spacer(modifier = Modifier.width(2.dp))
+      }
       val icon = when {
-        file.isDirectory -> Icons.Filled.Folder
+        file.isDirectory -> if (isExpanded) Icons.Filled.FolderOpen else Icons.Filled.Folder
         file.name.endsWith(".json") -> Icons.Outlined.DataObject
         file.name.endsWith(".md") -> Icons.AutoMirrored.Outlined.Article
         file.name.endsWith(".tsx") || file.name.endsWith(".ts") -> Icons.Outlined.Code
