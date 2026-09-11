@@ -207,7 +207,7 @@ class WorkspaceRepository {
       name = name,
       currentDir = "~/projects/sco",
       lines = listOf(
-        TerminalLine("AgentIDE Terminal Environment v2.4", TerminalLineType.INFO),
+        TerminalLine("ScoOS Terminal Environment v2.4", TerminalLineType.INFO),
         TerminalLine("Type 'help' or commands like 'git status', 'npm test', 'ls'", TerminalLineType.INFO)
       )
     )
@@ -738,7 +738,7 @@ export const useChatStore = create<ChatState>((set) => ({
           name = "bash",
           currentDir = "~/projects/sco",
           lines = listOf(
-            TerminalLine("AgentIDE Bash Shell (Linux x86_64)", TerminalLineType.INFO),
+            TerminalLine("ScoOS Bash Shell (Linux x86_64)", TerminalLineType.INFO),
             TerminalLine("~/projects/sco $ git status", TerminalLineType.COMMAND),
             TerminalLine("modified: src/components/Chat.tsx", TerminalLineType.STDERR),
             TerminalLine("modified: src/store/chatStore.ts", TerminalLineType.STDERR),

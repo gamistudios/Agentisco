@@ -22,6 +22,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "Agent IDE"
+rootProject.name = "ScoOS"
 
 include(":app")
