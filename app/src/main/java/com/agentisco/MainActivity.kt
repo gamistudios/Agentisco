@@ -17,9 +17,13 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.ScaffoldDefaults
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
 import com.agentisco.core.model.AppDestination
+import com.agentisco.data.repository.WorkspaceRepository
 import com.agentisco.ui.WorkspaceViewModel
 import com.agentisco.ui.components.*
 import com.agentisco.ui.screens.*
@@ -40,11 +44,21 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun AgentIDEApp(
-  viewModel: WorkspaceViewModel = viewModel()
+  viewModel: WorkspaceViewModel = run {
+    val app = LocalContext.current.applicationContext as AgentiscoApplication
+    viewModel(
+      factory = viewModelFactory {
+        initializer {
+          WorkspaceViewModel(WorkspaceRepository(providerStore = app.providerStore))
+        }
+      }
+    )
+  }
 ) {
   val currentDestination by viewModel.currentDestination.collectAsState()
   val activeProject by viewModel.activeProject.collectAsState()
   val selectedModel by viewModel.selectedModel.collectAsState()
+  val aiModels by viewModel.aiModels.collectAsState()
   val providers by viewModel.providers.collectAsState()
   val isAgentWorking by viewModel.isAgentWorking.collectAsState()
   val pendingApproval by viewModel.pendingApproval.collectAsState()
@@ -166,6 +180,7 @@ fun AgentIDEApp(
       isOpen = isModelSheetOpen,
       currentModel = selectedModel,
       providers = providers,
+      models = aiModels,
       onSelectModel = { model ->
         viewModel.selectModel(model)
         viewModel.toggleModelSheet(false)

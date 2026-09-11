@@ -135,6 +135,21 @@ class TerminalProcessManager(
     } else false
   }
 
+  /** Writes raw input (plus newline) to a running session's stdin, e.g. to answer interactive prompts. */
+  fun writeInput(sessionId: String, input: String): Boolean {
+    val process = activeProcesses[sessionId] ?: return false
+    if (!process.isAlive) return false
+    return try {
+      process.outputStream.use { stream ->
+        stream.write((input + "\n").toByteArray())
+        stream.flush()
+      }
+      true
+    } catch (_: Exception) {
+      false
+    }
+  }
+
   fun isRunning(sessionId: String): Boolean {
     val p = activeProcesses[sessionId]
     return p != null && p.isAlive

@@ -42,7 +42,10 @@ class WorkspaceViewModel(
   val terminalCommandHistory: StateFlow<List<String>> = repository.terminalCommandHistory
 
   val providers: StateFlow<List<AIProvider>> = repository.providers
-  val selectedModel: StateFlow<AIModel> = repository.selectedModel
+  val aiModels: StateFlow<List<AIModel>> = repository.aiModels
+  val selectedModel: StateFlow<AIModel?> = repository.selectedModel
+  val connectionTests: StateFlow<Map<String, WorkspaceRepository.ConnectionTestState>> = repository.connectionTests
+  val agentResponse: StateFlow<String> = repository.agentResponse
   val permissions: StateFlow<AgentPermissions> = repository.permissions
   val searchQuery: StateFlow<String> = repository.searchQuery
   val isCommandPaletteOpen: StateFlow<Boolean> = repository.isCommandPaletteOpen
@@ -102,7 +105,36 @@ class WorkspaceViewModel(
   }
 
   fun selectModel(model: AIModel) {
-    repository.selectModel(model)
+    repository.selectModel(model.id)
+  }
+
+  // ---- Provider & model management (Task: AI provider system) ----
+
+  fun saveProvider(name: String, baseUrl: String, protocol: com.agentisco.settings.model.LLMProtocol, apiKey: String?, providerId: String? = null) {
+    repository.saveProvider(name, baseUrl, protocol, apiKey, providerId)
+  }
+
+  fun deleteProvider(providerId: String) {
+    repository.deleteProvider(providerId)
+  }
+
+  fun saveModel(
+    providerId: String,
+    modelId: String,
+    displayName: String,
+    contextWindow: Int?,
+    maxOutputTokens: Int?,
+    capabilities: com.agentisco.settings.model.ModelCapabilities,
+    reasoning: com.agentisco.settings.model.ReasoningConfig?,
+    recordId: String? = null
+  ): AIModel? = repository.saveModel(providerId, modelId, displayName, contextWindow, maxOutputTokens, capabilities, reasoning, recordId)
+
+  fun deleteModel(recordId: String) {
+    repository.deleteModel(recordId)
+  }
+
+  fun testProviderConnection(providerId: String) {
+    repository.testProviderConnection(providerId)
   }
 
   fun updateSearchQuery(query: String) {

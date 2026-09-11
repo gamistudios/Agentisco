@@ -56,6 +56,21 @@ fun SettingsScreen(
       }
     }
 
+    // AI Providers & Models (provider-centric configuration)
+    item {
+      Card(
+        modifier = Modifier
+          .fillMaxWidth()
+          .clip(RoundedCornerShape(12.dp))
+          .border(1.dp, DarkBorder, RoundedCornerShape(12.dp)),
+        colors = CardDefaults.cardColors(containerColor = DarkSurface)
+      ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+          com.agentisco.ui.components.AIProvidersSection(viewModel = viewModel)
+        }
+      }
+    }
+
     // File Editing Permission Card (Section 22)
     item {
       Card(

@@ -31,7 +31,8 @@ import java.io.File
 class WorkspaceRepository(
   context: Context? = null,
   baseDir: File = context?.let { File(it.filesDir, "sco_projects") }
-    ?: File(System.getProperty("java.io.tmpdir") ?: ".", "sco_projects")
+    ?: File(System.getProperty("java.io.tmpdir") ?: ".", "sco_projects"),
+  val providerStore: com.agentisco.data.local.ProviderConfigStore? = null
 ) {
 
   private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -49,7 +50,20 @@ class WorkspaceRepository(
     onRevertFile = { f -> rejectDiff(f) }
   )
   val terminalManager = TerminalProcessManager(linuxEnv)
-  val agentRuntime = AgentRuntime(fileSystem, terminalManager, gitManager)
+
+  // LLM communication + agent tooling. Providers are configuration only; the
+  // protocol adapter is chosen from the provider config, never from its name.
+  private val llmService = com.agentisco.agent.llm.LlmService()
+  private val toolRegistry = com.agentisco.agent.tool.AgentToolRegistry(
+    fileSystem = fileSystem,
+    gitManager = gitManager,
+    terminalManager = terminalManager,
+    stagedFilesProvider = { _stagedFiles.value },
+    onStageFile = { f -> toggleFileStaged(f) },
+    onStageAll = { stageAll() },
+    onUnstageAll = { unstageAll() }
+  )
+  val agentRuntime = AgentRuntime(fileSystem, terminalManager, gitManager, llmService, toolRegistry)
 
   // Current Projects
   private val _projects = MutableStateFlow<List<Project>>(fileSystem.getProjects())
@@ -85,6 +99,10 @@ class WorkspaceRepository(
 
   private val _agentStatusText = MutableStateFlow("Ready for tasks")
   val agentStatusText: StateFlow<String> = _agentStatusText.asStateFlow()
+
+  /** Progressively streamed assistant response for the current/last task. */
+  private val _agentResponse = MutableStateFlow("")
+  val agentResponse: StateFlow<String> = _agentResponse.asStateFlow()
 
   private val _agentWorkingDurationSeconds = MutableStateFlow(0)
   val agentWorkingDurationSeconds: StateFlow<Int> = _agentWorkingDurationSeconds.asStateFlow()
@@ -123,23 +141,27 @@ class WorkspaceRepository(
   private val _terminalCommandHistory = MutableStateFlow<List<String>>(emptyList())
   val terminalCommandHistory: StateFlow<List<String>> = _terminalCommandHistory.asStateFlow()
 
-  // AI Providers & Models
-  private val _providers = MutableStateFlow<List<AIProvider>>(getInitialProviders())
+  // AI Providers & Models — durable configuration via ProviderConfigStore.
+  // A model belongs to exactly one provider record; the same model identifier
+  // may exist under multiple providers (each is a distinct selectable model).
+  private val _providers = MutableStateFlow<List<AIProvider>>(emptyList())
   val providers: StateFlow<List<AIProvider>> = _providers.asStateFlow()
 
-  private val _selectedModel = MutableStateFlow(
-    AIModel(
-      id = "glm-5.3-free",
-      name = "GLM 5.3 Free",
-      providerId = "tokenrouter",
-      contextWindow = "1000k",
-      hasTools = true,
-      hasStreaming = true,
-      hasReasoning = true,
-      isFree = true
-    )
-  )
-  val selectedModel: StateFlow<AIModel> = _selectedModel.asStateFlow()
+  private val _aiModels = MutableStateFlow<List<AIModel>>(emptyList())
+  val aiModels: StateFlow<List<AIModel>> = _aiModels.asStateFlow()
+
+  private val _selectedModel = MutableStateFlow<AIModel?>(null)
+  val selectedModel: StateFlow<AIModel?> = _selectedModel.asStateFlow()
+
+  /** Per-provider connection test outcome (never contains secrets). */
+  sealed class ConnectionTestState {
+    data object Testing : ConnectionTestState()
+    data class Connected(val note: String) : ConnectionTestState()
+    data class Failed(val message: String) : ConnectionTestState()
+  }
+
+  private val _connectionTests = MutableStateFlow<Map<String, ConnectionTestState>>(emptyMap())
+  val connectionTests: StateFlow<Map<String, ConnectionTestState>> = _connectionTests.asStateFlow()
 
   // Agent Permissions
   private val _permissions = MutableStateFlow(AgentPermissions())
@@ -163,6 +185,130 @@ class WorkspaceRepository(
 
   init {
     loadActiveProjectState(_activeProject.value)
+    loadProviderConfiguration()
+  }
+
+  // ---- Provider / model configuration (Task: AI provider system) ----
+
+  private fun loadProviderConfiguration() {
+    val store = providerStore
+    if (store != null) {
+      store.reconcileSelection(autoSelectFallback = true)
+      _providers.value = store.getProviders()
+      _aiModels.value = store.getModels()
+      _selectedModel.value = store.getSelectedModelId()?.let { id -> _aiModels.value.firstOrNull { it.id == id } }
+    } else {
+      // No durable store (tests/previews): operate in-memory.
+      _providers.value = emptyList()
+      _aiModels.value = emptyList()
+      _selectedModel.value = null
+    }
+  }
+
+  fun saveProvider(name: String, baseUrl: String, protocol: com.agentisco.settings.model.LLMProtocol, apiKey: String?, providerId: String? = null): AIProvider {
+    val id = providerId ?: "provider-${System.currentTimeMillis()}"
+    val existing = _providers.value.firstOrNull { it.id == id }
+    val keyChanged = apiKey != null
+    val provider = AIProvider(
+      id = id,
+      name = name.trim(),
+      baseUrl = baseUrl.trim(),
+      protocol = protocol,
+      hasApiKey = if (keyChanged) apiKey?.isNotBlank() == true else (existing?.hasApiKey ?: false)
+    )
+    providerStore?.upsertProvider(provider, apiKey)
+    _providers.value = providerStore?.getProviders() ?: (_providers.value.filterNot { it.id == id } + provider)
+    _connectionTests.update { it - id }
+    return provider
+  }
+
+  /**
+   * Deletes a provider and all model records that belong to it. The selection
+   * is reconciled afterwards: if the selected model was removed, another
+   * available model is selected (or the selection becomes empty).
+   */
+  fun deleteProvider(providerId: String) {
+    providerStore?.deleteProvider(providerId)
+    _providers.value = providerStore?.getProviders() ?: _providers.value.filterNot { it.id == providerId }
+    _aiModels.value = providerStore?.getModels() ?: _aiModels.value.filterNot { it.providerId == providerId }
+    if (_selectedModel.value?.providerId == providerId) {
+      _selectedModel.value = _aiModels.value.firstOrNull()
+      _selectedModel.value?.let { providerStore?.selectModel(it.id) }
+    }
+    _connectionTests.update { it - providerId }
+  }
+
+  fun saveModel(
+    providerId: String,
+    modelId: String,
+    displayName: String,
+    contextWindow: Int?,
+    maxOutputTokens: Int?,
+    capabilities: com.agentisco.settings.model.ModelCapabilities,
+    reasoning: com.agentisco.settings.model.ReasoningConfig?,
+    recordId: String? = null
+  ): AIModel? {
+    if (modelId.isBlank() || displayName.isBlank()) return null
+    if (_providers.value.none { it.id == providerId }) return null
+    val model = AIModel(
+      id = recordId ?: "model-${System.currentTimeMillis()}",
+      providerId = providerId,
+      modelId = modelId.trim(),
+      displayName = displayName.trim(),
+      contextWindow = contextWindow,
+      maxOutputTokens = maxOutputTokens,
+      capabilities = capabilities,
+      reasoning = reasoning
+    )
+    providerStore?.upsertModel(model)
+    _aiModels.value = providerStore?.getModels() ?: (_aiModels.value.filterNot { it.id == model.id } + model)
+    if (_selectedModel.value == null) selectModel(model.id)
+    return model
+  }
+
+  fun deleteModel(recordId: String) {
+    val wasSelected = _selectedModel.value?.id == recordId
+    providerStore?.deleteModel(recordId)
+    _aiModels.value = providerStore?.getModels() ?: _aiModels.value.filterNot { it.id == recordId }
+    if (wasSelected) {
+      _selectedModel.value = _aiModels.value.firstOrNull()
+      _selectedModel.value?.let { providerStore?.selectModel(it.id) }
+    }
+  }
+
+  /** Selects by unique model record id — never by model name. */
+  fun selectModel(recordId: String) {
+    val model = _aiModels.value.firstOrNull { it.id == recordId } ?: return
+    providerStore?.selectModel(recordId)
+    _selectedModel.value = model
+    _isModelSheetOpen.value = false
+  }
+
+  /** Real connection test: contacts the provider endpoint with the stored credentials. */
+  fun testProviderConnection(providerId: String) {
+    val provider = _providers.value.firstOrNull { it.id == providerId } ?: return
+    val apiKey = providerStore?.getApiKey(providerId)
+    _connectionTests.update { it + (providerId to ConnectionTestState.Testing) }
+    repositoryScope.launch {
+      val state = try {
+        val (ok, message) = llmService.testConnection(provider, apiKey ?: "")
+        if (ok) {
+          val modelCount = _aiModels.value.count { it.providerId == providerId }
+          val note = if (modelCount == 0) "Connected, but no models configured — add a model before using the agent." else "Connected · $modelCount model(s)"
+          ConnectionTestState.Connected(note)
+        } else ConnectionTestState.Failed(message)
+      } catch (e: Exception) {
+        ConnectionTestState.Failed(e.message ?: "Connection test failed")
+      }
+      _connectionTests.update { it + (providerId to state) }
+    }
+  }
+
+  private fun resolveProviderForModel(model: AIModel): Pair<AIProvider, String>? {
+    val provider = _providers.value.firstOrNull { it.id == model.providerId } ?: return null
+    val apiKey = providerStore?.getApiKey(provider.id) ?: return null
+    if (apiKey.isBlank()) return null
+    return provider to apiKey
   }
 
   private fun loadActiveProjectState(project: Project) {
@@ -580,8 +726,23 @@ class WorkspaceRepository(
   suspend fun runAgentTask(prompt: String) {
     if (_isAgentWorking.value) return
 
+    val model = _selectedModel.value
+    if (model == null) {
+      _agentStatusText.value = "No model selected — configure a provider and select a model in Settings first."
+      _isModelSheetOpen.value = true
+      return
+    }
+    val connection = resolveProviderForModel(model)
+    if (connection == null) {
+      _agentStatusText.value = "Provider \"${_providers.value.firstOrNull { it.id == model.providerId }?.name ?: model.providerId}\" is not configured with a valid API key."
+      _isModelSheetOpen.value = true
+      return
+    }
+    val (provider, apiKey) = connection
+
     _isAgentWorking.value = true
     _agentStatusText.value = "Starting agent task..."
+    _agentResponse.value = ""
     _agentWorkingDurationSeconds.value = 0
 
     val currentSession = _terminalSessions.value.firstOrNull { it.id == _activeTerminalSessionId.value }
@@ -590,13 +751,16 @@ class WorkspaceRepository(
     val result = agentRuntime.executeTask(
       prompt = prompt,
       project = _activeProject.value,
-      model = _selectedModel.value,
+      provider = provider,
+      model = model,
+      apiKey = apiKey,
       permissions = _permissions.value,
       terminalSession = currentSession,
       onStatus = { _agentStatusText.value = it },
       onStepUpdate = { _agentSteps.value = it },
       onToolExecuted = { tool -> _toolExecutions.update { listOf(tool) + it } },
-      onRequestApproval = { approval -> _pendingApproval.value = approval }
+      onRequestApproval = { approval -> _pendingApproval.value = approval },
+      onToken = { token -> _agentResponse.value += token }
     )
 
     _isAgentWorking.value = false
@@ -609,7 +773,7 @@ class WorkspaceRepository(
       _isEditorDirty.value = false
     }
 
-    _agentStatusText.value = result.summary
+    _agentStatusText.value = if (result.success) result.summary else "Task failed — ${result.summary}"
   }
 
   fun toggleDevServer() {
@@ -682,42 +846,5 @@ class WorkspaceRepository(
       )
     }
 
-    fun getInitialProviders(): List<AIProvider> {
-      return listOf(
-        AIProvider(
-          id = "google",
-          name = "Google Gemini",
-          baseUrl = "https://generativelanguage.googleapis.com",
-          apiKey = "AIzaSy•••••••••••••",
-          isConnected = true,
-          models = listOf(
-            AIModel("gemini-3.1-pro-preview", "Gemini 3.1 Pro", "google", "2000k", hasTools = true, hasStreaming = true, hasVision = true, hasReasoning = true),
-            AIModel("gemini-3.5-flash", "Gemini 3.5 Flash", "google", "1000k", hasTools = true, hasStreaming = true, hasVision = true)
-          )
-        ),
-        AIProvider(
-          id = "tokenrouter",
-          name = "TokenRouter",
-          baseUrl = "https://api.tokenrouter.io/v1",
-          apiKey = "tr-live-•••••••••••••",
-          isConnected = true,
-          models = listOf(
-            AIModel("glm-5.3-free", "GLM 5.3 Free", "tokenrouter", "1000k", hasTools = true, hasStreaming = true, hasReasoning = true, isFree = true),
-            AIModel("deepseek-r1", "DeepSeek R1", "tokenrouter", "128k", hasTools = true, hasStreaming = true, hasReasoning = true)
-          )
-        ),
-        AIProvider(
-          id = "openai",
-          name = "OpenAI",
-          baseUrl = "https://api.openai.com/v1",
-          apiKey = "sk-•••••••••••••",
-          isConnected = true,
-          models = listOf(
-            AIModel("gpt-4o", "GPT-4o", "openai", "128k", hasTools = true, hasStreaming = true, hasVision = true),
-            AIModel("o3-mini", "o3-mini", "openai", "200k", hasTools = true, hasStreaming = true, hasReasoning = true)
-          )
-        )
-      )
-    }
   }
 }

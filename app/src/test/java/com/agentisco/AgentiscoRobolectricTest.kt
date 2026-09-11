@@ -11,6 +11,7 @@ import com.agentisco.ui.WorkspaceViewModel
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -34,7 +35,9 @@ class ExampleRobolectricTest {
     val viewModel = WorkspaceViewModel()
     assertEquals("Agentisco", viewModel.activeProject.value.name)
     assertEquals(com.agentisco.core.model.AppDestination.AGENT, viewModel.currentDestination.value)
-    assertEquals("GLM 5.3 Free", viewModel.selectedModel.value.name)
+    // Fresh installs start with an empty provider catalog and no selected model
+    assertNull(viewModel.selectedModel.value)
+    assertTrue(viewModel.providers.value.isEmpty())
   }
 
   @Test

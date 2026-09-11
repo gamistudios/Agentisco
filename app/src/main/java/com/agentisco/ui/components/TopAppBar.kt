@@ -28,7 +28,7 @@ import com.agentisco.ui.theme.*
 @Composable
 fun AgentIDETopAppBar(
   activeProject: Project,
-  selectedModel: AIModel,
+  selectedModel: AIModel?,
   currentDestination: AppDestination,
   onNavigate: (AppDestination) -> Unit,
   onOpenModelSheet: () -> Unit,
@@ -109,8 +109,8 @@ fun AgentIDETopAppBar(
               .testTag("top_model_selector")
           ) {
             Text(
-              text = selectedModel.name,
-              color = ElectricBlueGlow,
+              text = selectedModel?.displayName ?: "No model selected",
+              color = if (selectedModel == null) TextMuted else ElectricBlueGlow,
               fontSize = 11.sp,
               fontWeight = FontWeight.Medium,
               maxLines = 1

@@ -9,9 +9,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -27,19 +25,23 @@ import com.agentisco.settings.model.AIModel
 import com.agentisco.settings.model.AIProvider
 import com.agentisco.ui.theme.*
 
+/**
+ * Model selector listing every configured model grouped by its provider.
+ * The same model identifier under two providers appears twice — the entries
+ * are distinct selectable models because they inherit different connections.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ModelSelectorSheet(
   isOpen: Boolean,
-  currentModel: AIModel,
+  currentModel: AIModel?,
   providers: List<AIProvider>,
+  models: List<AIModel>,
   onSelectModel: (AIModel) -> Unit,
   onDismiss: () -> Unit,
   modifier: Modifier = Modifier
 ) {
   if (!isOpen) return
-
-  var showAddModelDialog by remember { mutableStateOf(false) }
 
   ModalBottomSheet(
     onDismissRequest = onDismiss,
@@ -62,150 +64,102 @@ fun ModelSelectorSheet(
         .padding(horizontal = 20.dp, vertical = 6.dp)
         .padding(bottom = 32.dp)
     ) {
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-      ) {
-        Column {
-          Text(
-            text = "Select AI Model",
-            color = TextPrimary,
-            fontSize = 17.sp,
-            fontWeight = FontWeight.Bold
-          )
-          Text(
-            text = "Choose model and provider for coding agent",
-            color = TextSecondary,
-            fontSize = 12.sp
-          )
-        }
-
-        IconButton(
-          onClick = { showAddModelDialog = true },
-          modifier = Modifier
-            .size(36.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(DarkSurfaceElevated)
-            .border(1.dp, DarkBorder, RoundedCornerShape(8.dp))
-            .testTag("btn_add_custom_model")
-        ) {
-          Icon(
-            imageVector = Icons.Default.Add,
-            contentDescription = "Add custom model",
-            tint = ElectricBlueGlow,
-            modifier = Modifier.size(18.dp)
-          )
-        }
+      Column {
+        Text(
+          text = "Select AI Model",
+          color = TextPrimary,
+          fontSize = 17.sp,
+          fontWeight = FontWeight.Bold
+        )
+        Text(
+          text = "Models grouped by provider · manage providers in Settings",
+          color = TextSecondary,
+          fontSize = 12.sp
+        )
       }
 
       Spacer(modifier = Modifier.height(16.dp))
 
-      LazyColumn(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(16.dp)
-      ) {
-        items(providers) { provider ->
-          Column(modifier = Modifier.fillMaxWidth()) {
-            Row(
-              verticalAlignment = Alignment.CenterVertically,
-              modifier = Modifier.padding(bottom = 6.dp)
-            ) {
-              Box(
+      if (models.isEmpty()) {
+        Box(
+          modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(DarkBackground)
+            .border(1.dp, DarkBorderSubtle, RoundedCornerShape(12.dp))
+            .padding(16.dp)
+        ) {
+          Text(
+            text = "No models configured yet.\nAdd a provider and its models in Settings → AI Providers.",
+            color = TextMuted,
+            fontSize = 12.sp
+          )
+        }
+      } else {
+        LazyColumn(
+          modifier = Modifier.fillMaxWidth(),
+          verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+          items(providers, key = { it.id }) { provider ->
+            val providerModels = models.filter { it.providerId == provider.id }
+            Column(modifier = Modifier.fillMaxWidth()) {
+              // Provider header with separator
+              Row(
+                verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
-                  .size(8.dp)
-                  .clip(CircleShape)
-                  .background(if (provider.isConnected) TerminalGreen else TextMuted)
-              )
-              Spacer(modifier = Modifier.width(6.dp))
-              Text(
-                text = provider.name,
-                color = TextSecondary,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold,
-                letterSpacing = 0.5.sp
-              )
-              Spacer(modifier = Modifier.width(6.dp))
-              Text(
-                text = if (provider.isConnected) "Connected" else "Not configured",
-                color = TextMuted,
-                fontSize = 10.sp
-              )
-            }
-
-            Column(
-              modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
-                .background(DarkBackground)
-                .border(1.dp, DarkBorderSubtle, RoundedCornerShape(12.dp))
-            ) {
-              if (provider.models.isEmpty()) {
-                Text(
-                  text = "No models configured for ${provider.name}. Tap + to add.",
-                  color = TextMuted,
-                  fontSize = 11.sp,
-                  modifier = Modifier.padding(12.dp)
+                  .fillMaxWidth()
+                  .padding(bottom = 6.dp)
+              ) {
+                Box(
+                  modifier = Modifier
+                    .size(8.dp)
+                    .clip(CircleShape)
+                    .background(if (provider.hasApiKey) TerminalGreen else TextMuted)
                 )
-              } else {
-                provider.models.forEachIndexed { index, model ->
-                  val isSelected = model.id == currentModel.id
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                  text = provider.name,
+                  color = TextSecondary,
+                  fontSize = 12.sp,
+                  fontWeight = FontWeight.SemiBold,
+                  letterSpacing = 0.5.sp
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                  text = if (provider.hasApiKey) "Key set" else "No API key",
+                  color = TextMuted,
+                  fontSize = 10.sp
+                )
+              }
+              HorizontalDivider(color = DarkBorderSubtle, thickness = 0.5.dp)
+              Spacer(modifier = Modifier.height(4.dp))
 
-                  Row(
-                    modifier = Modifier
-                      .fillMaxWidth()
-                      .clickable { onSelectModel(model) }
-                      .padding(horizontal = 12.dp, vertical = 10.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                  ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                      Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                          text = model.name,
-                          color = if (isSelected) ElectricBlueGlow else TextPrimary,
-                          fontSize = 13.sp,
-                          fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
-                        )
-                        if (model.isFree) {
-                          Spacer(modifier = Modifier.width(6.dp))
-                          Box(
-                            modifier = Modifier
-                              .clip(RoundedCornerShape(4.dp))
-                              .background(TerminalGreenBg)
-                              .padding(horizontal = 5.dp, vertical = 1.dp)
-                          ) {
-                            Text("FREE", color = TerminalGreen, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                          }
-                        }
-                      }
-
-                      Spacer(modifier = Modifier.height(3.dp))
-
-                      // Capabilities badges
-                      Row(
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                      ) {
-                        CapabilityPill("Ctx ${model.contextWindow}")
-                        if (model.hasTools) CapabilityPill("Tools")
-                        if (model.hasReasoning) CapabilityPill("Reasoning")
-                        if (model.hasVision) CapabilityPill("Vision")
-                      }
+              Column(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .clip(RoundedCornerShape(12.dp))
+                  .background(DarkBackground)
+                  .border(1.dp, DarkBorderSubtle, RoundedCornerShape(12.dp))
+              ) {
+                if (providerModels.isEmpty()) {
+                  Text(
+                    text = "No models configured for ${provider.name}. Add models in Settings.",
+                    color = TextMuted,
+                    fontSize = 11.sp,
+                    modifier = Modifier.padding(12.dp)
+                  )
+                } else {
+                  providerModels.forEachIndexed { index, model ->
+                    val isSelected = currentModel?.id == model.id
+                    ModelRow(
+                      model = model,
+                      providerName = provider.name,
+                      isSelected = isSelected,
+                      onSelect = { onSelectModel(model) }
+                    )
+                    if (index < providerModels.size - 1) {
+                      HorizontalDivider(color = DarkBorderSubtle, thickness = 0.5.dp)
                     }
-
-                    if (isSelected) {
-                      Icon(
-                        imageVector = Icons.Default.Check,
-                        contentDescription = "Selected",
-                        tint = ElectricBlueGlow,
-                        modifier = Modifier.size(18.dp)
-                      )
-                    }
-                  }
-
-                  if (index < provider.models.size - 1) {
-                    HorizontalDivider(color = DarkBorderSubtle, thickness = 0.5.dp)
                   }
                 }
               }
@@ -215,9 +169,72 @@ fun ModelSelectorSheet(
       }
     }
   }
+}
 
-  if (showAddModelDialog) {
-    AddCustomModelDialog(onDismiss = { showAddModelDialog = false })
+@Composable
+private fun ModelRow(
+  model: AIModel,
+  providerName: String,
+  isSelected: Boolean,
+  onSelect: () -> Unit
+) {
+  Row(
+    modifier = Modifier
+      .fillMaxWidth()
+      .clickable(onClick = onSelect)
+      .testTag("model_option_${model.id}")
+      .padding(horizontal = 12.dp, vertical = 10.dp),
+    horizontalArrangement = Arrangement.SpaceBetween,
+    verticalAlignment = Alignment.CenterVertically
+  ) {
+    Column(modifier = Modifier.weight(1f)) {
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+          text = model.displayName,
+          color = if (isSelected) ElectricBlueGlow else TextPrimary,
+          fontSize = 13.sp,
+          fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+          text = providerName,
+          color = TextMuted,
+          fontSize = 10.sp
+        )
+      }
+
+      Spacer(modifier = Modifier.height(3.dp))
+
+      Text(
+        text = model.modelId,
+        color = TextMuted,
+        fontSize = 10.sp,
+        fontFamily = FontFamily.Monospace
+      )
+
+      Spacer(modifier = Modifier.height(5.dp))
+
+      // Capability indicators (only what the runtime actually branches on)
+      Row(
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        model.contextWindow?.let { CapabilityPill("Ctx ${it / 1000}k") }
+        if (model.capabilities.tools) CapabilityPill("Tools") else CapabilityPill("No tools")
+        if (model.capabilities.streaming) CapabilityPill("Stream")
+        if (model.capabilities.images) CapabilityPill("Images")
+        if (model.reasoning?.enabled == true) CapabilityPill("Reasoning")
+      }
+    }
+
+    if (isSelected) {
+      Icon(
+        imageVector = Icons.Default.Check,
+        contentDescription = "Selected",
+        tint = ElectricBlueGlow,
+        modifier = Modifier.size(18.dp)
+      )
+    }
   }
 }
 
@@ -236,80 +253,4 @@ private fun CapabilityPill(text: String) {
       fontFamily = FontFamily.Monospace
     )
   }
-}
-
-@Composable
-private fun AddCustomModelDialog(onDismiss: () -> Unit) {
-  var modelId by remember { mutableStateOf("z-ai/glm-5.3-free") }
-  var displayName by remember { mutableStateOf("GLM 5.3 Free") }
-  var contextWindow by remember { mutableStateOf("1000000") }
-  var toolCalling by remember { mutableStateOf(true) }
-  var streaming by remember { mutableStateOf(true) }
-  var vision by remember { mutableStateOf(false) }
-  var reasoning by remember { mutableStateOf(true) }
-
-  AlertDialog(
-    onDismissRequest = onDismiss,
-    containerColor = DarkSurface,
-    title = {
-      Text("Add Model", color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-    },
-    text = {
-      Column(
-        modifier = Modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-      ) {
-        OutlinedTextField(
-          value = modelId,
-          onValueChange = { modelId = it },
-          label = { Text("Model ID", fontSize = 11.sp) },
-          singleLine = true,
-          modifier = Modifier.fillMaxWidth()
-        )
-        OutlinedTextField(
-          value = displayName,
-          onValueChange = { displayName = it },
-          label = { Text("Display name", fontSize = 11.sp) },
-          singleLine = true,
-          modifier = Modifier.fillMaxWidth()
-        )
-        OutlinedTextField(
-          value = contextWindow,
-          onValueChange = { contextWindow = it },
-          label = { Text("Context window", fontSize = 11.sp) },
-          singleLine = true,
-          modifier = Modifier.fillMaxWidth()
-        )
-
-        Text("Capabilities", color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-        Row(verticalAlignment = Alignment.CenterVertically) {
-          Checkbox(checked = toolCalling, onCheckedChange = { toolCalling = it })
-          Text("Tool calling", color = TextPrimary, fontSize = 12.sp)
-          Spacer(modifier = Modifier.width(12.dp))
-          Checkbox(checked = streaming, onCheckedChange = { streaming = it })
-          Text("Streaming", color = TextPrimary, fontSize = 12.sp)
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-          Checkbox(checked = reasoning, onCheckedChange = { reasoning = it })
-          Text("Reasoning", color = TextPrimary, fontSize = 12.sp)
-          Spacer(modifier = Modifier.width(12.dp))
-          Checkbox(checked = vision, onCheckedChange = { vision = it })
-          Text("Vision", color = TextPrimary, fontSize = 12.sp)
-        }
-      }
-    },
-    confirmButton = {
-      Button(
-        onClick = onDismiss,
-        colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue)
-      ) {
-        Text("Save Model", fontSize = 12.sp)
-      }
-    },
-    dismissButton = {
-      TextButton(onClick = onDismiss) {
-        Text("Cancel", color = TextMuted, fontSize = 12.sp)
-      }
-    }
-  )
 }

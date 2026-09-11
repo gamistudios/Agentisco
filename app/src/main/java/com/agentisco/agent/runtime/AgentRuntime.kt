@@ -1,26 +1,41 @@
 package com.agentisco.agent.runtime
 
-import com.agentisco.settings.model.AIModel
+import com.agentisco.agent.llm.LlmErrorKind
+import com.agentisco.agent.llm.LlmException
+import com.agentisco.agent.llm.LlmMessage
+import com.agentisco.agent.llm.LlmRequest
+import com.agentisco.agent.llm.LlmRole
+import com.agentisco.agent.llm.LlmService
+import com.agentisco.agent.llm.LlmStreamEvent
 import com.agentisco.agent.model.AgentPermissions
 import com.agentisco.agent.model.PendingApproval
-import com.agentisco.agent.model.ToolExecution
-import com.agentisco.agent.model.ToolType
-import com.agentisco.agent.model.AgentTaskStep
 import com.agentisco.agent.model.AgentStepStatus
-import com.agentisco.workspace.terminal.TerminalProcessManager
-import com.agentisco.workspace.git.GitRepositoryManager
-import com.agentisco.workspace.filesystem.ProjectFileSystem
-import com.agentisco.data.model.*
+import com.agentisco.agent.model.AgentTaskStep
+import com.agentisco.agent.model.ToolExecution
+import com.agentisco.agent.tool.AgentToolRegistry
+import com.agentisco.agent.tool.ToolContext
+import com.agentisco.agent.tool.ToolResult
+import com.agentisco.data.model.Project
+import com.agentisco.data.model.TerminalSession
+import com.agentisco.settings.model.AIModel
+import com.agentisco.settings.model.AIProvider
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
-import java.io.File
 
+/**
+ * Drives the agent loop: LLM request → (streamed) response → model-requested
+ * tool calls → validation → permission policy → real tool execution → tool
+ * results back to the model → repeat, until a final answer or the iteration cap.
+ *
+ * The model never executes tools itself and never sees provider credentials.
+ */
 class AgentRuntime(
-  private val fileSystem: ProjectFileSystem,
-  private val terminalManager: TerminalProcessManager,
-  private val gitManager: GitRepositoryManager
+  private val fileSystem: com.agentisco.workspace.filesystem.ProjectFileSystem,
+  private val terminalManager: com.agentisco.workspace.terminal.TerminalProcessManager,
+  private val gitManager: com.agentisco.workspace.git.GitRepositoryManager,
+  private val llmService: LlmService,
+  private val toolRegistry: AgentToolRegistry
 ) {
 
   private var pendingApprovalDeferred: CompletableDeferred<Boolean>? = null
@@ -34,213 +49,192 @@ class AgentRuntime(
   suspend fun executeTask(
     prompt: String,
     project: Project,
+    provider: AIProvider,
     model: AIModel,
+    apiKey: String,
     permissions: AgentPermissions,
     terminalSession: TerminalSession,
     onStatus: (String) -> Unit,
     onStepUpdate: (List<AgentTaskStep>) -> Unit,
     onToolExecuted: (ToolExecution) -> Unit,
-    onRequestApproval: (PendingApproval) -> Unit
+    onRequestApproval: (PendingApproval) -> Unit,
+    onToken: (String) -> Unit
   ): AgentTaskResult = withContext(Dispatchers.IO) {
-    onStatus("Analyzing project structure & prompt...")
-
     val steps = mutableListOf(
-      AgentTaskStep("s1", "Analyze project & search files", AgentStepStatus.RUNNING, "Inspecting files for prompt: \"$prompt\""),
-      AgentTaskStep("s2", "Read relevant source code", AgentStepStatus.PENDING, "Reading file contents from disk"),
-      AgentTaskStep("s3", "Plan and apply code modifications", AgentStepStatus.PENDING, "Generating and applying changes"),
-      AgentTaskStep("s4", "Execute verification & tests", AgentStepStatus.PENDING, "Running tests in terminal"),
-      AgentTaskStep("s5", "Review diff & finalize", AgentStepStatus.PENDING, "Checking generated diffs")
+      AgentTaskStep("s1", "Understand task & workspace", AgentStepStatus.RUNNING, "Building workspace context"),
+      AgentTaskStep("s2", "Reason & act with tools", AgentStepStatus.PENDING, "Model-driven tool loop"),
+      AgentTaskStep("s3", "Summarize results", AgentStepStatus.PENDING, "Collecting final answer and changes")
     )
     onStepUpdate(steps)
 
-    // Step 1: Search & list real files
-    delay(400)
-    val filesTree = fileSystem.getFileTree(project)
-    val candidateFiles = mutableListOf<String>()
+    // Pre-flight capability validation: never silently send tool calls a model can't honor.
+    val useTools = model.capabilities.tools
+    if (!useTools) {
+      onStatus("⚠ Selected model does not support tool calling — running in text-only mode.")
+    }
 
-    fun collectFilePaths(items: List<ProjectFile>) {
-      for (item in items) {
-        if (!item.isDirectory) candidateFiles.add(item.path)
-        collectFilePaths(item.children)
+    val systemPrompt = buildSystemPrompt(project, useTools)
+    val messages = mutableListOf(LlmMessage(LlmRole.SYSTEM, systemPrompt), LlmMessage(LlmRole.USER, prompt))
+    val modifiedFiles = linkedSetOf<String>()
+    val maxIterations = permissions.maxToolIterations.coerceAtLeast(1)
+
+    try {
+      var finalText = ""
+      for (iteration in 1..maxIterations) {
+        if (iteration == 2) {
+          steps[1] = steps[1].copy(status = AgentStepStatus.RUNNING)
+          onStepUpdate(steps)
+        }
+        val assistantText = StringBuilder()
+        var completedMessage: LlmMessage? = null
+        var failure: LlmException? = null
+
+        llmService.streamChat(
+          provider = provider,
+          model = model,
+          apiKey = apiKey,
+          request = LlmRequest(
+            messages = messages,
+            tools = if (useTools) toolRegistry.specs() else emptyList(),
+            maxOutputTokens = model.maxOutputTokens
+          )
+        ) { event ->
+          when (event) {
+            is LlmStreamEvent.Started -> if (iteration == 1) onStatus("Contacting ${provider.name} · ${model.displayName}…")
+            is LlmStreamEvent.Token -> {
+              assistantText.append(event.text)
+              onToken(event.text)
+            }
+            is LlmStreamEvent.ReasoningToken -> Unit // reasoning traces are not surfaced
+            is LlmStreamEvent.ToolCallRequested -> onStatus("Model requested tool: ${event.call.name}")
+            is LlmStreamEvent.Completed -> completedMessage = event.message
+            is LlmStreamEvent.Interrupted -> failure = LlmException("Response stream was interrupted.", LlmErrorKind.CANCELLED)
+            is LlmStreamEvent.Failed -> failure = event.error
+          }
+        }
+
+        failure?.let { throw it }
+        val message = completedMessage ?: LlmMessage(LlmRole.ASSISTANT, assistantText.toString())
+
+        if (message.toolCalls.isEmpty() || !useTools) {
+          finalText = message.content.ifBlank { assistantText.toString() }
+          break
+        }
+
+        // Model requested tools: validate, enforce permissions, execute for real,
+        // then feed structured results back to the model.
+        messages.add(message)
+        for (call in message.toolCalls) {
+          val tool = toolRegistry.get(call.name)
+          if (tool == null) {
+            messages.add(LlmMessage(LlmRole.TOOL, "Error: unknown tool \"${call.name}\".", toolCallId = call.id, toolName = call.name))
+            continue
+          }
+          onStatus("Running ${call.name}…")
+          val result: ToolResult = try {
+            tool.execute(call.argumentsJson, buildToolContext(project, permissions, terminalSession, onRequestApproval, onToolExecuted))
+          } catch (e: com.agentisco.agent.tool.ToolArgumentError) {
+            ToolResult(success = false, error = e.message ?: "Invalid tool arguments")
+          }
+          result.metadata["file"]?.let { modifiedFiles.add(it) }
+          toolRegistry.recordExecution(call.name, call.argumentsJson.take(80), result, buildToolContext(project, permissions, terminalSession, onRequestApproval, onToolExecuted))
+          messages.add(
+            LlmMessage(
+              LlmRole.TOOL,
+              listOfNotNull(
+                result.output.takeIf { it.isNotBlank() },
+                result.error?.let { "ERROR: $it" },
+                result.exitCode?.let { "exitCode: $it" }
+              ).joinToString("\n").ifBlank { "(no output)" },
+              toolCallId = call.id,
+              toolName = call.name
+            )
+          )
+        }
+        if (iteration == maxIterations) {
+          finalText = message.content.ifBlank { "Stopped after $maxIterations tool iterations." }
+        }
+      }
+
+      steps[0] = steps[0].copy(status = AgentStepStatus.COMPLETED, details = "Workspace context: ${project.name}")
+      steps[1] = steps[1].copy(status = AgentStepStatus.COMPLETED, details = "${modifiedFiles.size} file(s) changed via tools")
+      steps[2] = steps[2].copy(status = AgentStepStatus.COMPLETED, details = "Final response received")
+      onStepUpdate(steps)
+      onStatus("Task completed")
+
+      AgentTaskResult(
+        success = true,
+        summary = finalText.take(500).ifBlank { "Task completed." },
+        modifiedFiles = modifiedFiles.toList()
+      )
+    } catch (e: LlmException) {
+      markFailed(steps, onStepUpdate, e.message, onStatus)
+      AgentTaskResult(success = false, summary = e.message, modifiedFiles = modifiedFiles.toList())
+    } catch (e: Exception) {
+      markFailed(steps, onStepUpdate, "Agent failed: ${e.message ?: e.javaClass.simpleName}", onStatus)
+      AgentTaskResult(success = false, summary = "Agent failed: ${e.message ?: e.javaClass.simpleName}", modifiedFiles = modifiedFiles.toList())
+    }
+  }
+
+  private fun markFailed(
+    steps: MutableList<AgentTaskStep>,
+    onStepUpdate: (List<AgentTaskStep>) -> Unit,
+    reason: String,
+    onStatus: (String) -> Unit
+  ) {
+    steps.forEachIndexed { i, s ->
+      if (s.status == AgentStepStatus.RUNNING || s.status == AgentStepStatus.PENDING) {
+        steps[i] = s.copy(status = AgentStepStatus.FAILED, details = reason.take(160))
       }
     }
-    collectFilePaths(filesTree)
-
-    // Find most relevant file mentioned in prompt or source files
-    val mentionedFile = candidateFiles.firstOrNull { f ->
-      val name = f.substringAfterLast("/")
-      prompt.contains(name, ignoreCase = true) || prompt.contains(name.substringBeforeLast("."), ignoreCase = true)
-    } ?: candidateFiles.firstOrNull { it.endsWith(".tsx") || it.endsWith(".ts") || it.endsWith(".kt") } ?: candidateFiles.firstOrNull() ?: "src/index.ts"
-
-    // Execute Search Tool
-    val searchTool = ToolExecution(
-      id = "tool-${System.currentTimeMillis()}",
-      type = ToolType.SEARCH,
-      title = "Search workspace",
-      subtitle = "Found ${candidateFiles.size} project files",
-      details = "Target candidate: $mentionedFile\nFiles scanned: ${candidateFiles.take(4).joinToString(", ")}"
-    )
-    onToolExecuted(searchTool)
-
-    steps[0] = steps[0].copy(
-      status = AgentStepStatus.COMPLETED,
-      filesInspected = listOf(mentionedFile),
-      finding = "Identified target candidate file: $mentionedFile"
-    )
-    steps[1] = steps[1].copy(status = AgentStepStatus.RUNNING)
     onStepUpdate(steps)
-    onStatus("Reading $mentionedFile from disk...")
+    onStatus(reason)
+  }
 
-    // Step 2: Read file tool
-    delay(400)
-    val originalContent = fileSystem.readFile(project, mentionedFile)
-    val readTool = ToolExecution(
-      id = "tool-${System.currentTimeMillis()}",
-      type = ToolType.READ_FILE,
-      title = "read_file $mentionedFile",
-      subtitle = "${originalContent.lines().size} lines read",
-      details = "Read ${originalContent.length} bytes from real filesystem"
-    )
-    onToolExecuted(readTool)
-
-    steps[1] = steps[1].copy(status = AgentStepStatus.COMPLETED)
-    steps[2] = steps[2].copy(status = AgentStepStatus.RUNNING)
-    onStepUpdate(steps)
-
-    // Step 3: Determine and apply modification
-    onStatus("Applying changes to $mentionedFile...")
-    val modifiedContent = generateModifiedContent(originalContent, prompt, mentionedFile)
-
-    // Check approval policy if permissions require it
-    val isDangerous = prompt.contains("delete", ignoreCase = true) ||
-                      prompt.contains("install", ignoreCase = true) ||
-                      prompt.contains("rm -rf", ignoreCase = true) ||
-                      (permissions.alwaysAskDangerous && permissions.modifyFiles == false)
-
-    if (isDangerous) {
-      onStatus("Waiting for user approval...")
-      val approval = PendingApproval(
-        id = "appr-${System.currentTimeMillis()}",
-        command = if (prompt.contains("install", ignoreCase = true)) "npm install" else "Modify $mentionedFile",
-        title = "Agent requests approval",
-        impactDescription = "Modifying $mentionedFile on disk (${originalContent.lines().size} -> ${modifiedContent.lines().size} lines).",
-        isDestructive = prompt.contains("delete", ignoreCase = true)
-      )
+  private fun buildToolContext(
+    project: Project,
+    permissions: AgentPermissions,
+    terminalSession: TerminalSession,
+    onRequestApproval: (PendingApproval) -> Unit,
+    onToolExecuted: (ToolExecution) -> Unit
+  ): ToolContext = ToolContext(
+    project = project,
+    permissions = permissions,
+    terminalSession = terminalSession,
+    requestApproval = { approval ->
       val deferred = CompletableDeferred<Boolean>()
       pendingApprovalDeferred = deferred
       onRequestApproval(approval)
+      deferred.await()
+    },
+    onToolExecuted = onToolExecuted,
+    activeSessions = { listOf(terminalSession) }
+  )
 
-      val approved = deferred.await()
-      if (!approved) {
-        onStatus("Action rejected by user")
-        steps[2] = steps[2].copy(status = AgentStepStatus.FAILED, details = "User rejected file modification")
-        onStepUpdate(steps)
-        return@withContext AgentTaskResult(
-          success = false,
-          summary = "Task halted: user rejected approval request",
-          modifiedFiles = emptyList()
-        )
+  private fun buildSystemPrompt(project: Project, toolsAvailable: Boolean): String {
+    val files = fileSystem.getFileTree(project)
+    val paths = StringBuilder()
+    fun walk(items: List<com.agentisco.data.model.ProjectFile>, depth: Int) {
+      if (depth > 2) return
+      for (f in items) {
+        paths.appendLine(f.path)
+        if (f.isDirectory) walk(f.children, depth + 1)
       }
     }
-
-    // Write modified content directly to disk
-    fileSystem.writeFile(project, mentionedFile, modifiedContent)
-    val writeTool = ToolExecution(
-      id = "tool-${System.currentTimeMillis()}",
-      type = ToolType.EDIT_FILE,
-      title = "write_file $mentionedFile",
-      subtitle = "Updated file on real filesystem",
-      details = "Applied changes to $mentionedFile. Total lines: ${modifiedContent.lines().size}"
-    )
-    onToolExecuted(writeTool)
-
-    steps[2] = steps[2].copy(
-      status = AgentStepStatus.COMPLETED,
-      details = "Updated $mentionedFile with requested changes"
-    )
-    steps[3] = steps[3].copy(status = AgentStepStatus.RUNNING)
-    onStepUpdate(steps)
-
-    // Step 4: Run verification tests
-    onStatus("Running verification tests...")
-    delay(500)
-
-    val testCommand = if (File(project.path, "package.json").exists()) "npm test" else "echo 'Verification complete'"
-    var testOutput = ""
-    var exitCode = 0
-
-    // Check if terminal has npm or sh
-    terminalManager.executeCommand(terminalSession, "echo 'Running tests for $mentionedFile'") { line ->
-      testOutput += line.text + "\n"
-    }
-
-    // Add terminal verification tool
-    val terminalTool = ToolExecution(
-      id = "tool-${System.currentTimeMillis()}",
-      type = ToolType.TERMINAL,
-      title = "$ $testCommand",
-      subtitle = "Verification passed · Exit code 0",
-      exitCode = 0,
-      output = "PASS tests/Chat.test.tsx\nAll tests passed successfully."
-    )
-    onToolExecuted(terminalTool)
-
-    steps[3] = steps[3].copy(status = AgentStepStatus.COMPLETED, details = "Test suite executed with exit code 0")
-    steps[4] = steps[4].copy(status = AgentStepStatus.RUNNING)
-    onStepUpdate(steps)
-
-    // Step 5: Compute real diffs
-    delay(300)
-    val diffs = gitManager.computeAllDiffs(project)
-    steps[4] = steps[4].copy(
-      status = AgentStepStatus.COMPLETED,
-      details = "Computed ${diffs.size} file diff(s) for review"
-    )
-    onStepUpdate(steps)
-
-    onStatus("Task completed · ${diffs.size} file(s) modified")
-
-    return@withContext AgentTaskResult(
-      success = true,
-      summary = "Completed: ${prompt.take(60)}. Modified $mentionedFile",
-      modifiedFiles = listOf(mentionedFile)
-    )
-  }
-
-  private fun generateModifiedContent(original: String, prompt: String, filePath: String): String {
-    if (original.isBlank()) {
-      return "// Generated for $filePath based on: $prompt\nexport const active = true;\n"
-    }
-
-    val lowerPrompt = prompt.lowercase()
-    return when {
-      lowerPrompt.contains("button") || lowerPrompt.contains("counter") -> {
-        if (original.contains("<button") || original.contains("<input")) {
-          original.replace(
-            "<input",
-            "<button className=\"btn-action\" onClick={() => console.log('Action triggered')}>Execute Action</button>\n      <input"
-          )
-        } else {
-          original + "\n\n// Added button action handler based on user prompt\nexport const handleAction = () => console.log('Action');\n"
-        }
-      }
-      lowerPrompt.contains("memo") || lowerPrompt.contains("cache") || lowerPrompt.contains("store") -> {
-        if (original.contains("useChatStore")) {
-          original.replace(
-            "const { messages, fetchMessages, appendMessage } = useChatStore();",
-            "// Optimized with memoized store selectors\n  const messages = useChatStore((s) => s.messages);\n  const fetchMessages = useChatStore((s) => s.fetchMessages);\n  const appendMessage = useChatStore((s) => s.appendMessage);"
-          )
-        } else {
-          "// Optimized caching layer added\n" + original
-        }
-      }
-      lowerPrompt.contains("test") || lowerPrompt.contains("spec") -> {
-        original + "\n// Test assertions validated\n"
-      }
-      else -> {
-        // Apply clean comment header with prompt intent
-        val header = "// Agentisco Agent: Modified for \"${prompt.take(50)}\"\n"
-        if (!original.startsWith("// Agentisco Agent")) header + original else original
+    walk(files, 0)
+    return buildString {
+      appendLine("You are the Agentisco coding agent operating inside the mobile IDE \"Agentisco\".")
+      appendLine("Active project: ${project.name} (${project.path}).")
+      appendLine()
+      appendLine("Workspace files:")
+      appendLine(paths.toString().take(4000))
+      if (toolsAvailable) {
+        appendLine()
+        appendLine("You can request tools (read_file, write_file, run_command, git_*, ...) to inspect and modify this workspace.")
+        appendLine("Use tools to do real work instead of describing changes. The user must approve protected operations.")
+      } else {
+        appendLine()
+        appendLine("This model cannot call tools. Answer with descriptions/snippets only.")
       }
     }
   }

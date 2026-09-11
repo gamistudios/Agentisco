@@ -16,6 +16,23 @@ enum class DestructiveSeverity {
 
 object DestructiveCommandGuard {
 
+  /** Read-only commands considered safe under ALLOW_SAFE / AUTO_APPROVE policies. */
+  private val SAFE_COMMAND_PREFIXES = listOf(
+    "ls", "pwd", "echo", "cat", "head", "tail", "wc", "which", "whoami", "uname",
+    "grep", "rg", "find .", "tree", "du", "df",
+    "git status", "git diff", "git log", "git show", "git branch", "git remote",
+    "node -v", "npm -v", "python --version", "python3 --version"
+  )
+
+  /** True when every segment of the command is a read-only/safe operation. */
+  fun isSafeCommand(command: String): Boolean {
+    val clean = command.trim()
+    if (clean.isEmpty()) return false
+    if (assess(clean) != null) return false
+    val segments = clean.split("[;&|]+".toRegex()).map { it.trim() }.filter { it.isNotEmpty() }
+    return segments.all { seg -> SAFE_COMMAND_PREFIXES.any { seg == it || seg.startsWith("$it ") } }
+  }
+
   /**
    * Assesses whether a given command line contains destructive actions.
    * Returns a DestructiveAssessment if dangerous, or null if safe to proceed freely.

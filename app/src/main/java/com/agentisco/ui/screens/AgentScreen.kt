@@ -42,6 +42,7 @@ fun AgentScreen(
   val selectedModel by viewModel.selectedModel.collectAsState()
   val isWorking by viewModel.isAgentWorking.collectAsState()
   val statusText by viewModel.agentStatusText.collectAsState()
+  val agentResponse by viewModel.agentResponse.collectAsState()
   val steps by viewModel.agentSteps.collectAsState()
   val tools by viewModel.toolExecutions.collectAsState()
 
@@ -282,6 +283,44 @@ fun AgentScreen(
               Text("Test Approval", fontSize = 10.sp, color = WarningAmber)
             }
           }
+        }
+      }
+    }
+
+    // Section: Streamed Agent Response (progressive, from the selected model)
+    if (agentResponse.isNotBlank()) {
+      item {
+        Column(
+          modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(DarkSurface)
+            .border(1.dp, DarkBorder, RoundedCornerShape(12.dp))
+            .padding(12.dp)
+            .testTag("agent_response_card")
+        ) {
+          Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(
+              imageVector = Icons.Default.AutoAwesome,
+              contentDescription = null,
+              tint = ElectricBlueGlow,
+              modifier = Modifier.size(13.dp)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+              "Agent Response",
+              color = TextPrimary,
+              fontSize = 12.sp,
+              fontWeight = FontWeight.SemiBold
+            )
+          }
+          Spacer(modifier = Modifier.height(6.dp))
+          Text(
+            text = agentResponse,
+            color = TextCode,
+            fontSize = 12.sp,
+            lineHeight = 17.sp
+          )
         }
       }
     }
