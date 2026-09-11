@@ -37,6 +37,7 @@ fun EditorScreen(
 ) {
   val activeFile by viewModel.activeFile.collectAsState()
   val content by viewModel.editorContent.collectAsState()
+  val isEditorDirty by viewModel.isEditorDirty.collectAsState()
   val isAgentWorking by viewModel.isAgentWorking.collectAsState()
 
   var showAgentSplitPane by remember { mutableStateOf(true) }
@@ -96,15 +97,40 @@ fun EditorScreen(
                 fontWeight = FontWeight.Medium,
                 fontFamily = FontFamily.Monospace
               )
+              if (isEditorDirty || editedText != activeFile.content) {
+                Spacer(modifier = Modifier.width(6.dp))
+                Box(
+                  modifier = Modifier
+                    .size(7.dp)
+                    .clip(androidx.compose.foundation.shape.CircleShape)
+                    .background(WarningAmber)
+                )
+              }
             }
           }
         }
 
-        // Action controls: Agent Split toggle, Diff, Save
+        // Action controls: Edit toggle, Agent Split toggle, Diff, Save
         Row(
           horizontalArrangement = Arrangement.spacedBy(6.dp),
           verticalAlignment = Alignment.CenterVertically
         ) {
+          IconButton(
+            onClick = { isEditMode = !isEditMode },
+            modifier = Modifier
+              .size(32.dp)
+              .clip(RoundedCornerShape(6.dp))
+              .background(if (isEditMode) ElectricBlue.copy(alpha = 0.2f) else DarkSurfaceElevated)
+              .testTag("btn_toggle_edit_mode")
+          ) {
+            Icon(
+              imageVector = if (isEditMode) Icons.Outlined.Edit else Icons.Outlined.Visibility,
+              contentDescription = "Edit Mode",
+              tint = if (isEditMode) ElectricBlueGlow else TextSecondary,
+              modifier = Modifier.size(16.dp)
+            )
+          }
+
           IconButton(
             onClick = { showAgentSplitPane = !showAgentSplitPane },
             modifier = Modifier
@@ -140,12 +166,20 @@ fun EditorScreen(
           Button(
             onClick = {
               viewModel.updateEditorContent(editedText)
+              viewModel.saveActiveFile()
             },
-            colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
+            colors = ButtonDefaults.buttonColors(
+              containerColor = if (isEditorDirty || editedText != activeFile.content) ElectricBlue else DarkSurfaceElevated
+            ),
             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-            modifier = Modifier.height(30.dp)
+            modifier = Modifier.height(30.dp).testTag("btn_save_file")
           ) {
-            Text("Save", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            Text(
+              "Save",
+              fontSize = 11.sp,
+              fontWeight = FontWeight.SemiBold,
+              color = if (isEditorDirty || editedText != activeFile.content) Color.White else TextSecondary
+            )
           }
         }
       }

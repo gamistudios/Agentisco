@@ -18,7 +18,9 @@ data class ProjectFile(
   val isDirectory: Boolean,
   val content: String = "",
   val language: String = "typescript",
-  val children: List<ProjectFile> = emptyList()
+  val children: List<ProjectFile> = emptyList(),
+  val sizeBytes: Long = 0L,
+  val lastModified: Long = 0L
 )
 
 enum class AgentStepStatus {
@@ -82,7 +84,9 @@ data class FileDiff(
   val filePath: String,
   val additionsCount: Int,
   val deletionsCount: Int,
-  val lines: List<DiffLine>
+  val lines: List<DiffLine>,
+  val originalContent: String = "",
+  val newContent: String = ""
 )
 
 enum class TerminalLineType {
@@ -102,7 +106,16 @@ data class TerminalSession(
   val id: String,
   val name: String,
   val currentDir: String,
-  val lines: List<TerminalLine> = emptyList()
+  val lines: List<TerminalLine> = emptyList(),
+  val isRunning: Boolean = false
+)
+
+data class GitCommit(
+  val hash: String,
+  val message: String,
+  val author: String,
+  val date: String,
+  val filesChanged: List<String>
 )
 
 data class AIModel(

@@ -39,6 +39,13 @@ fun FilesScreen(
 
   var selectedFileForMenu by remember { mutableStateOf<ProjectFile?>(null) }
   var showAskAgentDialog by remember { mutableStateOf(false) }
+  var showFileOptionsDialog by remember { mutableStateOf(false) }
+  var showNewFileDialog by remember { mutableStateOf(false) }
+  var newFileNameInput by remember { mutableStateOf("") }
+  var showNewFolderDialog by remember { mutableStateOf(false) }
+  var newFolderNameInput by remember { mutableStateOf("") }
+  var showRenameDialog by remember { mutableStateOf(false) }
+  var renameInput by remember { mutableStateOf("") }
   var searchQuery by remember { mutableStateOf("") }
   var isSearchActive by remember { mutableStateOf(false) }
 
@@ -84,20 +91,38 @@ fun FilesScreen(
             }
           }
 
-          IconButton(
-            onClick = { isSearchActive = !isSearchActive },
-            modifier = Modifier
-              .size(32.dp)
-              .clip(RoundedCornerShape(6.dp))
-              .background(DarkSurfaceElevated)
-              .testTag("btn_search_files")
-          ) {
-            Icon(
-              imageVector = Icons.Default.Search,
-              contentDescription = "Search",
-              tint = if (isSearchActive) ElectricBlueGlow else TextSecondary,
-              modifier = Modifier.size(16.dp)
-            )
+          Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            IconButton(
+              onClick = { viewModel.refreshFiles() },
+              modifier = Modifier
+                .size(32.dp)
+                .clip(RoundedCornerShape(6.dp))
+                .background(DarkSurfaceElevated)
+                .testTag("btn_refresh_files")
+            ) {
+              Icon(
+                imageVector = Icons.Default.Refresh,
+                contentDescription = "Refresh",
+                tint = TextSecondary,
+                modifier = Modifier.size(16.dp)
+              )
+            }
+
+            IconButton(
+              onClick = { isSearchActive = !isSearchActive },
+              modifier = Modifier
+                .size(32.dp)
+                .clip(RoundedCornerShape(6.dp))
+                .background(DarkSurfaceElevated)
+                .testTag("btn_search_files")
+            ) {
+              Icon(
+                imageVector = Icons.Default.Search,
+                contentDescription = "Search",
+                tint = if (isSearchActive) ElectricBlueGlow else TextSecondary,
+                modifier = Modifier.size(16.dp)
+              )
+            }
           }
         }
 
@@ -158,6 +183,7 @@ fun FilesScreen(
           },
           onLongClick = {
             selectedFileForMenu = file
+            showFileOptionsDialog = true
           },
           onAskAgent = {
             selectedFileForMenu = file
@@ -181,13 +207,8 @@ fun FilesScreen(
       ) {
         OutlinedButton(
           onClick = {
-            val newFile = ProjectFile(
-              path = "src/components/NewComponent.tsx",
-              name = "NewComponent.tsx",
-              isDirectory = false,
-              content = "export const NewComponent = () => <div>New</div>;"
-            )
-            viewModel.openFile(newFile)
+            newFileNameInput = "src/"
+            showNewFileDialog = true
           },
           modifier = Modifier
             .weight(1f)
@@ -202,10 +223,14 @@ fun FilesScreen(
         }
 
         OutlinedButton(
-          onClick = {},
+          onClick = {
+            newFolderNameInput = "src/"
+            showNewFolderDialog = true
+          },
           modifier = Modifier
             .weight(1f)
-            .height(40.dp),
+            .height(40.dp)
+            .testTag("btn_add_folder"),
           border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder),
           shape = RoundedCornerShape(8.dp)
         ) {
@@ -215,6 +240,180 @@ fun FilesScreen(
         }
       }
     }
+  }
+
+  // Dialog: New File
+  if (showNewFileDialog) {
+    AlertDialog(
+      onDismissRequest = { showNewFileDialog = false },
+      containerColor = DarkSurface,
+      title = { Text("Create New File", color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold) },
+      text = {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+          Text("Enter relative file path:", color = TextSecondary, fontSize = 12.sp)
+          TextField(
+            value = newFileNameInput,
+            onValueChange = { newFileNameInput = it },
+            placeholder = { Text("e.g. src/utils.ts", color = TextMuted) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth().testTag("input_new_file"),
+            colors = TextFieldDefaults.colors(
+              focusedContainerColor = DarkBackground,
+              unfocusedContainerColor = DarkBackground,
+              focusedTextColor = TextPrimary,
+              unfocusedTextColor = TextPrimary
+            )
+          )
+        }
+      },
+      confirmButton = {
+        Button(
+          onClick = {
+            val clean = newFileNameInput.trim()
+            if (clean.isNotBlank()) {
+              viewModel.createFile(clean, "// Created in ScoOS\n")
+              showNewFileDialog = false
+            }
+          },
+          colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue)
+        ) {
+          Text("Create")
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = { showNewFileDialog = false }) {
+          Text("Cancel", color = TextMuted)
+        }
+      }
+    )
+  }
+
+  // Dialog: New Folder
+  if (showNewFolderDialog) {
+    AlertDialog(
+      onDismissRequest = { showNewFolderDialog = false },
+      containerColor = DarkSurface,
+      title = { Text("Create New Folder", color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold) },
+      text = {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+          Text("Enter relative folder path:", color = TextSecondary, fontSize = 12.sp)
+          TextField(
+            value = newFolderNameInput,
+            onValueChange = { newFolderNameInput = it },
+            placeholder = { Text("e.g. src/services", color = TextMuted) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth().testTag("input_new_folder"),
+            colors = TextFieldDefaults.colors(
+              focusedContainerColor = DarkBackground,
+              unfocusedContainerColor = DarkBackground,
+              focusedTextColor = TextPrimary,
+              unfocusedTextColor = TextPrimary
+            )
+          )
+        }
+      },
+      confirmButton = {
+        Button(
+          onClick = {
+            val clean = newFolderNameInput.trim()
+            if (clean.isNotBlank()) {
+              viewModel.createDirectory(clean)
+              showNewFolderDialog = false
+            }
+          },
+          colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue)
+        ) {
+          Text("Create")
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = { showNewFolderDialog = false }) {
+          Text("Cancel", color = TextMuted)
+        }
+      }
+    )
+  }
+
+  // Dialog: File Context Options
+  if (showFileOptionsDialog && selectedFileForMenu != null) {
+    val file = selectedFileForMenu!!
+    AlertDialog(
+      onDismissRequest = { showFileOptionsDialog = false },
+      containerColor = DarkSurface,
+      title = { Text(file.name, color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold) },
+      text = {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+          if (!file.isDirectory) {
+            AskAgentOptionItem("Open in Editor", "View and edit file content") {
+              showFileOptionsDialog = false
+              viewModel.openFile(file)
+            }
+          }
+          AskAgentOptionItem("Ask Agent", "Analyze, refactor, or test this file") {
+            showFileOptionsDialog = false
+            showAskAgentDialog = true
+          }
+          AskAgentOptionItem("Rename", "Change file or folder name") {
+            showFileOptionsDialog = false
+            renameInput = file.name
+            showRenameDialog = true
+          }
+          AskAgentOptionItem("Delete", "Remove from project directory") {
+            showFileOptionsDialog = false
+            viewModel.deleteFile(file.path)
+          }
+        }
+      },
+      confirmButton = {},
+      dismissButton = {
+        TextButton(onClick = { showFileOptionsDialog = false }) {
+          Text("Cancel", color = TextMuted)
+        }
+      }
+    )
+  }
+
+  // Dialog: Rename
+  if (showRenameDialog && selectedFileForMenu != null) {
+    val file = selectedFileForMenu!!
+    AlertDialog(
+      onDismissRequest = { showRenameDialog = false },
+      containerColor = DarkSurface,
+      title = { Text("Rename ${file.name}", color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold) },
+      text = {
+        TextField(
+          value = renameInput,
+          onValueChange = { renameInput = it },
+          singleLine = true,
+          modifier = Modifier.fillMaxWidth().testTag("input_rename_file"),
+          colors = TextFieldDefaults.colors(
+            focusedContainerColor = DarkBackground,
+            unfocusedContainerColor = DarkBackground,
+            focusedTextColor = TextPrimary,
+            unfocusedTextColor = TextPrimary
+          )
+        )
+      },
+      confirmButton = {
+        Button(
+          onClick = {
+            val clean = renameInput.trim()
+            if (clean.isNotBlank()) {
+              viewModel.renameFile(file.path, clean)
+              showRenameDialog = false
+            }
+          },
+          colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue)
+        ) {
+          Text("Rename")
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = { showRenameDialog = false }) {
+          Text("Cancel", color = TextMuted)
+        }
+      }
+    )
   }
 
   // Ask Agent Dialog / Context Menu (Section 13)

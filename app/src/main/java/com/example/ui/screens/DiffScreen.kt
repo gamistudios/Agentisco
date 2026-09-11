@@ -207,28 +207,68 @@ fun DiffScreen(
 
       val currentDiff = fileDiffs.getOrNull(selectedDiffIndex) ?: fileDiffs.first()
 
+      // Per-file action bar
+      Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = DarkSurfaceElevated,
+        border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorderSubtle)
+      ) {
+        Row(
+          modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 14.dp, vertical = 6.dp),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Text(
+            text = currentDiff.filePath,
+            color = TextPrimary,
+            fontSize = 12.sp,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Medium
+          )
+
+          Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(
+              onClick = {
+                val projFile = com.example.data.model.ProjectFile(
+                  path = currentDiff.filePath,
+                  name = currentDiff.filePath.substringAfterLast("/"),
+                  isDirectory = false
+                )
+                viewModel.openFile(projFile)
+              },
+              modifier = Modifier.height(28.dp),
+              contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+              border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder)
+            ) {
+              Icon(Icons.Outlined.Edit, contentDescription = "Edit", modifier = Modifier.size(12.dp), tint = TextSecondary)
+              Spacer(modifier = Modifier.width(4.dp))
+              Text("Open", color = TextSecondary, fontSize = 11.sp)
+            }
+
+            OutlinedButton(
+              onClick = {
+                viewModel.rejectDiff(currentDiff.filePath)
+              },
+              modifier = Modifier.height(28.dp),
+              contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+              border = androidx.compose.foundation.BorderStroke(1.dp, DangerRed.copy(alpha = 0.5f))
+            ) {
+              Icon(Icons.Default.Refresh, contentDescription = "Revert", modifier = Modifier.size(12.dp), tint = DangerRed)
+              Spacer(modifier = Modifier.width(4.dp))
+              Text("Revert File", color = DangerRed, fontSize = 11.sp)
+            }
+          }
+        }
+      }
+
       // Full diff view
       LazyColumn(
         modifier = Modifier
           .fillMaxSize()
           .background(DarkBackground)
       ) {
-        item {
-          Box(
-            modifier = Modifier
-              .fillMaxWidth()
-              .background(DarkSurface)
-              .padding(horizontal = 14.dp, vertical = 8.dp)
-          ) {
-            Text(
-              text = currentDiff.filePath,
-              color = TextMuted,
-              fontSize = 11.sp,
-              fontFamily = FontFamily.Monospace
-            )
-          }
-        }
-
         items(currentDiff.lines) { line ->
           DiffLineRow(line = line)
         }

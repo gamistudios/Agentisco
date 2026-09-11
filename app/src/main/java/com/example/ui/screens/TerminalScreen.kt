@@ -219,20 +219,33 @@ fun TerminalScreen(
           textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace, fontSize = 13.sp)
         )
 
-        IconButton(
-          onClick = {
-            if (inputCommand.isNotBlank()) {
-              viewModel.executeTerminalCommand(inputCommand)
-              inputCommand = ""
-            }
-          },
-          modifier = Modifier
-            .size(34.dp)
-            .clip(CircleShape)
-            .background(ElectricBlue)
-            .testTag("btn_run_terminal_command")
-        ) {
-          Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Run", tint = Color.White, modifier = Modifier.size(14.dp))
+        if (currentSession.isRunning) {
+          IconButton(
+            onClick = { viewModel.interruptTerminal(currentSession.id) },
+            modifier = Modifier
+              .size(34.dp)
+              .clip(CircleShape)
+              .background(DangerRed)
+              .testTag("btn_interrupt_terminal")
+          ) {
+            Icon(Icons.Default.Stop, contentDescription = "Interrupt", tint = Color.White, modifier = Modifier.size(16.dp))
+          }
+        } else {
+          IconButton(
+            onClick = {
+              if (inputCommand.isNotBlank()) {
+                viewModel.executeTerminalCommand(inputCommand)
+                inputCommand = ""
+              }
+            },
+            modifier = Modifier
+              .size(34.dp)
+              .clip(CircleShape)
+              .background(ElectricBlue)
+              .testTag("btn_run_terminal_command")
+          ) {
+            Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Run", tint = Color.White, modifier = Modifier.size(14.dp))
+          }
         }
       }
     }

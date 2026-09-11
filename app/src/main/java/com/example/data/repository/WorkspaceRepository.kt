@@ -1,16 +1,33 @@
 package com.example.data.repository
 
+import android.content.Context
 import com.example.data.model.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import java.io.File
 
-class WorkspaceRepository {
+class WorkspaceRepository(
+  context: Context? = null,
+  baseDir: File = context?.let { File(it.filesDir, "sco_projects") }
+    ?: File(System.getProperty("java.io.tmpdir") ?: ".", "sco_projects")
+) {
 
-  // Current Active Project
-  private val _projects = MutableStateFlow<List<Project>>(getSampleProjects())
+  private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+
+  val fileSystem = ProjectFileSystem(baseDir)
+  val terminalManager = TerminalProcessManager()
+  val gitManager = GitRepositoryManager(fileSystem)
+  val agentRuntime = AgentRuntime(fileSystem, terminalManager, gitManager)
+
+  // Current Projects
+  private val _projects = MutableStateFlow<List<Project>>(fileSystem.getProjects())
   val projects: StateFlow<List<Project>> = _projects.asStateFlow()
 
   private val _activeProject = MutableStateFlow<Project>(_projects.value.first())
@@ -20,17 +37,22 @@ class WorkspaceRepository {
   private val _currentDestination = MutableStateFlow(AppDestination.AGENT)
   val currentDestination: StateFlow<AppDestination> = _currentDestination.asStateFlow()
 
-  // Files in Project
-  private val _projectFiles = MutableStateFlow<List<ProjectFile>>(getSampleFileTree())
+  // Files in Active Project
+  private val _projectFiles = MutableStateFlow<List<ProjectFile>>(emptyList())
   val projectFiles: StateFlow<List<ProjectFile>> = _projectFiles.asStateFlow()
 
   // Currently Active File in Editor
-  private val _activeFile = MutableStateFlow<ProjectFile>(getSampleChatFile())
+  private val _activeFile = MutableStateFlow<ProjectFile>(
+    ProjectFile("src/components/Chat.tsx", "Chat.tsx", false)
+  )
   val activeFile: StateFlow<ProjectFile> = _activeFile.asStateFlow()
 
-  // Editor content & undo stack
-  private val _editorContent = MutableStateFlow(getSampleChatFile().content)
+  // Editor content & unsaved tracking
+  private val _editorContent = MutableStateFlow("")
   val editorContent: StateFlow<String> = _editorContent.asStateFlow()
+
+  private val _isEditorDirty = MutableStateFlow(false)
+  val isEditorDirty: StateFlow<Boolean> = _isEditorDirty.asStateFlow()
 
   // Agent State
   private val _isAgentWorking = MutableStateFlow(false)
@@ -52,15 +74,18 @@ class WorkspaceRepository {
   val pendingApproval: StateFlow<PendingApproval?> = _pendingApproval.asStateFlow()
 
   // Diffs
-  private val _fileDiffs = MutableStateFlow<List<FileDiff>>(getSampleDiffs())
+  private val _fileDiffs = MutableStateFlow<List<FileDiff>>(emptyList())
   val fileDiffs: StateFlow<List<FileDiff>> = _fileDiffs.asStateFlow()
 
   // Git State
-  private val _stagedFiles = MutableStateFlow<Set<String>>(setOf("src/components/Chat.tsx", "src/store/chatStore.ts"))
+  private val _stagedFiles = MutableStateFlow<Set<String>>(emptySet())
   val stagedFiles: StateFlow<Set<String>> = _stagedFiles.asStateFlow()
 
   private val _commitMessage = MutableStateFlow("Fix chat message lifecycle and store recreation")
   val commitMessage: StateFlow<String> = _commitMessage.asStateFlow()
+
+  private val _commitHistory = MutableStateFlow<List<GitCommit>>(emptyList())
+  val commitHistory: StateFlow<List<GitCommit>> = _commitHistory.asStateFlow()
 
   // Terminal Sessions
   private val _terminalSessions = MutableStateFlow<List<TerminalSession>>(getInitialTerminalSessions())
@@ -107,40 +132,128 @@ class WorkspaceRepository {
   private val _isDevServerRunning = MutableStateFlow(true)
   val isDevServerRunning: StateFlow<Boolean> = _isDevServerRunning.asStateFlow()
 
-  // Actions
+  init {
+    loadActiveProjectState(_activeProject.value)
+  }
+
+  private fun loadActiveProjectState(project: Project) {
+    gitManager.initializeProjectBaseline(project)
+    val files = fileSystem.getFileTree(project)
+    _projectFiles.value = files
+
+    // Pick first code file
+    fun findFirstFile(list: List<ProjectFile>): ProjectFile? {
+      for (f in list) {
+        if (!f.isDirectory) return f
+        val sub = findFirstFile(f.children)
+        if (sub != null) return sub
+      }
+      return null
+    }
+
+    val firstFile = findFirstFile(files) ?: ProjectFile("README.md", "README.md", false)
+    _activeFile.value = firstFile
+    val content = fileSystem.readFile(project, firstFile.path)
+    _editorContent.value = content
+    _isEditorDirty.value = false
+
+    // Update terminal session directory
+    _terminalSessions.update { list ->
+      list.map { it.copy(currentDir = project.path) }
+    }
+
+    refreshDiffsAndGit()
+  }
+
+  fun refreshFiles() {
+    _projectFiles.value = fileSystem.getFileTree(_activeProject.value)
+    refreshDiffsAndGit()
+  }
+
+  private fun refreshDiffsAndGit() {
+    val diffs = gitManager.computeAllDiffs(_activeProject.value)
+    _fileDiffs.value = diffs
+    val changedFiles = gitManager.getChangedFiles(_activeProject.value)
+    _activeProject.update {
+      it.copy(
+        changedFilesCount = changedFiles.size,
+        isDirty = changedFiles.isNotEmpty()
+      )
+    }
+    _commitHistory.value = gitManager.getCommitHistory(_activeProject.value)
+  }
+
+  // Navigation
   fun navigateTo(destination: AppDestination) {
     _currentDestination.value = destination
   }
 
   fun selectProject(project: Project) {
     _activeProject.value = project
+    loadActiveProjectState(project)
   }
 
   fun createProject(name: String, description: String) {
-    val newProj = Project(
-      id = "proj-${System.currentTimeMillis()}",
-      name = name.ifBlank { "Untitled Project" },
-      branch = "main",
-      lastActivity = "Just now",
-      changedFilesCount = 0,
-      isDirty = false,
-      description = description,
-      path = "~/projects/${name.lowercase().replace(" ", "-")}"
-    )
-    _projects.update { listOf(newProj) + it }
-    _activeProject.value = newProj
+    val newProj = fileSystem.createProject(name, description)
+    _projects.value = fileSystem.getProjects()
+    selectProject(newProj)
   }
 
   fun openFile(file: ProjectFile) {
     if (!file.isDirectory) {
       _activeFile.value = file
-      _editorContent.value = file.content
+      val diskContent = fileSystem.readFile(_activeProject.value, file.path)
+      _editorContent.value = diskContent
+      _isEditorDirty.value = false
       _currentDestination.value = AppDestination.EDITOR
     }
   }
 
   fun updateEditorContent(content: String) {
     _editorContent.value = content
+    _isEditorDirty.value = content != _activeFile.value.content
+  }
+
+  fun saveActiveFile() {
+    val file = _activeFile.value
+    val text = _editorContent.value
+    fileSystem.writeFile(_activeProject.value, file.path, text)
+    _activeFile.value = file.copy(content = text, sizeBytes = text.length.toLong())
+    _isEditorDirty.value = false
+    refreshFiles()
+  }
+
+  fun createFile(relativePath: String, content: String = ""): Boolean {
+    val success = fileSystem.createFile(_activeProject.value, relativePath, content)
+    if (success) {
+      refreshFiles()
+      openFile(ProjectFile(relativePath, relativePath.substringAfterLast("/"), false, content))
+    }
+    return success
+  }
+
+  fun createDirectory(relativePath: String): Boolean {
+    val success = fileSystem.createDirectory(_activeProject.value, relativePath)
+    if (success) {
+      refreshFiles()
+    }
+    return success
+  }
+
+  fun deleteFile(relativePath: String): Boolean {
+    val success = fileSystem.deleteFile(_activeProject.value, relativePath)
+    if (success) {
+      refreshFiles()
+    }
+    return success
+  }
+
+  fun renameFile(oldPath: String, newName: String): Boolean {
+    val success = fileSystem.renameFile(_activeProject.value, oldPath, newName)
+    if (success) {
+      refreshFiles()
+    }
+    return success
   }
 
   fun toggleCommandPalette(open: Boolean? = null) {
@@ -166,33 +279,64 @@ class WorkspaceRepository {
     }
   }
 
+  fun stageAll() {
+    val allChanged = gitManager.getChangedFiles(_activeProject.value)
+    _stagedFiles.value = allChanged.toSet()
+  }
+
+  fun unstageAll() {
+    _stagedFiles.value = emptySet()
+  }
+
   fun updateCommitMessage(msg: String) {
     _commitMessage.value = msg
   }
 
   fun generateCommitMessageWithAgent() {
+    val changed = gitManager.getChangedFiles(_activeProject.value)
+    val filesDesc = if (changed.isNotEmpty()) changed.joinToString(", ") { it.substringAfterLast("/") } else "code"
     val suggested = listOf(
-      "fix(chat): prevent message store reset on conversation component mount",
-      "refactor: memoize message listeners and stabilize chat state",
-      "fix: resolve race condition in useMessages async loader hook",
-      "feat(chat): retain loaded message cache during route transitions"
+      "fix($filesDesc): update component lifecycle and state consistency",
+      "refactor($filesDesc): improve data flow and type safety",
+      "feat($filesDesc): implement requested updates from agent workflow",
+      "chore: update project configuration and verification tests"
     ).random()
     _commitMessage.value = suggested
   }
 
   fun commitStagedChanges() {
-    _stagedFiles.value = emptySet()
-    _fileDiffs.value = emptyList()
-    _activeProject.update { it.copy(changedFilesCount = 0, isDirty = false, lastActivity = "Just committed") }
+    val commit = gitManager.commit(_activeProject.value, _stagedFiles.value, _commitMessage.value)
+    if (commit != null) {
+      _stagedFiles.value = emptySet()
+      refreshDiffsAndGit()
+    }
   }
 
   fun acceptAllDiffs() {
-    _fileDiffs.value = emptyList()
-    _activeProject.update { it.copy(changedFilesCount = 0, isDirty = false) }
+    // Staging all and setting baseline to current
+    val changed = gitManager.getChangedFiles(_activeProject.value)
+    gitManager.commit(_activeProject.value, changed.toSet(), "Accept changes")
+    _stagedFiles.value = emptySet()
+    refreshDiffsAndGit()
   }
 
   fun rejectAllDiffs() {
-    _fileDiffs.value = emptyList()
+    gitManager.revertAllFiles(_activeProject.value)
+    refreshFiles()
+    // Reload active file content if it was reverted
+    val reloaded = fileSystem.readFile(_activeProject.value, _activeFile.value.path)
+    _editorContent.value = reloaded
+    _isEditorDirty.value = false
+  }
+
+  fun rejectDiff(filePath: String) {
+    gitManager.revertFile(_activeProject.value, filePath)
+    refreshFiles()
+    if (_activeFile.value.path == filePath) {
+      val reloaded = fileSystem.readFile(_activeProject.value, filePath)
+      _editorContent.value = reloaded
+      _isEditorDirty.value = false
+    }
   }
 
   // Terminal actions
@@ -205,10 +349,11 @@ class WorkspaceRepository {
     val newSession = TerminalSession(
       id = newId,
       name = name,
-      currentDir = "~/projects/sco",
+      currentDir = _activeProject.value.path,
       lines = listOf(
-        TerminalLine("ScoOS Terminal Environment v2.4", TerminalLineType.INFO),
-        TerminalLine("Type 'help' or commands like 'git status', 'npm test', 'ls'", TerminalLineType.INFO)
+        TerminalLine("ScoOS Terminal Environment v2.4 (Android sh)", TerminalLineType.INFO),
+        TerminalLine("Current Dir: ${_activeProject.value.path}", TerminalLineType.INFO),
+        TerminalLine("Type shell commands like 'ls', 'pwd', 'cat <file>', 'mkdir', 'git status'", TerminalLineType.INFO)
       )
     )
     _terminalSessions.update { it + newSession }
@@ -220,58 +365,57 @@ class WorkspaceRepository {
     if (cleanCmd.isEmpty()) return
 
     val currentId = _activeTerminalSessionId.value
-    _terminalSessions.update { list ->
-      list.map { session ->
-        if (session.id == currentId) {
-          val newLines = session.lines.toMutableList()
-          newLines.add(TerminalLine("$ $cleanCmd", TerminalLineType.COMMAND))
+    val session = _terminalSessions.value.firstOrNull { it.id == currentId } ?: return
 
-          when {
-            cleanCmd == "clear" -> {
-              newLines.clear()
-            }
-            cleanCmd.startsWith("npm test") -> {
-              newLines.add(TerminalLine("Running Jest / Vitest test suite...", TerminalLineType.STDOUT))
-              newLines.add(TerminalLine("PASS src/components/__tests__/Chat.test.tsx", TerminalLineType.SUCCESS))
-              newLines.add(TerminalLine("PASS src/store/__tests__/chatStore.test.ts", TerminalLineType.SUCCESS))
-              newLines.add(TerminalLine("Tests: 42 passed, 42 total", TerminalLineType.SUCCESS))
-              newLines.add(TerminalLine("Time:  1.482 s", TerminalLineType.STDOUT))
-              newLines.add(TerminalLine("Exit code 0", TerminalLineType.SUCCESS))
-            }
-            cleanCmd.startsWith("git status") -> {
-              newLines.add(TerminalLine("On branch main", TerminalLineType.STDOUT))
-              newLines.add(TerminalLine("Your branch is ahead of 'origin/main' by 2 commits.", TerminalLineType.STDOUT))
-              newLines.add(TerminalLine("Changes not staged for commit:", TerminalLineType.STDOUT))
-              newLines.add(TerminalLine("  modified:   src/components/Chat.tsx", TerminalLineType.STDERR))
-              newLines.add(TerminalLine("  modified:   src/store/chatStore.ts", TerminalLineType.STDERR))
-              newLines.add(TerminalLine("  modified:   src/hooks/useMessages.ts", TerminalLineType.STDERR))
-            }
-            cleanCmd == "ls" || cleanCmd == "dir" -> {
-              newLines.add(TerminalLine("package.json  README.md  tsconfig.json  vite.config.ts", TerminalLineType.STDOUT))
-              newLines.add(TerminalLine("src/          public/    node_modules/   dist/", TerminalLineType.STDOUT))
-            }
-            cleanCmd.startsWith("echo ") -> {
-              newLines.add(TerminalLine(cleanCmd.removePrefix("echo ").trim('"'), TerminalLineType.STDOUT))
-            }
-            cleanCmd == "pwd" -> {
-              newLines.add(TerminalLine("~/projects/sco", TerminalLineType.STDOUT))
-            }
-            cleanCmd == "help" -> {
-              newLines.add(TerminalLine("Available commands: git status, git diff, npm test, npm run dev, ls, pwd, clear, cat <file>, echo <text>", TerminalLineType.INFO))
-            }
-            cleanCmd.startsWith("npm run dev") -> {
-              newLines.add(TerminalLine("> sco-space@1.0.0 dev", TerminalLineType.STDOUT))
-              newLines.add(TerminalLine("> vite", TerminalLineType.STDOUT))
-              newLines.add(TerminalLine("VITE v5.2.0  ready in 280 ms", TerminalLineType.SUCCESS))
-              newLines.add(TerminalLine("➜  Local:   http://localhost:5173/", TerminalLineType.SUCCESS))
-            }
-            else -> {
-              newLines.add(TerminalLine("Executed: $cleanCmd", TerminalLineType.STDOUT))
-              newLines.add(TerminalLine("Process completed with exit code 0", TerminalLineType.SUCCESS))
-            }
+    // Add command input line immediately
+    _terminalSessions.update { list ->
+      list.map { s ->
+        if (s.id == currentId) {
+          if (cleanCmd == "clear") {
+            s.copy(lines = emptyList(), isRunning = false)
+          } else {
+            s.copy(
+              lines = s.lines + TerminalLine("$ $cleanCmd", TerminalLineType.COMMAND),
+              isRunning = true
+            )
           }
-          session.copy(lines = newLines)
-        } else session
+        } else s
+      }
+    }
+
+    if (cleanCmd == "clear") return
+
+    repositoryScope.launch {
+      val exitCode = terminalManager.executeCommand(session, cleanCmd) { line ->
+        _terminalSessions.update { list ->
+          list.map { s ->
+            if (s.id == currentId) {
+              s.copy(lines = s.lines + line)
+            } else s
+          }
+        }
+      }
+
+      _terminalSessions.update { list ->
+        list.map { s ->
+          if (s.id == currentId) s.copy(isRunning = false) else s
+        }
+      }
+
+      // Check if command might have affected files or git
+      if (cleanCmd.startsWith("touch") || cleanCmd.startsWith("rm") || cleanCmd.startsWith("mkdir") || cleanCmd.startsWith("git")) {
+        refreshFiles()
+      }
+    }
+  }
+
+  fun interruptTerminal(sessionId: String = _activeTerminalSessionId.value) {
+    terminalManager.interrupt(sessionId)
+    _terminalSessions.update { list ->
+      list.map { s ->
+        if (s.id == sessionId) {
+          s.copy(lines = s.lines + TerminalLine("^C (Interrupted)", TerminalLineType.STDERR), isRunning = false)
+        } else s
       }
     }
   }
@@ -286,160 +430,44 @@ class WorkspaceRepository {
   }
 
   fun resolveApproval(allowed: Boolean) {
-    val current = _pendingApproval.value
     _pendingApproval.value = null
-    if (allowed && current != null) {
-      // Execute the approved command in terminal
-      executeTerminalCommand(current.command)
-    }
+    agentRuntime.resolvePendingApproval(allowed)
   }
 
-  // Run simulated or interactive Agent Task Workflow
+  // Run Real Agent Task Workflow
   suspend fun runAgentTask(prompt: String) {
     if (_isAgentWorking.value) return
 
     _isAgentWorking.value = true
-    _agentStatusText.value = "Analyzing project structure..."
+    _agentStatusText.value = "Starting agent task..."
     _agentWorkingDurationSeconds.value = 0
 
-    // Reset steps to fresh state
-    _agentSteps.value = listOf(
-      AgentTaskStep("s1", "Understand project context", AgentStepStatus.RUNNING, "Inspecting package.json and component tree", listOf("package.json", "tsconfig.json")),
-      AgentTaskStep("s2", "Locate relevant source files", AgentStepStatus.PENDING, "Searching for conversation and message handlers"),
-      AgentTaskStep("s3", "Trace message store lifecycle", AgentStepStatus.PENDING, "Analyzing hooks and Zustand store mounts"),
-      AgentTaskStep("s4", "Identify root state bug", AgentStepStatus.PENDING, "Pinpointing recreation of initial messages array"),
-      AgentTaskStep("s5", "Implement code fix", AgentStepStatus.PENDING, "Updating Chat.tsx and chatStore.ts"),
-      AgentTaskStep("s6", "Run project test suite", AgentStepStatus.PENDING, "Running unit & integration test suites"),
-      AgentTaskStep("s7", "Verify diff & build", AgentStepStatus.PENDING, "Confirming clean compilation")
+    val currentSession = _terminalSessions.value.firstOrNull { it.id == _activeTerminalSessionId.value }
+      ?: _terminalSessions.value.first()
+
+    val result = agentRuntime.executeTask(
+      prompt = prompt,
+      project = _activeProject.value,
+      model = _selectedModel.value,
+      permissions = _permissions.value,
+      terminalSession = currentSession,
+      onStatus = { _agentStatusText.value = it },
+      onStepUpdate = { _agentSteps.value = it },
+      onToolExecuted = { tool -> _toolExecutions.update { listOf(tool) + it } },
+      onRequestApproval = { approval -> _pendingApproval.value = approval }
     )
 
-    delay(900)
-    // Step 1 complete, Step 2 running
-    _agentSteps.update { list ->
-      list.mapIndexed { idx, s ->
-        when (idx) {
-          0 -> s.copy(status = AgentStepStatus.COMPLETED)
-          1 -> s.copy(status = AgentStepStatus.RUNNING)
-          else -> s
-        }
-      }
-    }
-    _agentStatusText.value = "Searching for chat components..."
-
-    // Add tool execution: Search
-    _toolExecutions.update {
-      listOf(
-        ToolExecution(
-          id = "tool-${System.currentTimeMillis()}",
-          type = ToolType.SEARCH,
-          title = "Search \"messages\"",
-          subtitle = "24 matches · 8 files searched",
-          details = "Chat.tsx:42, chatStore.ts:18, useMessages.ts:31"
-        )
-      ) + it
-    }
-
-    delay(1100)
-    // Step 2 complete, Step 3 running
-    _agentSteps.update { list ->
-      list.mapIndexed { idx, s ->
-        when (idx) {
-          1 -> s.copy(status = AgentStepStatus.COMPLETED, filesInspected = listOf("Chat.tsx", "chatStore.ts", "useMessages.ts"))
-          2 -> s.copy(status = AgentStepStatus.RUNNING)
-          else -> s
-        }
-      }
-    }
-    _agentStatusText.value = "Tracing message store mount lifecycle..."
-
-    // Add tool execution: Read file
-    _toolExecutions.update {
-      listOf(
-        ToolExecution(
-          id = "tool-${System.currentTimeMillis()}",
-          type = ToolType.READ_FILE,
-          title = "Read Chat.tsx",
-          subtitle = "142 lines inspected",
-          details = "Lines 40-75 inspected for useEffect triggers"
-        )
-      ) + it
-    }
-
-    delay(1200)
-    // Step 3 complete, Step 4 complete with finding
-    _agentSteps.update { list ->
-      list.mapIndexed { idx, s ->
-        when (idx) {
-          2 -> s.copy(status = AgentStepStatus.COMPLETED)
-          3 -> s.copy(
-            status = AgentStepStatus.COMPLETED,
-            finding = "Message state was being reset to empty array whenever conversationId prop changed without retaining cached cache."
-          )
-          4 -> s.copy(status = AgentStepStatus.RUNNING)
-          else -> s
-        }
-      }
-    }
-    _agentStatusText.value = "Applying fix to Chat.tsx & chatStore.ts..."
-
-    // Check if permission needed for package installation or modifying files
-    if (_permissions.value.alwaysAskDangerous && prompt.contains("install", ignoreCase = true)) {
-      _pendingApproval.value = PendingApproval(
-        id = "appr-1",
-        command = "npm install axios",
-        title = "Agent wants to run",
-        impactDescription = "This will modify package.json and lockfiles."
-      )
-    }
-
-    delay(1300)
-    // Step 5 complete, Step 6 running tests
-    _agentSteps.update { list ->
-      list.mapIndexed { idx, s ->
-        when (idx) {
-          4 -> s.copy(status = AgentStepStatus.COMPLETED)
-          5 -> s.copy(status = AgentStepStatus.RUNNING)
-          else -> s
-        }
-      }
-    }
-    _agentStatusText.value = "Running test suite in terminal..."
-
-    // Add tool execution: Edit files
-    _toolExecutions.update {
-      listOf(
-        ToolExecution(
-          id = "tool-${System.currentTimeMillis()}",
-          type = ToolType.EDIT_FILE,
-          title = "Modified 3 files",
-          subtitle = "Chat.tsx, chatStore.ts, useMessages.ts",
-          details = "+42 lines, -18 lines applied"
-        )
-      ) + it
-    }
-
-    delay(1200)
-    // Run tests tool
-    _toolExecutions.update {
-      listOf(
-        ToolExecution(
-          id = "tool-${System.currentTimeMillis()}",
-          type = ToolType.TERMINAL,
-          title = "$ npm test",
-          subtitle = "42 tests passed · Exit code 0",
-          exitCode = 0,
-          output = "PASS Chat.test.tsx\nPASS chatStore.test.ts"
-        )
-      ) + it
-    }
-
-    // All steps complete
-    _agentSteps.update { list ->
-      list.map { it.copy(status = AgentStepStatus.COMPLETED) }
-    }
     _isAgentWorking.value = false
-    _agentStatusText.value = "Task completed · 3 files modified · 42 tests passed"
-    _activeProject.update { it.copy(isDirty = true, changedFilesCount = 3, lastActivity = "Agent fixed chat loading") }
+    refreshFiles()
+
+    // Refresh active file if modified
+    if (result.modifiedFiles.contains(_activeFile.value.path)) {
+      val freshContent = fileSystem.readFile(_activeProject.value, _activeFile.value.path)
+      _editorContent.value = freshContent
+      _isEditorDirty.value = false
+    }
+
+    _agentStatusText.value = result.summary
   }
 
   fun toggleDevServer() {
@@ -447,286 +475,41 @@ class WorkspaceRepository {
   }
 
   companion object {
-    fun getSampleProjects(): List<Project> {
-      return listOf(
-        Project(
-          id = "sco-1",
-          name = "ScoSpace",
-          branch = "main",
-          lastActivity = "12 min ago",
-          changedFilesCount = 3,
-          isDirty = true,
-          activeSessionText = "Fix chat loading",
-          description = "Modern collaborative workspace & real-time messaging canvas",
-          path = "~/projects/scospace"
-        ),
-        Project(
-          id = "pay-2",
-          name = "PayHabesha",
-          branch = "development",
-          lastActivity = "Yesterday",
-          changedFilesCount = 0,
-          isDirty = false,
-          activeSessionText = null,
-          description = "Fintech payment processing engine and mobile banking client",
-          path = "~/projects/payhabesha"
-        ),
-        Project(
-          id = "fix-3",
-          name = "FixNet",
-          branch = "main",
-          lastActivity = "3 days ago",
-          changedFilesCount = 1,
-          isDirty = true,
-          activeSessionText = null,
-          description = "Network diagnostic telemetry dashboard and ping agent",
-          path = "~/projects/fixnet"
-        )
-      )
-    }
-
-    fun getSampleChatFile(): ProjectFile {
-      return ProjectFile(
-        path = "src/components/Chat.tsx",
-        name = "Chat.tsx",
-        isDirectory = false,
-        language = "typescript",
-        content = """import React, { useEffect, useState } from 'react';
-import { useChatStore } from '../store/chatStore';
-import { MessageList } from './MessageList';
-import { PromptInput } from './PromptInput';
-
-interface ChatProps {
-  conversationId: string;
-}
-
-export const Chat: React.FC<ChatProps> = ({ conversationId }) => {
-  // Access global message store
-  const { messages, loadMessages, sendMessage, isStreaming } = useChatStore();
-  const [input, setInput] = useState('');
-
-  useEffect(() => {
-    // Retain conversation state across re-renders
-    if (conversationId) {
-      loadMessages(conversationId);
-    }
-  }, [conversationId, loadMessages]);
-
-  const handleSend = async () => {
-    if (!input.trim() || isStreaming) return;
-    const text = input;
-    setInput('');
-    await sendMessage(conversationId, text);
-  };
-
-  return (
-    <div className="flex flex-col h-full bg-slate-900 text-slate-100">
-      <header className="px-4 py-3 border-b border-slate-800 flex items-center justify-between">
-        <h2 className="font-semibold text-sm">Agent Conversation</h2>
-        <span className="text-xs text-emerald-400">● Connected</span>
-      </header>
-
-      <div className="flex-1 overflow-y-auto p-4">
-        <MessageList messages={messages} />
-      </div>
-
-      <div className="p-4 border-t border-slate-800">
-        <PromptInput
-          value={input}
-          onChange={setInput}
-          onSubmit={handleSend}
-          disabled={isStreaming}
-        />
-      </div>
-    </div>
-  );
-};
-"""
-      )
-    }
-
-    fun getSampleFileTree(): List<ProjectFile> {
-      return listOf(
-        ProjectFile(
-          path = "src",
-          name = "src",
-          isDirectory = true,
-          children = listOf(
-            ProjectFile(
-              path = "src/components",
-              name = "components",
-              isDirectory = true,
-              children = listOf(
-                getSampleChatFile(),
-                ProjectFile("src/components/MessageList.tsx", "MessageList.tsx", false, "// Message list component\nexport const MessageList = () => null;"),
-                ProjectFile("src/components/PromptInput.tsx", "PromptInput.tsx", false, "// Prompt input\nexport const PromptInput = () => null;")
-              )
-            ),
-            ProjectFile(
-              path = "src/store",
-              name = "store",
-              isDirectory = true,
-              children = listOf(
-                ProjectFile(
-                  path = "src/store/chatStore.ts",
-                  name = "chatStore.ts",
-                  isDirectory = false,
-                  content = """import { create } from 'zustand';
-
-export interface ChatState {
-  messages: Array<{ id: string; text: string; sender: 'user' | 'agent' }>;
-  isStreaming: boolean;
-  loadMessages: (id: string) => Promise<void>;
-  sendMessage: (id: string, text: string) => Promise<void>;
-}
-
-export const useChatStore = create<ChatState>((set) => ({
-  messages: [],
-  isStreaming: false,
-  loadMessages: async (id) => {
-    // Preserve cache and avoid unnecessary state flush
-    const res = await fetch(`/api/conversations/${'$'}id/messages`);
-    const data = await res.json();
-    set({ messages: data });
-  },
-  sendMessage: async (id, text) => {
-    set((s) => ({
-      messages: [...s.messages, { id: Date.now().toString(), text, sender: 'user' }]
-    }));
-  }
-}));
-"""
-                )
-              )
-            ),
-            ProjectFile(
-              path = "src/hooks",
-              name = "hooks",
-              isDirectory = true,
-              children = listOf(
-                ProjectFile("src/hooks/useMessages.ts", "useMessages.ts", false, "// Hook for message lifecycle\nexport const useMessages = () => ({});")
-              )
-            ),
-            ProjectFile("src/App.tsx", "App.tsx", false, "export default function App() { return <div>IDE</div>; }"),
-            ProjectFile("src/main.tsx", "main.tsx", false, "import React from 'react';\nimport ReactDOM from 'react-dom/client';")
-          )
-        ),
-        ProjectFile(
-          path = "package.json",
-          name = "package.json",
-          isDirectory = false,
-          language = "json",
-          content = """{
-  "name": "scospace",
-  "version": "1.0.0",
-  "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
-    "test": "vitest run"
-  },
-  "dependencies": {
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "zustand": "^4.5.2"
-  },
-  "devDependencies": {
-    "typescript": "^5.4.5",
-    "vite": "^5.2.0",
-    "vitest": "^1.6.0"
-  }
-}"""
-        ),
-        ProjectFile(
-          path = "README.md",
-          name = "README.md",
-          isDirectory = false,
-          language = "markdown",
-          content = "# ScoSpace\nMobile-first autonomous development workspace built on Android."
-        ),
-        ProjectFile(
-          path = "vite.config.ts",
-          name = "vite.config.ts",
-          isDirectory = false,
-          language = "typescript",
-          content = "import { defineConfig } from 'vite';\nimport react from '@vitejs/plugin-react';\n\nexport default defineConfig({\n  plugins: [react()],\n  server: { port: 5173 }\n});"
-        )
-      )
-    }
-
     fun getInitialAgentSteps(): List<AgentTaskStep> {
       return listOf(
-        AgentTaskStep("s1", "Understand project", AgentStepStatus.COMPLETED, "Parsed package.json and project AST"),
-        AgentTaskStep("s2", "Locate chat components", AgentStepStatus.COMPLETED, "Found Chat.tsx and useMessages.ts"),
-        AgentTaskStep("s3", "Trace message lifecycle", AgentStepStatus.COMPLETED, "Identified state recreation during mount"),
-        AgentTaskStep("s4", "Identify state bug", AgentStepStatus.COMPLETED, "Finding: Message state is recreated when the conversation component mounts.", listOf("Chat.tsx", "useMessages.ts", "chatStore.ts")),
-        AgentTaskStep("s5", "Implementing fix", AgentStepStatus.COMPLETED, "Applied memoized store listener"),
-        AgentTaskStep("s6", "Run tests", AgentStepStatus.COMPLETED, "Executed npm test - 42 passed"),
-        AgentTaskStep("s7", "Verify behavior", AgentStepStatus.COMPLETED, "Clean compilation confirmed")
+        AgentTaskStep("s1", "Understand project context", AgentStepStatus.COMPLETED, "Inspected package.json and workspace files", listOf("package.json", "tsconfig.json")),
+        AgentTaskStep("s2", "Locate relevant source files", AgentStepStatus.COMPLETED, "Searched for chat components and state handlers", listOf("Chat.tsx", "chatStore.ts")),
+        AgentTaskStep("s3", "Trace message store lifecycle", AgentStepStatus.COMPLETED, "Analyzed zustand hooks and cache mapping"),
+        AgentTaskStep("s4", "Identify root state bug", AgentStepStatus.COMPLETED, finding = "Message state was reset to empty array on conversation mount without checking cached map"),
+        AgentTaskStep("s5", "Implement code fix", AgentStepStatus.COMPLETED, "Updated Chat.tsx and chatStore.ts with memoized selectors"),
+        AgentTaskStep("s6", "Run project test suite", AgentStepStatus.COMPLETED, "Ran vitest unit tests with exit code 0"),
+        AgentTaskStep("s7", "Verify diff & build", AgentStepStatus.COMPLETED, "Confirmed clean compilation and diff generation")
       )
     }
 
     fun getInitialToolExecutions(): List<ToolExecution> {
       return listOf(
         ToolExecution(
-          id = "tool-edit-1",
-          type = ToolType.EDIT_FILE,
-          title = "Modified 3 files",
-          subtitle = "Chat.tsx, chatStore.ts, useMessages.ts",
-          details = "Lines 42-50 in Chat.tsx updated with dependency array"
-        ),
-        ToolExecution(
-          id = "tool-term-1",
+          id = "init-1",
           type = ToolType.TERMINAL,
           title = "$ npm test",
-          subtitle = "42 tests passed",
+          subtitle = "42 tests passed · Exit code 0",
           exitCode = 0,
-          output = "✓ 42 tests passed in 1.4s"
+          output = "PASS src/components/Chat.test.tsx\nTests: 42 passed, 42 total"
         ),
         ToolExecution(
-          id = "tool-search-1",
-          type = ToolType.SEARCH,
-          title = "Search \"messages\"",
-          subtitle = "24 matches · 8 files",
-          details = "Chat.tsx, chatStore.ts, useMessages.ts, Chat.test.tsx"
+          id = "init-2",
+          type = ToolType.EDIT_FILE,
+          title = "write_file src/components/Chat.tsx",
+          subtitle = "+14 lines, -6 lines applied",
+          details = "Updated chat component with cached memo selectors"
         ),
         ToolExecution(
-          id = "tool-read-1",
+          id = "init-3",
           type = ToolType.READ_FILE,
-          title = "Read file",
-          subtitle = "Chat.tsx",
-          details = "Read lines 1 to 142"
-        )
-      )
-    }
-
-    fun getSampleDiffs(): List<FileDiff> {
-      return listOf(
-        FileDiff(
-          filePath = "src/components/Chat.tsx",
-          additionsCount = 28,
-          deletionsCount = 12,
-          lines = listOf(
-            DiffLine(DiffLineType.UNCHANGED, 40, 40, "export const Chat: React.FC<ChatProps> = ({ conversationId }) => {"),
-            DiffLine(DiffLineType.REMOVED, 41, null, "-  const messages = initial;"),
-            DiffLine(DiffLineType.ADDED, null, 41, "+  const messages = store.messages;"),
-            DiffLine(DiffLineType.UNCHANGED, 42, 42, "   const [input, setInput] = useState('');"),
-            DiffLine(DiffLineType.REMOVED, 43, null, "-  useEffect(loadMessages, []);"),
-            DiffLine(DiffLineType.ADDED, null, 43, "+  useEffect(() => {"),
-            DiffLine(DiffLineType.ADDED, null, 44, "+    loadMessages(conversationId);"),
-            DiffLine(DiffLineType.ADDED, null, 45, "+  }, [conversationId, loadMessages]);"),
-            DiffLine(DiffLineType.UNCHANGED, 46, 46, "   return (")
-          )
-        ),
-        FileDiff(
-          filePath = "src/store/chatStore.ts",
-          additionsCount = 14,
-          deletionsCount = 6,
-          lines = listOf(
-            DiffLine(DiffLineType.UNCHANGED, 15, 15, "export const useChatStore = create<ChatState>((set) => ({"),
-            DiffLine(DiffLineType.REMOVED, 16, null, "-  messages: initialMessages,"),
-            DiffLine(DiffLineType.ADDED, null, 16, "+  messages: [],"),
-            DiffLine(DiffLineType.UNCHANGED, 17, 17, "   isStreaming: false,")
-          )
+          title = "read_file src/store/chatStore.ts",
+          subtitle = "62 lines inspected",
+          details = "Inspected Zustand cachedMap handler"
         )
       )
     }
@@ -735,35 +518,21 @@ export const useChatStore = create<ChatState>((set) => ({
       return listOf(
         TerminalSession(
           id = "term-1",
-          name = "bash",
-          currentDir = "~/projects/sco",
+          name = "main",
+          currentDir = "~/projects/scospace",
           lines = listOf(
-            TerminalLine("ScoOS Bash Shell (Linux x86_64)", TerminalLineType.INFO),
-            TerminalLine("~/projects/sco $ git status", TerminalLineType.COMMAND),
-            TerminalLine("modified: src/components/Chat.tsx", TerminalLineType.STDERR),
-            TerminalLine("modified: src/store/chatStore.ts", TerminalLineType.STDERR),
-            TerminalLine("~/projects/sco $ npm test", TerminalLineType.COMMAND),
-            TerminalLine("✓ 42 passed in 1.4s", TerminalLineType.SUCCESS)
+            TerminalLine("ScoOS Developer Shell v2.4 (Android sh)", TerminalLineType.INFO),
+            TerminalLine("Working directory initialized.", TerminalLineType.INFO)
           )
         ),
         TerminalSession(
           id = "term-2",
-          name = "dev server",
-          currentDir = "~/projects/sco",
+          name = "dev-server",
+          currentDir = "~/projects/scospace",
           lines = listOf(
-            TerminalLine("$ npm run dev", TerminalLineType.COMMAND),
-            TerminalLine("VITE v5.2.0 ready in 280 ms", TerminalLineType.SUCCESS),
-            TerminalLine("➜ Local:   http://localhost:5173/", TerminalLineType.SUCCESS),
-            TerminalLine("➜ Network: use --host to expose", TerminalLineType.STDOUT)
-          )
-        ),
-        TerminalSession(
-          id = "term-3",
-          name = "agent",
-          currentDir = "~/projects/sco",
-          lines = listOf(
-            TerminalLine("[agent] Initialized workspace analysis", TerminalLineType.INFO),
-            TerminalLine("[agent] Ran static typecheck: 0 errors", TerminalLineType.SUCCESS)
+            TerminalLine("> vite --port 5173", TerminalLineType.COMMAND),
+            TerminalLine("VITE v5.2.0  ready in 280 ms", TerminalLineType.SUCCESS),
+            TerminalLine("➜  Local:   http://localhost:5173/", TerminalLineType.SUCCESS)
           )
         )
       )
@@ -772,6 +541,17 @@ export const useChatStore = create<ChatState>((set) => ({
     fun getInitialProviders(): List<AIProvider> {
       return listOf(
         AIProvider(
+          id = "google",
+          name = "Google Gemini",
+          baseUrl = "https://generativelanguage.googleapis.com",
+          apiKey = "AIzaSy•••••••••••••",
+          isConnected = true,
+          models = listOf(
+            AIModel("gemini-3.1-pro-preview", "Gemini 3.1 Pro", "google", "2000k", hasTools = true, hasStreaming = true, hasVision = true, hasReasoning = true),
+            AIModel("gemini-3.5-flash", "Gemini 3.5 Flash", "google", "1000k", hasTools = true, hasStreaming = true, hasVision = true)
+          )
+        ),
+        AIProvider(
           id = "tokenrouter",
           name = "TokenRouter",
           baseUrl = "https://api.tokenrouter.io/v1",
@@ -779,20 +559,7 @@ export const useChatStore = create<ChatState>((set) => ({
           isConnected = true,
           models = listOf(
             AIModel("glm-5.3-free", "GLM 5.3 Free", "tokenrouter", "1000k", hasTools = true, hasStreaming = true, hasReasoning = true, isFree = true),
-            AIModel("glm-5.3", "GLM 5.3 Pro", "tokenrouter", "1000k", hasTools = true, hasStreaming = true, hasReasoning = true),
-            AIModel("qwen-2.5-coder", "Qwen 2.5 Coder 32B", "tokenrouter", "128k", hasTools = true, hasStreaming = true),
             AIModel("deepseek-r1", "DeepSeek R1", "tokenrouter", "128k", hasTools = true, hasStreaming = true, hasReasoning = true)
-          )
-        ),
-        AIProvider(
-          id = "google",
-          name = "Google Gemini",
-          baseUrl = "https://generativelanguage.googleapis.com",
-          apiKey = "AIzaSy•••••••••••••",
-          isConnected = true,
-          models = listOf(
-            AIModel("gemini-2.5-pro", "Gemini 2.5 Pro", "google", "2000k", hasTools = true, hasStreaming = true, hasVision = true, hasReasoning = true),
-            AIModel("gemini-2.5-flash", "Gemini 2.5 Flash", "google", "1000k", hasTools = true, hasStreaming = true, hasVision = true)
           )
         ),
         AIProvider(
@@ -805,14 +572,6 @@ export const useChatStore = create<ChatState>((set) => ({
             AIModel("gpt-4o", "GPT-4o", "openai", "128k", hasTools = true, hasStreaming = true, hasVision = true),
             AIModel("o3-mini", "o3-mini", "openai", "200k", hasTools = true, hasStreaming = true, hasReasoning = true)
           )
-        ),
-        AIProvider(
-          id = "custom",
-          name = "Custom Gateway",
-          baseUrl = "http://localhost:11434/v1",
-          apiKey = "",
-          isConnected = false,
-          models = emptyList()
         )
       )
     }

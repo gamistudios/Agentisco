@@ -45,6 +45,19 @@ fun AgentIDEApp(
   val isCommandPaletteOpen by viewModel.isCommandPaletteOpen.collectAsState()
   val isModelSheetOpen by viewModel.isModelSheetOpen.collectAsState()
 
+  // Handle system back navigation
+  androidx.activity.compose.BackHandler(
+    enabled = isCommandPaletteOpen || isModelSheetOpen || currentDestination != AppDestination.AGENT
+  ) {
+    when {
+      isCommandPaletteOpen -> viewModel.toggleCommandPalette(false)
+      isModelSheetOpen -> viewModel.toggleModelSheet(false)
+      currentDestination == AppDestination.EDITOR -> viewModel.navigateTo(AppDestination.FILES)
+      currentDestination == AppDestination.DIFF -> viewModel.navigateTo(AppDestination.AGENT)
+      else -> viewModel.navigateTo(AppDestination.AGENT)
+    }
+  }
+
   Scaffold(
     modifier = Modifier.fillMaxSize(),
     containerColor = DarkBackground,

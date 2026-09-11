@@ -17,6 +17,7 @@ class WorkspaceViewModel(
   val projectFiles: StateFlow<List<ProjectFile>> = repository.projectFiles
   val activeFile: StateFlow<ProjectFile> = repository.activeFile
   val editorContent: StateFlow<String> = repository.editorContent
+  val isEditorDirty: StateFlow<Boolean> = repository.isEditorDirty
 
   val isAgentWorking: StateFlow<Boolean> = repository.isAgentWorking
   val agentStatusText: StateFlow<String> = repository.agentStatusText
@@ -27,6 +28,7 @@ class WorkspaceViewModel(
   val fileDiffs: StateFlow<List<FileDiff>> = repository.fileDiffs
   val stagedFiles: StateFlow<Set<String>> = repository.stagedFiles
   val commitMessage: StateFlow<String> = repository.commitMessage
+  val commitHistory: StateFlow<List<GitCommit>> = repository.commitHistory
 
   val terminalSessions: StateFlow<List<TerminalSession>> = repository.terminalSessions
   val activeTerminalSessionId: StateFlow<String> = repository.activeTerminalSessionId
@@ -59,6 +61,30 @@ class WorkspaceViewModel(
     repository.updateEditorContent(content)
   }
 
+  fun saveActiveFile() {
+    repository.saveActiveFile()
+  }
+
+  fun createFile(relativePath: String, content: String = ""): Boolean {
+    return repository.createFile(relativePath, content)
+  }
+
+  fun createDirectory(relativePath: String): Boolean {
+    return repository.createDirectory(relativePath)
+  }
+
+  fun deleteFile(relativePath: String): Boolean {
+    return repository.deleteFile(relativePath)
+  }
+
+  fun renameFile(oldPath: String, newName: String): Boolean {
+    return repository.renameFile(oldPath, newName)
+  }
+
+  fun refreshFiles() {
+    repository.refreshFiles()
+  }
+
   fun toggleCommandPalette(open: Boolean? = null) {
     repository.toggleCommandPalette(open)
   }
@@ -77,6 +103,14 @@ class WorkspaceViewModel(
 
   fun toggleFileStaged(filePath: String) {
     repository.toggleFileStaged(filePath)
+  }
+
+  fun stageAll() {
+    repository.stageAll()
+  }
+
+  fun unstageAll() {
+    repository.unstageAll()
   }
 
   fun updateCommitMessage(msg: String) {
@@ -99,6 +133,10 @@ class WorkspaceViewModel(
     repository.rejectAllDiffs()
   }
 
+  fun rejectDiff(filePath: String) {
+    repository.rejectDiff(filePath)
+  }
+
   fun selectTerminalSession(id: String) {
     repository.selectTerminalSession(id)
   }
@@ -109,6 +147,10 @@ class WorkspaceViewModel(
 
   fun executeTerminalCommand(cmd: String) {
     repository.executeTerminalCommand(cmd)
+  }
+
+  fun interruptTerminal(sessionId: String = activeTerminalSessionId.value) {
+    repository.interruptTerminal(sessionId)
   }
 
   fun resolveApproval(allowed: Boolean) {

@@ -35,6 +35,7 @@ fun GitScreen(
   val diffs by viewModel.fileDiffs.collectAsState()
   val stagedFiles by viewModel.stagedFiles.collectAsState()
   val commitMessage by viewModel.commitMessage.collectAsState()
+  val commitHistory by viewModel.commitHistory.collectAsState()
 
   var messageText by remember(commitMessage) { mutableStateOf(commitMessage) }
 
@@ -152,14 +153,36 @@ fun GitScreen(
       }
     }
 
-    // Staged & Changed Files List
+    // Staged & Changed Files List Header with Stage/Unstage all
     item {
-      Text(
-        text = "Changes (${diffs.size})",
-        color = TextSecondary,
-        fontSize = 13.sp,
-        fontWeight = FontWeight.SemiBold
-      )
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Text(
+          text = "Changes (${diffs.size})",
+          color = TextSecondary,
+          fontSize = 13.sp,
+          fontWeight = FontWeight.SemiBold
+        )
+
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+          TextButton(
+            onClick = { viewModel.stageAll() },
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+          ) {
+            Text("Stage All", fontSize = 11.sp, color = ElectricBlueGlow)
+          }
+
+          TextButton(
+            onClick = { viewModel.unstageAll() },
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+          ) {
+            Text("Unstage All", fontSize = 11.sp, color = TextMuted)
+          }
+        }
+      }
     }
 
     if (diffs.isEmpty()) {
@@ -230,6 +253,90 @@ fun GitScreen(
               ) {
                 Icon(Icons.Default.ChevronRight, contentDescription = "View Diff", tint = TextMuted, modifier = Modifier.size(16.dp))
               }
+            }
+          }
+        }
+      }
+    }
+
+    // Commit History Section
+    item {
+      Spacer(modifier = Modifier.height(10.dp))
+      Text(
+        text = "Commit History (${commitHistory.size})",
+        color = TextSecondary,
+        fontSize = 13.sp,
+        fontWeight = FontWeight.SemiBold
+      )
+    }
+
+    if (commitHistory.isEmpty()) {
+      item {
+        Box(
+          modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(DarkSurfaceElevated)
+            .padding(16.dp),
+          contentAlignment = Alignment.Center
+        ) {
+          Text("No commits recorded yet", color = TextMuted, fontSize = 12.sp)
+        }
+      }
+    } else {
+      items(commitHistory) { commit ->
+        Card(
+          modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .border(1.dp, DarkBorder, RoundedCornerShape(10.dp)),
+          colors = CardDefaults.cardColors(containerColor = DarkSurface)
+        ) {
+          Column(modifier = Modifier.padding(12.dp)) {
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.SpaceBetween,
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Outlined.Commit, contentDescription = "Commit", tint = ElectricBlueGlow, modifier = Modifier.size(14.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                  text = commit.hash,
+                  color = ElectricBlueGlow,
+                  fontSize = 11.sp,
+                  fontFamily = FontFamily.Monospace,
+                  fontWeight = FontWeight.SemiBold
+                )
+              }
+              Text(
+                text = "${commit.filesChanged.size} files",
+                color = TextMuted,
+                fontSize = 10.sp
+              )
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+              text = commit.message,
+              color = TextPrimary,
+              fontSize = 13.sp,
+              fontWeight = FontWeight.Medium
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+              Text(
+                text = commit.author,
+                color = TextSecondary,
+                fontSize = 10.sp
+              )
+              Text(
+                text = "just now",
+                color = TextMuted,
+                fontSize = 10.sp
+              )
             }
           }
         }
