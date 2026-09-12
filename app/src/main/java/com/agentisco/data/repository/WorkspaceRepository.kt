@@ -41,6 +41,7 @@ class WorkspaceRepository(
 ) {
 
   private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+  private val appContext: Context? = context?.applicationContext
 
   val fileSystem = ProjectFileSystem(baseDir)
   val gitManager = GitRepositoryManager(fileSystem)
@@ -575,7 +576,7 @@ class WorkspaceRepository(
     val manager = prootSessionManager ?: return
     if (_ptySessions.value.containsKey(tabId)) return
     try {
-      val bridge = terminalClientRegistry.getOrPut(tabId) { TerminalClientBridge() }
+      val bridge = terminalClientRegistry.getOrPut(tabId) { TerminalClientBridge(appContext) }
       val session = manager.createSession(name, File(_activeProject.value.path), bridge)
       if (session != null) {
         _ptySessions.update { it + (tabId to session) }
@@ -635,7 +636,7 @@ class WorkspaceRepository(
    * Bridges a PTY session to the visible terminal view: text changes trigger
    * the registered redraw callback, everything else is ignored.
    */
-  class TerminalClientBridge : TerminalSessionClient {
+  class TerminalClientBridge(private val appContext: Context?) : TerminalSessionClient {
     @Volatile var redrawCallback: (() -> Unit)? = null
 
     override fun onTextChanged(session: com.termux.terminal.TerminalSession) {
@@ -645,8 +646,18 @@ class WorkspaceRepository(
     override fun onSessionFinished(session: com.termux.terminal.TerminalSession) {
       redrawCallback?.invoke()
     }
-    override fun onCopyTextToClipboard(session: com.termux.terminal.TerminalSession, text: String) {}
-    override fun onPasteTextFromClipboard(session: com.termux.terminal.TerminalSession) {}
+    override fun onCopyTextToClipboard(session: com.termux.terminal.TerminalSession, text: String) {
+      val clipboard = appContext?.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager ?: return
+      clipboard.setPrimaryClip(android.content.ClipData.newPlainText("terminal", text))
+    }
+    override fun onPasteTextFromClipboard(session: com.termux.terminal.TerminalSession) {
+      val clipboard = appContext?.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager ?: return
+      val clip = clipboard.primaryClip ?: return
+      val text = clip.getItemAt(0).coerceToText(appContext)?.toString() ?: return
+      if (text.isEmpty()) return
+      val bytes = text.toByteArray(Charsets.UTF_8)
+      session.write(bytes, 0, bytes.size)
+    }
     override fun onBell(session: com.termux.terminal.TerminalSession) {}
     override fun onColorsChanged(session: com.termux.terminal.TerminalSession) {
       redrawCallback?.invoke()

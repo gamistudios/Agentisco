@@ -11,6 +11,7 @@ import android.view.Menu;
 import android.view.MenuItem;
 import android.view.MotionEvent;
 import android.view.View;
+import android.widget.PopupMenu;
 
 import com.termux.terminal.TerminalBuffer;
 import com.termux.terminal.WcWidth;
@@ -141,8 +142,11 @@ public class TextSelectionCursorController implements CursorController {
                         terminalView.mTermSession.onPasteTextFromClipboard();
                         break;
                     case ACTION_MORE:
+                        // The original called terminalView.showContextMenu(),
+                        // which needs an Activity-implemented context menu —
+                        // show a self-contained popup instead.
                         terminalView.stopTextSelectionMode(); //we stop text selection first, otherwise handles will show above popup
-                        terminalView.showContextMenu();
+                        showMoreActionsPopup();
                         break;
                 }
 
@@ -193,6 +197,37 @@ public class TextSelectionCursorController implements CursorController {
                 outRect.set(x1, y1 + mHandleHeight, x2, y2 + mHandleHeight);
             }
         }, ActionMode.TYPE_FLOATING);
+    }
+
+    /** Self-contained replacement for the Activity context menu ("More" action). */
+    private void showMoreActionsPopup() {
+        PopupMenu popup = new PopupMenu(terminalView.getContext(), terminalView);
+        Menu menu = popup.getMenu();
+        menu.add(Menu.NONE, 1, Menu.NONE, R.string.paste_text);
+        menu.add(Menu.NONE, 2, Menu.NONE, R.string.paste_text_replacing_newlines);
+        menu.add(Menu.NONE, 3, Menu.NONE, R.string.reset_terminal);
+        popup.setOnMenuItemClickListener(item -> {
+            switch (item.getItemId()) {
+                case 1:
+                    terminalView.mTermSession.onPasteTextFromClipboard();
+                    return true;
+                case 2:
+                    ClipboardManager clipboard = (ClipboardManager) terminalView.getContext().getSystemService(Context.CLIPBOARD_SERVICE);
+                    ClipData clip = clipboard.getPrimaryClip();
+                    if (clip != null && terminalView.mEmulator != null) {
+                        CharSequence text = clip.getItemAt(0).coerceToText(terminalView.getContext());
+                        if (!TextUtils.isEmpty(text)) {
+                            terminalView.mEmulator.paste(text.toString().replace('\n', ' '));
+                        }
+                    }
+                    return true;
+                case 3:
+                    terminalView.mTermSession.reset();
+                    return true;
+            }
+            return false;
+        });
+        popup.show();
     }
 
     @Override

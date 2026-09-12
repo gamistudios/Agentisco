@@ -3,4 +3,6 @@
     <string name="copy_text">Copy</string>
     <string name="paste_text">Paste</string>
     <string name="text_selection_more">More…</string>
+    <string name="paste_text_replacing_newlines">Paste (newlines as spaces)</string>
+    <string name="reset_terminal">Reset terminal</string>
 </resources>

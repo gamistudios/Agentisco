@@ -132,12 +132,18 @@ fun TerminalScreen(
           }
         } else AndroidView(
           factory = { ctx ->
-            TerminalView(ctx, null).apply {
+            val view = TerminalView(ctx, null).apply {
               // Creates mRenderer; without it updateSize() crashes on layout
               // when the view sizes before a session is attached.
               setTextSize(26)
-              setTerminalViewClient(ScoTerminalViewClient())
+              // Termux sets these in its layout XML; without them
+              // requestFocus() fails and neither the IME nor the long-press
+              // text-selection mode can start.
+              isFocusable = true
+              isFocusableInTouchMode = true
             }
+            view.setTerminalViewClient(ScoTerminalViewClient(view))
+            view
           },
           update = { view ->
             val session = activePty
@@ -470,10 +476,16 @@ private fun formatBytes(bytes: Long): String = when {
   else -> "$bytes B"
 }
 
-/** Minimal TerminalView client: default behaviors, no custom key handling. */
-private class ScoTerminalViewClient : com.termux.view.TerminalViewClient {
+/** TerminalView client: raises the soft keyboard on tap; defaults elsewhere. */
+private class ScoTerminalViewClient(private val view: TerminalView) : com.termux.view.TerminalViewClient {
   override fun onScale(scaleFactor: Float): Float = 1.0f
-  override fun onSingleTapUp(e: MotionEvent?) {}
+  override fun onSingleTapUp(e: MotionEvent?) {
+    // TerminalView already requestFocus()es on tap; without an explicit
+    // showSoftInput the keyboard never appears in a Compose AndroidView.
+    view.requestFocus()
+    val imm = view.context.getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager
+    imm?.showSoftInput(view, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+  }
   override fun shouldBackButtonBeMappedToEscape(): Boolean = false
   override fun shouldEnforceCharBasedInput(): Boolean = true
   override fun shouldUseCtrlSpaceWorkaround(): Boolean = false

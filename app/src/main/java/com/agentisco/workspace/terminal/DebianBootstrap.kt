@@ -161,6 +161,15 @@ class DebianBootstrap(
     rootfsDir.resolve("etc/resolv.conf").writeText(
       "nameserver 8.8.8.8\nnameserver 1.1.1.1\n"
     )
+    // Android injects its supplementary group IDs into every child process;
+    // define them in /etc/group so bash/groups don't print "cannot find name"
+    // warnings at every shell start.
+    rootfsDir.resolve("etc/group").appendText(
+      "inet:x:3003:\n" +
+        "everybody:x:9997:\n" +
+        "all_a345:x:20450:\n" +
+        "ext_a345:x:50450:\n"
+    )
     rootfsDir.resolve("etc/apt/sources.list").writeText(
       "deb http://ports.ubuntu.com/ubuntu-ports noble main universe\n" +
         "deb http://ports.ubuntu.com/ubuntu-ports noble-updates main universe\n" +
