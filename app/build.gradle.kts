@@ -85,6 +85,12 @@ android {
   ndkVersion = "27.2.12479018"
   packaging {
     jniLibs {
+      // proot, its loader and the bundled rootfs tarball must exist as REAL
+      // extracted files: proot is execve'd and the rootfs is read as a plain
+      // archive. Uncompressed in-APK libs (useLegacyPackaging=false) never
+      // land in nativeLibraryDir, so extraction must stay on (same reason
+      // Termux requires it).
+      useLegacyPackaging = true
       // The bundled Linux rootfs tarballs (librootfs*.so) are gzip archives,
       // not ELF objects — strip must not touch them.
       keepDebugSymbols += "**/librootfs*.so"
