@@ -83,6 +83,11 @@ android {
     }
   }
   ndkVersion = "27.2.12479018"
+  lint {
+    // targetSdk 28 is deliberate (see comment in defaultConfig): Android denies
+    // execve of app-data binaries at targetSdk >= 29, which proot requires.
+    disable += "ExpiredTargetSdkVersion"
+  }
 }
 
 // Configure the Secrets Gradle Plugin to use .env and .env.example files

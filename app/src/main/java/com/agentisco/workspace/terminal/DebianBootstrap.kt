@@ -10,7 +10,6 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
-import org.apache.commons.compress.utils.IOUtils
 import java.io.File
 import java.io.FileOutputStream
 import java.security.MessageDigest
@@ -109,8 +108,7 @@ class DebianBootstrap(
     java.util.zip.GZIPInputStream(archiveFile.inputStream().buffered(256 * 1024)).use { gzip ->
       TarArchiveInputStream(gzip).use { tar ->
         while (true) {
-          val entryOrNull = tar.nextTarEntry ?: break
-          val archiveEntry = entryOrNull as TarArchiveEntry
+          val archiveEntry = tar.nextEntry as? TarArchiveEntry ?: break
           val name = archiveEntry.name.removePrefix("./")
           if (name.isBlank()) continue
           val target = File(rootfsDir, name)
@@ -136,7 +134,7 @@ class DebianBootstrap(
             }
             else -> {
               target.parentFile?.mkdirs()
-              FileOutputStream(target).use { IOUtils.copy(tar, it) }
+              FileOutputStream(target).use { tar.copyTo(it) }
             }
           }
           if (!archiveEntry.isDirectory) {
