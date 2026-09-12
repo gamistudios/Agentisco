@@ -133,6 +133,9 @@ fun TerminalScreen(
         } else AndroidView(
           factory = { ctx ->
             TerminalView(ctx, null).apply {
+              // Creates mRenderer; without it updateSize() crashes on layout
+              // when the view sizes before a session is attached.
+              setTextSize(26)
               setTerminalViewClient(ScoTerminalViewClient())
             }
           },
