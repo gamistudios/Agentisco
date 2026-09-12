@@ -75,7 +75,11 @@ class WorkspaceViewModel(
   val ptySessions: StateFlow<Map<String, com.termux.terminal.TerminalSession>> = repository.ptySessions
   val linuxEnvironmentState: StateFlow<com.agentisco.workspace.terminal.LinuxEnvironmentState> =
     repository.debianBootstrap?.state
-      ?: MutableStateFlow(com.agentisco.workspace.terminal.LinuxEnvironmentState.NotBootstrapped)
+      ?: MutableStateFlow(
+        com.agentisco.workspace.terminal.LinuxEnvironmentState.Failed(
+          "Linux terminal unavailable: repository was created without an application context."
+        )
+      )
 
   val providers: StateFlow<List<AIProvider>> = repository.providers
   val aiModels: StateFlow<List<AIModel>> = repository.aiModels

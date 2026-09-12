@@ -5,6 +5,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
@@ -41,8 +43,15 @@ class DebianBootstrap(
 
   fun isBootstrapped(): Boolean = File(rootfsDir, ".scoos-ready").exists() && rootfsDir.resolve("bin").exists()
 
+  private val bootstrapMutex = Mutex()
+
   /** Verifies, extracts and configures the bundled rootfs. Idempotent. */
   suspend fun bootstrap(): Boolean = withContext(Dispatchers.IO) {
+    if (isBootstrapped()) {
+      _state.value = LinuxEnvironmentState.Ready
+      return@withContext true
+    }
+    bootstrapMutex.withLock {
     val abi = android.os.Build.SUPPORTED_ABIS.firstOrNull()
     val entry = abi?.let { RootfsCatalog.forAbi(it) }
     val archive = nativeBinaries.rootfsArchive
@@ -70,6 +79,7 @@ class DebianBootstrap(
       } catch (e: Exception) {
         _state.value = LinuxEnvironmentState.Failed(e.message ?: e.javaClass.simpleName)
         false
+      }
       }
     }
   }

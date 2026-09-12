@@ -49,7 +49,7 @@ fun AgentIDEApp(
     viewModel(
       factory = viewModelFactory {
         initializer {
-          WorkspaceViewModel(WorkspaceRepository(providerStore = app.providerStore))
+          WorkspaceViewModel(WorkspaceRepository(context = app, providerStore = app.providerStore))
         }
       }
     )
