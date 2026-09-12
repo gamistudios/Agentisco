@@ -16,9 +16,24 @@ android {
   defaultConfig {
     applicationId = "com.agentisco"
     minSdk = 24
-    targetSdk = 36
+    // targetSdk must stay < 29: Android SELinux denies execve of binaries in
+    // app-writable storage for apps targeting SDK 29+, which the proot Debian
+    // terminal requires. Termux pins targetSdk 28 for the same reason.
+    targetSdk = 28
     versionCode = 1
     versionName = "1.0"
+
+    ndk {
+      abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+    }
+
+    externalNativeBuild {
+      cmake {
+        // Builds the PTY JNI helper (libtermux.so) vendored from termux-app.
+        cppFlags += ""
+        arguments += listOf("-DANDROID_STL=none")
+      }
+    }
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -61,6 +76,13 @@ android {
     includeInApk = false
     includeInBundle = true
   }
+  externalNativeBuild {
+    cmake {
+      path = file("src/main/cpp/CMakeLists.txt")
+      version = "3.22.1"
+    }
+  }
+  ndkVersion = "27.2.12479018"
 }
 
 // Configure the Secrets Gradle Plugin to use .env and .env.example files
@@ -117,6 +139,9 @@ dependencies {
   implementation(libs.logging.interceptor)
   // implementation(libs.moshi.kotlin)
   implementation(libs.okhttp)
+  // Debian rootfs download + extraction (tar.gz / tar.xz) for the real Linux terminal.
+  implementation(libs.commons.compress)
+  implementation(libs.tukaani.xz)
   // implementation(libs.play.services.location)
   implementation(libs.retrofit)
   testImplementation(libs.androidx.compose.ui.test.junit4)

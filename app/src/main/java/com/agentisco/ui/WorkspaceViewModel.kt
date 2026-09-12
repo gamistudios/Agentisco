@@ -72,7 +72,10 @@ class WorkspaceViewModel(
 
   val terminalSessions: StateFlow<List<TerminalSession>> = repository.terminalSessions
   val activeTerminalSessionId: StateFlow<String> = repository.activeTerminalSessionId
-  val terminalCommandHistory: StateFlow<List<String>> = repository.terminalCommandHistory
+  val ptySessions: StateFlow<Map<String, com.termux.terminal.TerminalSession>> = repository.ptySessions
+  val linuxEnvironmentState: StateFlow<com.agentisco.workspace.terminal.LinuxEnvironmentState> =
+    repository.debianBootstrap?.state
+      ?: MutableStateFlow(com.agentisco.workspace.terminal.LinuxEnvironmentState.NotBootstrapped)
 
   val providers: StateFlow<List<AIProvider>> = repository.providers
   val aiModels: StateFlow<List<AIModel>> = repository.aiModels
@@ -319,7 +322,16 @@ class WorkspaceViewModel(
   }
 
   fun executeTerminalCommand(cmd: String) {
-    repository.executeTerminalCommand(cmd)
+    // Palette / quick actions write a real command line into the live PTY.
+    repository.sendTerminalLine(cmd)
+  }
+
+  fun startLinuxBootstrap() {
+    repository.startLinuxBootstrap()
+  }
+
+  fun ensurePtySession(tabId: String, name: String) {
+    repository.ensurePtySession(tabId, name)
   }
 
   fun interruptTerminal(sessionId: String = activeTerminalSessionId.value) {

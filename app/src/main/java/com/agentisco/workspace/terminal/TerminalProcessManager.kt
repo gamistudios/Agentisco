@@ -5,13 +5,17 @@ import com.agentisco.data.model.TerminalLineType
 import com.agentisco.data.model.TerminalSession
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.io.BufferedReader
 import java.io.File
-import java.io.InputStreamReader
 import java.util.concurrent.ConcurrentHashMap
 
+/**
+ * Executes commands for the agent tooling and scripted flows: non-interactive
+ * (pipes, no PTY) but inside the real Debian-based rootfs via proot, so apt,
+ * git, compilers etc. behave exactly like on a Linux box. The interactive
+ * human-facing terminal uses [ProotSessionManager] instead.
+ */
 class TerminalProcessManager(
-  val linuxEnv: LinuxEnvironmentManager = LinuxEnvironmentManager()
+  private val argsBuilderProvider: () -> ProotArgsBuilder?
 ) {
 
   private val activeProcesses = ConcurrentHashMap<String, Process>()
@@ -23,105 +27,59 @@ class TerminalProcessManager(
   ): Int = withContext(Dispatchers.IO) {
     val clean = command.trim()
     if (clean.isEmpty()) return@withContext 0
+    if (clean == "clear") return@withContext 0
 
-    // Handle 'clear' command
-    if (clean == "clear") {
-      return@withContext 0
+    val argsBuilder = argsBuilderProvider()
+    if (argsBuilder == null) {
+      onLine(TerminalLine("Linux environment is not ready yet. Open the Terminal tab once to bootstrap Debian.", TerminalLineType.STDERR))
+      return@withContext 1
     }
 
-    // Check if LinuxEnvironmentManager handles this command directly
-    if (linuxEnv.canHandle(clean)) {
-      return@withContext linuxEnv.execute(session, clean, onLine)
-    }
+    val workingDirInsideRootfs = "/root/workspace"
 
-    val workingDirFile = File(session.currentDir).let {
-      if (it.exists() && it.isDirectory) it else File("/").takeIf { f -> f.exists() } ?: File(".")
-    }
+    val guestCommand = listOf(
+      "/usr/bin/env", "-i",
+      "HOME=/root",
+      "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+      "TERM=dumb",
+      "LANG=C.UTF-8",
+      "DEBIAN_FRONTEND=noninteractive",
+      "/bin/bash", "-c", "cd $workingDirInsideRootfs 2>/dev/null; $clean"
+    )
 
-    // Handle 'cd' locally to change session directory state
-    if (clean.startsWith("cd ") || clean == "cd") {
-      val targetPath = clean.removePrefix("cd").trim()
-      val newDir = when {
-        targetPath.isEmpty() || targetPath == "~" -> File(System.getProperty("user.home") ?: workingDirFile.path)
-        targetPath.startsWith("/") -> File(targetPath)
-        else -> File(workingDirFile, targetPath)
-      }
-      return@withContext if (newDir.exists() && newDir.isDirectory) {
-        onLine(TerminalLine(newDir.canonicalPath, TerminalLineType.STDOUT))
-        0
-      } else {
-        onLine(TerminalLine("cd: no such file or directory: $targetPath", TerminalLineType.STDERR))
-        1
-      }
-    }
-
-    // Try executing using system shell
-    val shBinary = when {
-      File("/system/bin/sh").exists() -> "/system/bin/sh"
-      File("/bin/sh").exists() -> "/bin/sh"
-      else -> "sh"
-    }
+    val (argv, hostEnv) = argsBuilder.buildCommand(guestCommand)
 
     try {
-      val processBuilder = ProcessBuilder(shBinary, "-c", clean)
-        .directory(workingDirFile)
-        .redirectErrorStream(false)
-
-      val env = processBuilder.environment()
-      env["TERM"] = "xterm-256color"
-      env["PATH"] = (env["PATH"] ?: "") + ":/data/data/com.termux/files/usr/bin:/system/bin:/system/xbin:/vendor/bin:/bin:/usr/bin"
-
+      val processBuilder = ProcessBuilder(argv).redirectErrorStream(false)
+      processBuilder.environment().putAll(hostEnv)
       val process = processBuilder.start()
       activeProcesses[session.id] = process
 
-      // Read stdout
       val stdoutThread = Thread {
         try {
-          BufferedReader(InputStreamReader(process.inputStream)).use { reader ->
-            var line: String?
-            while (reader.readLine().also { line = it } != null) {
-              line?.let { onLine(TerminalLine(it, TerminalLineType.STDOUT)) }
-            }
+          process.inputStream.bufferedReader().forEachLine { line ->
+            onLine(TerminalLine(line, TerminalLineType.STDOUT))
           }
         } catch (_: Exception) {}
       }
-
-      // Read stderr
       val stderrThread = Thread {
         try {
-          BufferedReader(InputStreamReader(process.errorStream)).use { reader ->
-            var line: String?
-            while (reader.readLine().also { line = it } != null) {
-              line?.let { onLine(TerminalLine(it, TerminalLineType.STDERR)) }
-            }
+          process.errorStream.bufferedReader().forEachLine { line ->
+            onLine(TerminalLine(line, TerminalLineType.STDERR))
           }
         } catch (_: Exception) {}
       }
-
       stdoutThread.start()
       stderrThread.start()
 
       val exitCode = process.waitFor()
-      stdoutThread.join(500)
-      stderrThread.join(500)
-
+      stdoutThread.join(1000)
+      stderrThread.join(1000)
       activeProcesses.remove(session.id)
-
-      if (exitCode == 0) {
-        onLine(TerminalLine("Process completed with exit code 0", TerminalLineType.SUCCESS))
-      } else if (exitCode == 127) {
-        val cmdName = clean.split("\\s+".toRegex()).firstOrNull() ?: clean
-        onLine(TerminalLine("sh: $cmdName: command not found", TerminalLineType.STDERR))
-        onLine(TerminalLine("Hint: Install it using 'apt install $cmdName' or type 'help' for available tools.", TerminalLineType.INFO))
-      } else {
-        onLine(TerminalLine("Process exited with code $exitCode", TerminalLineType.STDERR))
-      }
       return@withContext exitCode
     } catch (e: Exception) {
       activeProcesses.remove(session.id)
-      val cmdName = clean.split("\\s+".toRegex()).firstOrNull() ?: clean
-      onLine(TerminalLine("sh: $cmdName: inaccessible or not found (${e.localizedMessage})", TerminalLineType.STDERR))
-      onLine(TerminalLine("Hint: Try 'apt install $cmdName' or 'help' for built-in tools.", TerminalLineType.INFO))
+      onLine(TerminalLine("Failed to run command in Linux environment: ${e.localizedMessage}", TerminalLineType.STDERR))
       return@withContext -1
     }
   }
@@ -135,7 +93,6 @@ class TerminalProcessManager(
     } else false
   }
 
-  /** Writes raw input (plus newline) to a running session's stdin, e.g. to answer interactive prompts. */
   fun writeInput(sessionId: String, input: String): Boolean {
     val process = activeProcesses[sessionId] ?: return false
     if (!process.isAlive) return false

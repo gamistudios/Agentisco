@@ -10,8 +10,12 @@ import com.agentisco.agent.model.AgentTaskStep
 import com.agentisco.core.model.AppDestination
 import com.agentisco.agent.permission.DestructiveCommandGuard
 import com.agentisco.agent.runtime.AgentRuntime
-import com.agentisco.workspace.terminal.LinuxEnvironmentManager
+import com.agentisco.workspace.terminal.DebianBootstrap
+import com.agentisco.workspace.terminal.NativeBinaries
+import com.agentisco.workspace.terminal.ProotArgsBuilder
+import com.agentisco.workspace.terminal.ProotSessionManager
 import com.agentisco.workspace.terminal.TerminalProcessManager
+import com.termux.terminal.TerminalSessionClient
 import com.agentisco.workspace.git.GitRepositoryManager
 import com.agentisco.workspace.filesystem.ProjectFileSystem
 import android.content.Context
@@ -40,17 +44,24 @@ class WorkspaceRepository(
 
   val fileSystem = ProjectFileSystem(baseDir)
   val gitManager = GitRepositoryManager(fileSystem)
-  val linuxEnv = LinuxEnvironmentManager(
-    fileSystem = fileSystem,
-    gitManager = gitManager,
-    activeProjectProvider = { _activeProject.value },
-    stagedFilesProvider = { _stagedFiles.value },
-    onStageFile = { f -> toggleFileStaged(f) },
-    onStageAll = { stageAll() },
-    onCommit = { msg -> commitStagedChanges() },
-    onRevertFile = { f -> rejectDiff(f) }
-  )
-  val terminalManager = TerminalProcessManager(linuxEnv)
+
+  // Real Linux terminal stack: proot binaries (bundled via jniLibs) + a
+  // Debian-based rootfs downloaded and verified on first use. Null when no
+  // Android context is available (unit tests / previews).
+  val nativeBinaries: NativeBinaries? = context?.let(::NativeBinaries)
+  val debianBootstrap: DebianBootstrap? = context?.let { ctx ->
+    nativeBinaries?.let { DebianBootstrap(ctx, it) }
+  }
+  private val prootSessionManager: ProotSessionManager? = context?.let { ctx ->
+    val bootstrap = debianBootstrap ?: return@let null
+    val bins = nativeBinaries ?: return@let null
+    ProotSessionManager(ctx, bins, bootstrap.rootfsDir)
+  }
+  val terminalManager = TerminalProcessManager {
+    val bootstrap = debianBootstrap?.takeIf { it.isBootstrapped() } ?: return@TerminalProcessManager null
+    val bins = nativeBinaries ?: return@TerminalProcessManager null
+    ProotArgsBuilder(bins, bootstrap.rootfsDir)
+  }
 
   // LLM communication + agent tooling. Providers are configuration only; the
   // protocol adapter is chosen from the provider config, never from its name.
@@ -142,16 +153,20 @@ class WorkspaceRepository(
   private val _commitHistory = MutableStateFlow<List<GitCommit>>(emptyList())
   val commitHistory: StateFlow<List<GitCommit>> = _commitHistory.asStateFlow()
 
-  // Terminal Sessions
+  // Terminal tabs (metadata only; the actual console lives in a real PTY
+  // session per tab, created on demand when the environment is bootstrapped).
   private val _terminalSessions = MutableStateFlow<List<TerminalSession>>(getInitialTerminalSessions())
   val terminalSessions: StateFlow<List<TerminalSession>> = _terminalSessions.asStateFlow()
 
   private val _activeTerminalSessionId = MutableStateFlow("term-1")
   val activeTerminalSessionId: StateFlow<String> = _activeTerminalSessionId.asStateFlow()
 
-  // Terminal command history (shared across sessions, like a shell's ~/.bash_history)
-  private val _terminalCommandHistory = MutableStateFlow<List<String>>(emptyList())
-  val terminalCommandHistory: StateFlow<List<String>> = _terminalCommandHistory.asStateFlow()
+  // Real PTY-backed terminal sessions keyed by tab id.
+  private val _ptySessions = MutableStateFlow<Map<String, com.termux.terminal.TerminalSession>>(emptyMap())
+  val ptySessions: StateFlow<Map<String, com.termux.terminal.TerminalSession>> = _ptySessions.asStateFlow()
+
+  /** Per-tab client bridges; the UI attaches a redraw callback to the visible one. */
+  val terminalClientRegistry = HashMap<String, TerminalClientBridge>()
 
   // AI Providers & Models — durable configuration via ProviderConfigStore.
   // A model belongs to exactly one provider record; the same model identifier
@@ -532,6 +547,13 @@ class WorkspaceRepository(
   }
 
   // Terminal actions
+
+  /** Runs the rootfs bootstrap (download → verify → extract → configure). */
+  fun startLinuxBootstrap() {
+    val bootstrap = debianBootstrap ?: return
+    repositoryScope.launch { bootstrap.bootstrap() }
+  }
+
   fun selectTerminalSession(id: String) {
     _activeTerminalSessionId.value = id
   }
@@ -541,30 +563,38 @@ class WorkspaceRepository(
     val newSession = TerminalSession(
       id = newId,
       name = name,
-      currentDir = _activeProject.value.path,
-      lines = listOf(
-        TerminalLine("Agentisco Terminal Environment v2.4 (Android Linux)", TerminalLineType.INFO),
-        TerminalLine("Current Dir: ${_activeProject.value.path}", TerminalLineType.INFO),
-        TerminalLine("Available: git, ssh, apt, pkg, termux-bridge, curl, node, python, sudo", TerminalLineType.INFO),
-        TerminalLine("Type 'help' for available commands, or 'apt install <pkg>' to install packages.", TerminalLineType.SUCCESS)
-      )
+      currentDir = _activeProject.value.path
     )
     _terminalSessions.update { it + newSession }
+    ensurePtySession(newId, name)
     _activeTerminalSessionId.value = newId
   }
 
+  /** Lazily creates the PTY-backed session for a tab once Debian is ready. */
+  fun ensurePtySession(tabId: String, name: String) {
+    val manager = prootSessionManager ?: return
+    if (_ptySessions.value.containsKey(tabId)) return
+    val bridge = terminalClientRegistry.getOrPut(tabId) { TerminalClientBridge() }
+    val session = manager.createSession(name, File(_activeProject.value.path), bridge)
+    if (session != null) {
+      _ptySessions.update { it + (tabId to session) }
+    }
+  }
+
   fun closeTerminalSession(id: String) {
+    _ptySessions.value[id]?.finishIfRunning()
+    _ptySessions.update { it - id }
+    terminalClientRegistry.remove(id)
+    closeTerminalSessionTab(id)
+  }
+
+  private fun closeTerminalSessionTab(id: String) {
     val currentList = _terminalSessions.value
     if (currentList.size <= 1) {
       val resetSession = TerminalSession(
         id = "term-${System.currentTimeMillis()}",
         name = "main",
-        currentDir = _activeProject.value.path,
-        lines = listOf(
-          TerminalLine("Agentisco Terminal Environment v2.4 (Android Linux)", TerminalLineType.INFO),
-          TerminalLine("Current Dir: ${_activeProject.value.path}", TerminalLineType.INFO),
-          TerminalLine("Session cleared. Type 'help' for developer tools.", TerminalLineType.SUCCESS)
-        )
+        currentDir = _activeProject.value.path
       )
       _terminalSessions.value = listOf(resetSession)
       _activeTerminalSessionId.value = resetSession.id
@@ -578,148 +608,53 @@ class WorkspaceRepository(
     }
   }
 
-  private var pendingTerminalApprovalAction: ((Boolean) -> Unit)? = null
-
-  private fun appendTerminalHistory(command: String) {
-    if (command.isBlank()) return
-    _terminalCommandHistory.update { history ->
-      val next = if (history.lastOrNull() == command) history else history + command
-      if (next.size > MAX_HISTORY_SIZE) next.drop(next.size - MAX_HISTORY_SIZE) else next
-    }
-  }
-
-  fun executeTerminalCommand(command: String, bypassGuard: Boolean = false) {
-    val cleanCmd = command.trim()
-    if (cleanCmd.isEmpty()) return
-
-    val currentId = _activeTerminalSessionId.value
-    val session = _terminalSessions.value.firstOrNull { it.id == currentId } ?: return
-
-    if (!bypassGuard) {
-      val assessment = DestructiveCommandGuard.assess(cleanCmd)
-      if (assessment != null) {
-        _terminalSessions.update { list ->
-          list.map { s ->
-            if (s.id == currentId) {
-              s.copy(
-                lines = s.lines + listOf(
-                  TerminalLine("$ $cleanCmd", TerminalLineType.COMMAND),
-                  TerminalLine("⚠️ DESTRUCTIVE ACTION GUARD TRIGGERED", TerminalLineType.STDERR),
-                  TerminalLine("Command: $cleanCmd", TerminalLineType.STDERR),
-                  TerminalLine("Impact: ${assessment.reason}", TerminalLineType.STDERR),
-                  TerminalLine("A safety confirmation is required. Please review the dialog to proceed.", TerminalLineType.INFO)
-                ),
-                isRunning = false
-              )
-            } else s
-          }
-        }
-
-        val approval = PendingApproval(
-          id = "guard-${System.currentTimeMillis()}",
-          command = cleanCmd,
-          title = assessment.title,
-          impactDescription = assessment.reason,
-          isDestructive = true
-        )
-
-        pendingTerminalApprovalAction = { allowed ->
-          if (allowed) {
-            _terminalSessions.update { list ->
-              list.map { s ->
-                if (s.id == currentId) {
-                  s.copy(
-                    lines = s.lines + TerminalLine("✓ Safety confirmation granted by user. Executing...", TerminalLineType.SUCCESS)
-                  )
-                } else s
-              }
-            }
-            appendTerminalHistory(cleanCmd)
-            executeTerminalCommandInternal(cleanCmd, currentId)
-          } else {
-            _terminalSessions.update { list ->
-              list.map { s ->
-                if (s.id == currentId) {
-                  s.copy(
-                    lines = s.lines + TerminalLine("✗ Aborted: Destructive execution cancelled by user.", TerminalLineType.STDERR)
-                  )
-                } else s
-              }
-            }
-          }
-        }
-
-        requestApproval(approval)
-        return
-      }
-    }
-
-    // Record in history before echoing the command line (also covers `clear`)
-    appendTerminalHistory(cleanCmd)
-
-    // Add command input line immediately
-    _terminalSessions.update { list ->
-      list.map { s ->
-        if (s.id == currentId) {
-          if (cleanCmd == "clear") {
-            s.copy(lines = emptyList(), isRunning = false)
-          } else {
-            s.copy(
-              lines = s.lines + TerminalLine("$ $cleanCmd", TerminalLineType.COMMAND),
-              isRunning = true
-            )
-          }
-        } else s
-      }
-    }
-
-    if (cleanCmd == "clear") return
-
-    executeTerminalCommandInternal(cleanCmd, currentId)
-  }
-
-  private fun executeTerminalCommandInternal(cleanCmd: String, currentId: String) {
-    val session = _terminalSessions.value.firstOrNull { it.id == currentId } ?: return
-
-    _terminalSessions.update { list ->
-      list.map { s ->
-        if (s.id == currentId) s.copy(isRunning = true) else s
-      }
-    }
-
-    repositoryScope.launch {
-      val exitCode = terminalManager.executeCommand(session, cleanCmd) { line ->
-        _terminalSessions.update { list ->
-          list.map { s ->
-            if (s.id == currentId) {
-              s.copy(lines = s.lines + line)
-            } else s
-          }
-        }
-      }
-
-      _terminalSessions.update { list ->
-        list.map { s ->
-          if (s.id == currentId) s.copy(isRunning = false) else s
-        }
-      }
-
-      // Check if command might have affected files or git
-      if (cleanCmd.startsWith("touch") || cleanCmd.startsWith("rm") || cleanCmd.startsWith("mkdir") || cleanCmd.startsWith("git")) {
-        refreshFiles()
-      }
-    }
-  }
-
   fun interruptTerminal(sessionId: String = _activeTerminalSessionId.value) {
-    terminalManager.interrupt(sessionId)
-    _terminalSessions.update { list ->
-      list.map { s ->
-        if (s.id == sessionId) {
-          s.copy(lines = s.lines + TerminalLine("^C (Interrupted)", TerminalLineType.STDERR), isRunning = false)
-        } else s
-      }
+    _ptySessions.value[sessionId]?.let { session ->
+      // Send a real INTR character through the PTY: the foreground process
+      // group inside the rootfs receives SIGINT exactly like a Linux terminal.
+      session.write(byteArrayOf(0x03), 0, 1)
     }
+    terminalManager.interrupt(sessionId)
+  }
+
+  /** Writes a full command line (plus newline) into the active PTY session. */
+  fun sendTerminalLine(command: String) {
+    val id = _activeTerminalSessionId.value
+    _ptySessions.value[id]?.let { session ->
+      val bytes = (command + "\n").toByteArray(Charsets.UTF_8)
+      session.write(bytes, 0, bytes.size)
+    }
+  }
+
+  /**
+   * Bridges a PTY session to the visible terminal view: text changes trigger
+   * the registered redraw callback, everything else is ignored.
+   */
+  class TerminalClientBridge : TerminalSessionClient {
+    @Volatile var redrawCallback: (() -> Unit)? = null
+
+    override fun onTextChanged(session: com.termux.terminal.TerminalSession) {
+      redrawCallback?.invoke()
+    }
+    override fun onTitleChanged(session: com.termux.terminal.TerminalSession) {}
+    override fun onSessionFinished(session: com.termux.terminal.TerminalSession) {
+      redrawCallback?.invoke()
+    }
+    override fun onCopyTextToClipboard(session: com.termux.terminal.TerminalSession, text: String) {}
+    override fun onPasteTextFromClipboard(session: com.termux.terminal.TerminalSession) {}
+    override fun onBell(session: com.termux.terminal.TerminalSession) {}
+    override fun onColorsChanged(session: com.termux.terminal.TerminalSession) {
+      redrawCallback?.invoke()
+    }
+    override fun onTerminalCursorStateChange(state: Boolean) {}
+    override fun getTerminalCursorStyle(): Int = 0
+    override fun logError(tag: String, message: String) {}
+    override fun logWarn(tag: String, message: String) {}
+    override fun logInfo(tag: String, message: String) {}
+    override fun logDebug(tag: String, message: String) {}
+    override fun logVerbose(tag: String, message: String) {}
+    override fun logStackTraceWithMessage(tag: String, message: String, e: Exception) {}
+    override fun logStackTrace(tag: String, e: Exception) {}
   }
 
   // Permission handling
@@ -733,9 +668,6 @@ class WorkspaceRepository(
 
   fun resolveApproval(allowed: Boolean) {
     _pendingApproval.value = null
-    val terminalAction = pendingTerminalApprovalAction
-    pendingTerminalApprovalAction = null
-    terminalAction?.invoke(allowed)
     agentRuntime.resolvePendingApproval(allowed)
   }
 
@@ -814,31 +746,14 @@ class WorkspaceRepository(
   }
 
   companion object {
-    private const val MAX_HISTORY_SIZE = 500
-
     fun getInitialTerminalSessions(): List<TerminalSession> {
       return listOf(
         TerminalSession(
           id = "term-1",
           name = "main",
-          currentDir = "~/projects/agentisco",
-          lines = listOf(
-            TerminalLine("Agentisco Developer Shell v2.4 (Android sh)", TerminalLineType.INFO),
-            TerminalLine("Working directory initialized.", TerminalLineType.INFO)
-          )
-        ),
-        TerminalSession(
-          id = "term-2",
-          name = "dev-server",
-          currentDir = "~/projects/agentisco",
-          lines = listOf(
-            TerminalLine("> vite --port 5173", TerminalLineType.COMMAND),
-            TerminalLine("VITE v5.2.0  ready in 280 ms", TerminalLineType.SUCCESS),
-            TerminalLine("➜  Local:   http://localhost:5173/", TerminalLineType.SUCCESS)
-          )
+          currentDir = "~/projects/agentisco"
         )
       )
     }
-
   }
 }
