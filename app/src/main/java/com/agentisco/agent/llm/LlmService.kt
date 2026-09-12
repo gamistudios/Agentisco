@@ -117,6 +117,9 @@ internal abstract class BaseLlmClient(protected val http: OkHttpClient) {
     var sawAnyData = false
   }
 
+  /** org.json renders JSON null as the literal string "null" — treat it as absent. */
+  internal fun cleanWireString(v: String?): String = if (v.isNullOrEmpty() || v == "null") "" else v
+
   internal fun normalizeArgs(raw: String?): String {
     val text = raw?.trim().orEmpty()
     if (text.isEmpty() || text == "null") return "{}"
@@ -326,8 +329,6 @@ internal class OpenAIChatCompletionsClient(http: OkHttpClient) : BaseLlmClient(h
     return false
   }
 
-  /** org.json renders JSON null as the literal string "null" — treat it as absent. */
-  private fun cleanWireString(v: String?): String = if (v.isNullOrEmpty() || v == "null") "" else v
 
   override suspend fun probeModels(provider: AIProvider, apiKey: String): Pair<Boolean, String> {
     return try {

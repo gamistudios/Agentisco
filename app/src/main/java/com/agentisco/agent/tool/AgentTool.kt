@@ -8,6 +8,15 @@ import com.agentisco.data.model.TerminalSession
 import org.json.JSONArray
 import org.json.JSONObject
 
+/** Structured result returned to the model after a tool executes. */
+data class ToolResult(
+  val success: Boolean,
+  val output: String = "",
+  val error: String? = null,
+  val exitCode: Int? = null,
+  val metadata: Map<String, String> = emptyMap()
+)
+
 /**
  * Canonical internal tool schema. Every tool declares its parameters once,
  * here; provider-specific wire formats (OpenAI function JSON Schema, Anthropic
