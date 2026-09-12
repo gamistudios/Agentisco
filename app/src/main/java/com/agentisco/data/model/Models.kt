@@ -11,7 +11,11 @@ data class Project(
   val isDirty: Boolean = false,
   val activeSessionText: String? = null,
   val description: String = "",
-  val path: String = "~/projects"
+  val path: String = "~/projects",
+  /** True when the project's root folder no longer exists on disk. */
+  val isMissing: Boolean = false,
+  /** True when the project was registered from an existing folder. */
+  val isImported: Boolean = false
 )
 
 data class ProjectFile(

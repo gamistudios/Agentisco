@@ -52,7 +52,13 @@ class ProotSessionManager(
       "/bin/bash", "-lc", shellScript
     )
 
-    val (argv, hostEnv) = argsBuilder.buildCommand(guestCommand)
+    // Bind the project folder into the guest and start the shell there, so
+    // the terminal always opens in the workspace it was launched from.
+    val (argv, hostEnv) = if (projectDir != null && projectDir.isDirectory) {
+      argsBuilder.buildCommand(guestCommand, workingDir = ProotArgsBuilder.WORKSPACE_GUEST_PATH, bindHostDir = projectDir)
+    } else {
+      argsBuilder.buildCommand(guestCommand)
+    }
     val envArray = hostEnv.map { (k, v) -> "$k=$v" }.toTypedArray()
 
     val cwd = projectDir?.takeIf { it.isDirectory && it.canRead() } ?: appFilesDir

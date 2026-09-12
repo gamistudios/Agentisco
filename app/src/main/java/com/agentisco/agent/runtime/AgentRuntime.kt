@@ -64,6 +64,7 @@ class AgentRuntime(
     apiKey: String,
     permissions: AgentPermissions,
     terminalSession: TerminalSession,
+    history: List<Pair<String, String>> = emptyList(),
     onRequestApproval: (PendingApproval) -> Unit,
     onEvent: (AgentStreamEvent) -> Unit
   ): AgentTaskResult = withContext(Dispatchers.IO) {
@@ -76,7 +77,13 @@ class AgentRuntime(
     }
 
     val systemPrompt = buildSystemPrompt(project, useTools)
-    val messages = mutableListOf(LlmMessage(LlmRole.SYSTEM, systemPrompt), LlmMessage(LlmRole.USER, prompt))
+    val messages = mutableListOf<LlmMessage>()
+    messages.add(LlmMessage(LlmRole.SYSTEM, systemPrompt))
+    // Prior conversation of the persisted session, so follow-up prompts keep context.
+    for ((role, text) in history) {
+      messages.add(LlmMessage(if (role == "user") LlmRole.USER else LlmRole.ASSISTANT, text))
+    }
+    messages.add(LlmMessage(LlmRole.USER, prompt))
     val modifiedFiles = linkedSetOf<String>()
     val maxIterations = permissions.maxToolIterations.coerceAtLeast(1)
 

@@ -49,45 +49,107 @@ class ProjectFileSystem(private val baseDir: File) {
     }
   }
 
-  fun createProject(name: String, description: String): Project {
+  /**
+   * Suggests a fresh default root for a new project under the projects base
+   * directory (`~/projects/<name>` from the user's point of view).
+   */
+  fun suggestDefaultRoot(name: String): File {
+    val slug = name.lowercase().replace("[^a-z0-9]+".toRegex(), "-").trim('-')
+      .ifBlank { "project-${System.currentTimeMillis()}" }
+    var dir = File(baseDir, slug)
+    var n = 2
+    while (dir.exists()) {
+      dir = File(baseDir, "$slug-$n")
+      n++
+    }
+    return dir
+  }
+
+  /** The real folder new projects live in when no custom location is chosen. */
+  fun defaultProjectsRoot(): File = baseDir
+
+  /**
+   * Creates a project rooted at [rootPath], or at a fresh default folder under
+   * the projects base directory when [rootPath] is null. Scaffolds starter
+   * files only in a newly created/empty folder — never over existing content.
+   */
+  fun createProject(name: String, description: String, rootPath: File? = null): Project {
     val cleanName = name.ifBlank { "Untitled Project" }
     val slug = cleanName.lowercase().replace("[^a-z0-9]+".toRegex(), "-").trim('-').ifBlank { "project-${System.currentTimeMillis()}" }
-    val projDir = File(baseDir, slug)
-    if (!projDir.exists()) {
-      projDir.mkdirs()
+    val projDir = rootPath ?: File(baseDir, slug)
+    val existedBefore = projDir.exists()
+    if (!projDir.exists() && !projDir.mkdirs()) {
+      throw java.io.IOException("Could not create folder: ${projDir.absolutePath}")
+    }
+    if (!projDir.isDirectory || !projDir.canRead()) {
+      throw java.io.IOException("Folder is not usable: ${projDir.absolutePath}")
     }
     // write metadata and name
     File(projDir, ".sco_name").writeText(cleanName)
     File(projDir, ".sco_meta").writeText(description.ifBlank { "Created in Agentisco" })
-    // create basic README and package.json
-    File(projDir, "README.md").writeText("# $cleanName\n\n${description}\n")
-    File(projDir, "package.json").writeText(
-      """
-      {
-        "name": "$slug",
-        "version": "1.0.0",
-        "private": true,
-        "scripts": {
-          "dev": "vite",
-          "build": "tsc && vite build",
-          "test": "vitest run"
+    // Scaffold starter files only when the folder has no content (never
+    // overwrite whatever the user pointed us at).
+    val hasContent = projDir.listFiles()?.any { !it.name.startsWith(".") } == true
+    if (!hasContent) {
+      // create basic README and package.json
+      File(projDir, "README.md").writeText("# $cleanName\n\n${description}\n")
+      File(projDir, "package.json").writeText(
+        """
+        {
+          "name": "$slug",
+          "version": "1.0.0",
+          "private": true,
+          "scripts": {
+            "dev": "vite",
+            "build": "tsc && vite build",
+            "test": "vitest run"
+          }
         }
-      }
-      """.trimIndent()
-    )
-    val srcDir = File(projDir, "src")
-    srcDir.mkdirs()
-    File(srcDir, "index.ts").writeText("// Entry point for $name\nconsole.log('Starting $name');\n")
+        """.trimIndent()
+      )
+      val srcDir = File(projDir, "src")
+      srcDir.mkdirs()
+      File(srcDir, "index.ts").writeText("// Entry point for $name\nconsole.log('Starting $name');\n")
+    }
 
     return Project(
-      id = "proj-$slug",
+      id = "proj-${projDir.name}-${Integer.toHexString(projDir.absolutePath.hashCode())}",
       name = name.ifBlank { "Untitled Project" },
       branch = "main",
       lastActivity = "Just now",
       changedFilesCount = 0,
       isDirty = false,
       description = description,
-      path = projDir.absolutePath
+      path = projDir.absolutePath,
+      isImported = existedBefore
+    )
+  }
+
+  /**
+   * Registers an existing folder as a project without touching its content.
+   * Throws [IllegalArgumentException] when the folder does not exist or is
+   * not readable.
+   */
+  fun importProject(rootPath: File, displayName: String? = null): Project {
+    if (!rootPath.isDirectory || !rootPath.canRead()) {
+      throw IllegalArgumentException("Folder not found or not readable: ${rootPath.absolutePath}")
+    }
+    val name = (displayName ?: rootPath.name).ifBlank { rootPath.name }
+    val metaFile = File(rootPath, ".sco_name")
+    if (!metaFile.exists()) {
+      runCatching { metaFile.writeText(name) }
+      runCatching { File(rootPath, ".sco_meta").writeText("Imported folder") }
+    }
+    return Project(
+      id = "proj-${rootPath.name}-${Integer.toHexString(rootPath.absolutePath.hashCode())}",
+      name = name,
+      branch = "main",
+      lastActivity = "Just now",
+      changedFilesCount = 0,
+      isDirty = false,
+      description = File(rootPath, ".sco_meta").takeIf { it.exists() }?.readText().orEmpty(),
+      path = rootPath.absolutePath,
+      isImported = true
     )
   }
 

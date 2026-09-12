@@ -1,8 +1,12 @@
+@file:OptIn(ExperimentalFoundationApi::class, ExperimentalMaterial3Api::class)
+
 package com.agentisco.ui.screens
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -11,14 +15,21 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.outlined.Build
 import androidx.compose.material.icons.outlined.Commit
+import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Search
@@ -31,6 +42,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -44,12 +57,21 @@ import androidx.compose.animation.core.tween
 import com.agentisco.agent.model.PermissionMode
 import com.agentisco.agent.model.ToolType
 import com.agentisco.core.model.AppDestination
-import com.agentisco.data.model.Project
-import com.agentisco.ui.AgentStreamItem
+import com.agentisco.data.local.chat.AgentSessionEntity
+import com.agentisco.ui.AgentTurnItem
+import com.agentisco.ui.ActionBlock
+import com.agentisco.ui.ApprovalBlock
+import com.agentisco.ui.ChatItem
+import com.agentisco.ui.TextBlock
+import com.agentisco.ui.TurnBlock
+import com.agentisco.ui.TurnStatus
+import com.agentisco.ui.UserMessageItem
 import com.agentisco.ui.WorkspaceViewModel
+import com.agentisco.ui.components.MarkdownText
 import com.agentisco.ui.theme.*
 import kotlinx.coroutines.launch
 import org.json.JSONObject
+import java.util.Locale
 
 @Composable
 fun AgentScreen(
@@ -61,25 +83,29 @@ fun AgentScreen(
   val selectedModel by viewModel.selectedModel.collectAsState()
   val providers by viewModel.providers.collectAsState()
   val isWorking by viewModel.isAgentWorking.collectAsState()
-  val stream by viewModel.agentStream.collectAsState()
+  val chatItems by viewModel.chatItems.collectAsState()
   val permissions by viewModel.permissions.collectAsState()
   val allModels by viewModel.aiModels.collectAsState()
+  val sessions by viewModel.chatSessions.collectAsState()
+  val activeSession by viewModel.activeChatSession.collectAsState()
 
   var promptText by remember { mutableStateOf("") }
+  var showSessionSheet by remember { mutableStateOf(false) }
+  var renameTarget by remember { mutableStateOf<AgentSessionEntity?>(null) }
   val listState = rememberLazyListState()
   val scope = rememberCoroutineScope()
 
-  // Auto-follow: scroll as new events arrive, but only while the user is at the
-  // bottom; otherwise they keep their position and get a "Jump to latest" chip.
+  // Auto-follow: scroll as new activity arrives, but only while the user is at
+  // the bottom; otherwise they keep their position and get a "Jump to latest" chip.
   val autoFollow by remember { derivedStateOf {
     val info = listState.layoutInfo
     val last = info.visibleItemsInfo.lastOrNull()?.index ?: 0
     val total = info.totalItemsCount
     total <= 2 || last >= total - 3
   } }
-  LaunchedEffect(stream) {
-    if (stream.isNotEmpty() && autoFollow) {
-      listState.animateScrollToItem(stream.size) // bottom spacer item
+  LaunchedEffect(chatItems) {
+    if (chatItems.isNotEmpty() && autoFollow) {
+      listState.animateScrollToItem(chatItems.size) // bottom spacer item
     }
   }
 
@@ -90,14 +116,77 @@ fun AgentScreen(
       // Keep the composer usable above the soft keyboard.
       .imePadding()
   ) {
-    // Compact agent header: live agent state only — model selection lives in the composer.
+    // Session bar: current conversation + session management.
     Row(
       modifier = Modifier
         .fillMaxWidth()
-        .padding(horizontal = 14.dp, vertical = 8.dp),
-      horizontalArrangement = Arrangement.End,
+        .padding(horizontal = 10.dp, vertical = 6.dp),
+      horizontalArrangement = Arrangement.spacedBy(8.dp),
       verticalAlignment = Alignment.CenterVertically
     ) {
+      // Current session selector (opens the session sheet).
+      Surface(
+        onClick = { showSessionSheet = true },
+        shape = RoundedCornerShape(8.dp),
+        color = DarkSurface,
+        border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorderSubtle),
+        modifier = Modifier
+          .weight(1f)
+          .testTag("btn_sessions")
+      ) {
+        Row(
+          modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Icon(
+            Icons.AutoMirrored.Filled.Chat,
+            contentDescription = null,
+            tint = ElectricBlueGlow,
+            modifier = Modifier.size(13.dp)
+          )
+          Spacer(modifier = Modifier.width(7.dp))
+          Column(modifier = Modifier.weight(1f)) {
+            Text(
+              text = activeSession?.title ?: "New conversation",
+              color = TextPrimary,
+              fontSize = 12.sp,
+              fontWeight = FontWeight.SemiBold,
+              maxLines = 1,
+              overflow = TextOverflow.Ellipsis
+            )
+            Text(
+              text = activeSession?.let { "${sessions.size} session${if (sessions.size == 1) "" else "s"} · ${relativeTime(it.updatedAt)}" }
+                ?: "Start chatting to create one",
+              color = TextMuted,
+              fontSize = 9.sp,
+              maxLines = 1,
+              overflow = TextOverflow.Ellipsis
+            )
+          }
+          Icon(
+            Icons.Default.KeyboardArrowDown,
+            contentDescription = "Switch session",
+            tint = TextMuted,
+            modifier = Modifier.size(14.dp)
+          )
+        }
+      }
+
+      // New chat button.
+      IconButton(
+        onClick = { viewModel.createChatSession() },
+        enabled = !isWorking,
+        modifier = Modifier
+          .size(32.dp)
+          .clip(RoundedCornerShape(8.dp))
+          .background(DarkSurface)
+          .border(1.dp, DarkBorderSubtle, RoundedCornerShape(8.dp))
+          .testTag("btn_new_session")
+      ) {
+        Icon(Icons.Default.Add, contentDescription = "New session", tint = TextSecondary, modifier = Modifier.size(16.dp))
+      }
+
+      // Live agent state + stop.
       if (isWorking) {
         Row(verticalAlignment = Alignment.CenterVertically) {
           Box(
@@ -106,13 +195,11 @@ fun AgentScreen(
               .clip(CircleShape)
               .background(ElectricBlueGlow)
           )
-          Spacer(modifier = Modifier.width(5.dp))
-          Text("Working…", color = ElectricBlueGlow, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-          Spacer(modifier = Modifier.width(8.dp))
+          Spacer(modifier = Modifier.width(4.dp))
           IconButton(
             onClick = { viewModel.cancelAgent() },
             modifier = Modifier
-              .size(30.dp)
+              .size(32.dp)
               .clip(RoundedCornerShape(8.dp))
               .background(DangerRed.copy(alpha = 0.15f))
               .border(1.dp, DangerRed, RoundedCornerShape(8.dp))
@@ -121,50 +208,52 @@ fun AgentScreen(
             Icon(Icons.Default.Stop, contentDescription = "Stop agent", tint = DangerRed, modifier = Modifier.size(15.dp))
           }
         }
-      } else {
-        Text("Ready", color = TextMuted, fontSize = 11.sp)
       }
     }
 
-    // Live agent event stream (the primary surface).
+    // Conversation (the primary surface).
     Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
       LazyColumn(
         state = listState,
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
       ) {
-        if (stream.isEmpty()) {
+        if (chatItems.isEmpty()) {
           item(key = "empty") {
             AgentEmptyState(
               project = activeProject,
+              hasHistory = activeSession != null,
               onSuggestion = { promptText = it }
             )
           }
         } else {
-          items(stream, key = { it.id }) { item ->
-            AgentStreamItemView(
-              item = item,
-              onAllow = { viewModel.resolveApproval(true) },
-              onDeny = { viewModel.resolveApproval(false) },
-              onNavigate = onNavigate
-            )
+          items(chatItems, key = { it.id }) { item ->
+            when (item) {
+              is UserMessageItem -> UserBubble(item)
+              is AgentTurnItem -> AgentTurnCard(
+                item = item,
+                onAllow = { viewModel.resolveApproval(true) },
+                onDeny = { viewModel.resolveApproval(false) },
+                onNavigate = onNavigate
+              )
+            }
           }
         }
         item(key = "bottom-spacer") { Spacer(modifier = Modifier.height(12.dp)) }
       }
 
       // Don't fight the user's scroll: offer a jump control instead.
-      if (stream.isNotEmpty()) {
-        val showJump by remember(stream.size) { derivedStateOf {
+      if (chatItems.isNotEmpty()) {
+        val showJump by remember(chatItems.size) { derivedStateOf {
           val info = listState.layoutInfo
           val last = info.visibleItemsInfo.lastOrNull()?.index ?: 0
-          last < stream.size - 1
+          last < chatItems.size
         } }
         if (showJump) {
           Surface(
             onClick = {
-              scope.launch { listState.animateScrollToItem(stream.size) }
+              scope.launch { listState.animateScrollToItem(chatItems.size) }
             },
             shape = CircleShape,
             color = DarkSurfaceElevated,
@@ -178,7 +267,7 @@ fun AgentScreen(
               modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
               verticalAlignment = Alignment.CenterVertically
             ) {
-              Icon(Icons.Default.Check, contentDescription = null, tint = ElectricBlueGlow, modifier = Modifier.size(12.dp))
+              Icon(Icons.Default.KeyboardArrowDown, contentDescription = null, tint = ElectricBlueGlow, modifier = Modifier.size(12.dp))
               Spacer(modifier = Modifier.width(4.dp))
               Text("Jump to latest", color = TextSecondary, fontSize = 11.sp)
             }
@@ -207,14 +296,343 @@ fun AgentScreen(
       onStop = { viewModel.cancelAgent() }
     )
   }
+
+  // Session management sheet.
+  if (showSessionSheet) {
+    ModalBottomSheet(
+      onDismissRequest = { showSessionSheet = false },
+      containerColor = DarkSurface
+    ) {
+      SessionSheet(
+        sessions = sessions,
+        activeSessionId = activeSession?.id,
+        isWorking = isWorking,
+        onSelect = {
+          viewModel.selectChatSession(it.id)
+          showSessionSheet = false
+        },
+        onNew = {
+          viewModel.createChatSession()
+          showSessionSheet = false
+        },
+        onRename = { renameTarget = it },
+        onDelete = { viewModel.deleteChatSession(it.id) }
+      )
+    }
+  }
+
+  renameTarget?.let { target ->
+    var name by remember(target.id) { mutableStateOf(target.title) }
+    AlertDialog(
+      onDismissRequest = { renameTarget = null },
+      containerColor = DarkSurface,
+      title = { Text("Rename session", color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold) },
+      text = {
+        OutlinedTextField(
+          value = name,
+          onValueChange = { name = it },
+          singleLine = true,
+          modifier = Modifier.fillMaxWidth()
+        )
+      },
+      confirmButton = {
+        Button(
+          onClick = {
+            viewModel.renameChatSession(target.id, name)
+            renameTarget = null
+          },
+          colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue)
+        ) { Text("Save", fontSize = 12.sp) }
+      },
+      dismissButton = {
+        TextButton(onClick = { renameTarget = null }) { Text("Cancel", color = TextMuted, fontSize = 12.sp) }
+      }
+    )
+  }
 }
 
 @Composable
-private fun AgentEmptyState(project: Project, onSuggestion: (String) -> Unit) {
+private fun SessionSheet(
+  sessions: List<AgentSessionEntity>,
+  activeSessionId: String?,
+  isWorking: Boolean,
+  onSelect: (AgentSessionEntity) -> Unit,
+  onNew: () -> Unit,
+  onRename: (AgentSessionEntity) -> Unit,
+  onDelete: (AgentSessionEntity) -> Unit
+) {
+  Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp)) {
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically
+    ) {
+      Text("Sessions", color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+      TextButton(onClick = onNew, enabled = !isWorking) {
+        Icon(Icons.Default.Add, contentDescription = null, tint = ElectricBlueGlow, modifier = Modifier.size(14.dp))
+        Spacer(modifier = Modifier.width(4.dp))
+        Text("New chat", color = ElectricBlueGlow, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+      }
+    }
+    Spacer(modifier = Modifier.height(4.dp))
+    if (sessions.isEmpty()) {
+      Text(
+        "No sessions yet for this project. Send a prompt to start one.",
+        color = TextMuted,
+        fontSize = 12.sp,
+        modifier = Modifier.padding(vertical = 16.dp)
+      )
+    } else {
+      Column(
+        modifier = Modifier.padding(bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+      ) {
+        sessions.forEach { session ->
+          val isActive = session.id == activeSessionId
+          Row(
+            modifier = Modifier
+              .fillMaxWidth()
+              .clip(RoundedCornerShape(8.dp))
+              .background(if (isActive) DarkSurfaceElevated else Color.Transparent)
+              .border(
+                1.dp,
+                if (isActive) ElectricBlue.copy(alpha = 0.5f) else DarkBorderSubtle,
+                RoundedCornerShape(8.dp)
+              )
+              .clickable(enabled = !isWorking || !isActive) { onSelect(session) }
+              .padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            SessionStatusDot(session.status)
+            Spacer(modifier = Modifier.width(8.dp))
+            Column(modifier = Modifier.weight(1f)) {
+              Text(
+                session.title,
+                color = if (isActive) TextPrimary else TextSecondary,
+                fontSize = 12.sp,
+                fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+              )
+              Text(
+                "${relativeTime(session.updatedAt)} · ${session.status}",
+                color = TextMuted,
+                fontSize = 9.sp
+              )
+            }
+            IconButton(onClick = { onRename(session) }, modifier = Modifier.size(26.dp)) {
+              Icon(Icons.Default.Edit, contentDescription = "Rename", tint = TextMuted, modifier = Modifier.size(13.dp))
+            }
+            IconButton(onClick = { onDelete(session) }, modifier = Modifier.size(26.dp)) {
+              Icon(Icons.Default.Delete, contentDescription = "Delete", tint = DangerRed.copy(alpha = 0.7f), modifier = Modifier.size(13.dp))
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun SessionStatusDot(status: String) {
+  val color = when (status) {
+    "running" -> ElectricBlueGlow
+    "completed" -> TerminalGreen
+    "failed" -> DangerRed
+    "cancelled", "interrupted" -> WarningAmber
+    else -> TextMuted
+  }
+  Box(modifier = Modifier.size(7.dp).clip(CircleShape).background(color))
+}
+
+@Composable
+private fun UserBubble(item: UserMessageItem) {
+  val clipboard = LocalClipboardManager.current
+  Row(
+    modifier = Modifier.fillMaxWidth(),
+    horizontalArrangement = Arrangement.End
+  ) {
+    Column(
+      modifier = Modifier
+        .widthIn(max = 300.dp)
+        .clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp, bottomStart = 12.dp, bottomEnd = 4.dp))
+        .background(ElectricBlue.copy(alpha = 0.16f))
+        .border(1.dp, ElectricBlue.copy(alpha = 0.4f), RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp, bottomStart = 12.dp, bottomEnd = 4.dp))
+        .combinedClickable(
+          onClick = {},
+          onLongClick = { clipboard.setText(AnnotatedString(item.text)) }
+        )
+        .padding(horizontal = 12.dp, vertical = 8.dp)
+        .testTag("chat_user_message")
+    ) {
+      Text(
+        text = item.text,
+        color = TextPrimary,
+        fontSize = 13.sp,
+        lineHeight = 18.sp
+      )
+      Spacer(modifier = Modifier.height(3.dp))
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(relativeTime(item.timestamp), color = TextMuted, fontSize = 8.sp)
+        Spacer(modifier = Modifier.width(6.dp))
+        Icon(
+          Icons.Outlined.ContentCopy,
+          contentDescription = "Copy message",
+          tint = TextMuted,
+          modifier = Modifier
+            .size(10.dp)
+            .clickable { clipboard.setText(AnnotatedString(item.text)) }
+        )
+      }
+    }
+  }
+}
+
+@Composable
+private fun AgentTurnCard(
+  item: AgentTurnItem,
+  onAllow: () -> Unit,
+  onDeny: () -> Unit,
+  onNavigate: (AppDestination) -> Unit
+) {
+  val clipboard = LocalClipboardManager.current
+  val fullText = item.blocks.filterIsInstance<TextBlock>().joinToString("\n\n") { it.text }
+
+  Column(
+    modifier = Modifier
+      .fillMaxWidth()
+      .clip(RoundedCornerShape(12.dp))
+      .background(DarkSurface.copy(alpha = 0.7f))
+      .border(
+        1.dp,
+        when (item.status) {
+          TurnStatus.RUNNING -> ElectricBlue.copy(alpha = 0.45f)
+          TurnStatus.FAILED -> DangerRed.copy(alpha = 0.5f)
+          TurnStatus.CANCELLED, TurnStatus.INTERRUPTED -> WarningAmber.copy(alpha = 0.4f)
+          TurnStatus.COMPLETED -> DarkBorderSubtle
+        },
+        RoundedCornerShape(12.dp)
+      )
+      .padding(10.dp)
+      .testTag("chat_agent_turn")
+  ) {
+    // Turn header: identity + status.
+    Row(verticalAlignment = Alignment.CenterVertically) {
+      if (item.status == TurnStatus.RUNNING) {
+        val transition = rememberInfiniteTransition(label = "thinking")
+        val alpha by transition.animateFloat(
+          initialValue = 0.35f,
+          targetValue = 1f,
+          animationSpec = infiniteRepeatable(tween(700), RepeatMode.Reverse),
+          label = "thinking-alpha"
+        )
+        Icon(
+          Icons.Default.AutoAwesome,
+          contentDescription = null,
+          tint = ElectricBlueGlow.copy(alpha = alpha),
+          modifier = Modifier.size(14.dp)
+        )
+      } else {
+        Icon(
+          when (item.status) {
+            TurnStatus.COMPLETED -> Icons.Default.CheckCircle
+            TurnStatus.FAILED -> Icons.Default.Close
+            else -> Icons.Default.AutoAwesome
+          },
+          contentDescription = null,
+          tint = when (item.status) {
+            TurnStatus.COMPLETED -> TerminalGreen
+            TurnStatus.FAILED -> DangerRed
+            TurnStatus.RUNNING -> ElectricBlueGlow
+            else -> WarningAmber
+          },
+          modifier = Modifier.size(14.dp)
+        )
+      }
+      Spacer(modifier = Modifier.width(6.dp))
+      Text(
+        text = when (item.status) {
+          TurnStatus.RUNNING -> "Working"
+          TurnStatus.COMPLETED -> "Completed"
+          TurnStatus.FAILED -> "Failed"
+          TurnStatus.CANCELLED -> "Cancelled"
+          TurnStatus.INTERRUPTED -> "Interrupted"
+        },
+        color = when (item.status) {
+          TurnStatus.RUNNING -> ElectricBlueGlow
+          TurnStatus.COMPLETED -> TerminalGreen
+          TurnStatus.FAILED -> DangerRed
+          else -> WarningAmber
+        },
+        fontSize = 10.sp,
+        fontWeight = FontWeight.Bold
+      )
+      Spacer(modifier = Modifier.weight(1f))
+      if (fullText.isNotBlank() && item.status != TurnStatus.RUNNING) {
+        Icon(
+          Icons.Outlined.ContentCopy,
+          contentDescription = "Copy response",
+          tint = TextMuted,
+          modifier = Modifier
+            .size(13.dp)
+            .clickable { clipboard.setText(AnnotatedString(fullText)) }
+        )
+      }
+    }
+
+    // Live status line (what the agent is doing right now / why it stopped).
+    if (item.statusMessage.isNotBlank() &&
+      (item.status == TurnStatus.RUNNING || item.status == TurnStatus.FAILED || item.status == TurnStatus.CANCELLED || item.status == TurnStatus.INTERRUPTED) &&
+      item.blocks.none { it is TextBlock && it.text.isNotBlank() }
+    ) {
+      Spacer(modifier = Modifier.height(6.dp))
+      Row(verticalAlignment = Alignment.Top) {
+        Icon(
+          Icons.Default.Psychology,
+          contentDescription = null,
+          tint = CyanAccent.copy(alpha = 0.7f),
+          modifier = Modifier.size(14.dp)
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(item.statusMessage, color = TextSecondary, fontSize = 12.sp, lineHeight = 16.sp)
+      }
+    }
+
+    // Turn blocks in order: streamed text, tool actions, approvals.
+    item.blocks.forEach { block ->
+      Spacer(modifier = Modifier.height(7.dp))
+      when (block) {
+        is TextBlock -> {
+          if (block.text.isNotBlank()) {
+            MarkdownText(
+              text = block.text,
+              streaming = block.streaming,
+              modifier = Modifier.fillMaxWidth()
+            )
+          }
+        }
+        is ActionBlock -> ToolCallRow(block)
+        is ApprovalBlock -> ApprovalCard(block, onAllow, onDeny)
+      }
+    }
+
+    // Post-completion navigation affordances.
+    if (item.status == TurnStatus.COMPLETED && fullText.isNotBlank()) {
+      Spacer(modifier = Modifier.height(8.dp))
+      Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        MiniAction("Review changes") { onNavigate(AppDestination.DIFF) }
+        MiniAction("Open files") { onNavigate(AppDestination.FILES) }
+      }
+    }
+  }
+}
+
+@Composable
+private fun AgentEmptyState(project: com.agentisco.data.model.Project, hasHistory: Boolean, onSuggestion: (String) -> Unit) {
   Column(modifier = Modifier.fillMaxWidth()) {
     Spacer(modifier = Modifier.height(20.dp))
     Text(
-      text = "What are we building?",
+      text = if (hasHistory) "Continue where you left off" else "What are we building?",
       color = TextPrimary,
       fontSize = 20.sp,
       fontWeight = FontWeight.Bold,
@@ -251,84 +669,11 @@ private fun AgentEmptyState(project: Project, onSuggestion: (String) -> Unit) {
   }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun AgentStreamItemView(
-  item: AgentStreamItem,
-  onAllow: () -> Unit,
-  onDeny: () -> Unit,
-  onNavigate: (AppDestination) -> Unit
-) {
-  when (item) {
-    is AgentStreamItem.Status -> StatusRow(item)
-    is AgentStreamItem.AssistantText -> AssistantTextBlock(item)
-    is AgentStreamItem.ToolCall -> ToolCallRow(item)
-    is AgentStreamItem.Approval -> ApprovalCard(item, onAllow, onDeny)
-    is AgentStreamItem.Final -> FinalCard(item, onNavigate)
-  }
-}
-
-@Composable
-private fun StatusRow(item: AgentStreamItem.Status) {
-  Row(verticalAlignment = Alignment.Top) {
-    if (item.running) {
-      val transition = rememberInfiniteTransition(label = "thinking")
-      val alpha by transition.animateFloat(
-        initialValue = 0.35f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(700), RepeatMode.Reverse),
-        label = "thinking-alpha"
-      )
-      Icon(
-        Icons.Default.Psychology,
-        contentDescription = "Thinking",
-        tint = CyanAccent.copy(alpha = alpha),
-        modifier = Modifier.size(15.dp)
-      )
-    } else {
-      Icon(
-        Icons.Default.Psychology,
-        contentDescription = "Status",
-        tint = CyanAccent.copy(alpha = 0.6f),
-        modifier = Modifier.size(15.dp)
-      )
-    }
-    Spacer(modifier = Modifier.width(8.dp))
-    Column {
-      Text(
-        text = if (item.running) "Thinking" else "Status",
-        color = TextMuted,
-        fontSize = 10.sp,
-        fontWeight = FontWeight.SemiBold
-      )
-      Text(item.text, color = TextSecondary, fontSize = 12.sp, lineHeight = 16.sp)
-    }
-  }
-}
-
-@Composable
-private fun AssistantTextBlock(item: AgentStreamItem.AssistantText) {
-  Row(verticalAlignment = Alignment.Top) {
-    Icon(
-      Icons.Default.AutoAwesome,
-      contentDescription = null,
-      tint = ElectricBlueGlow,
-      modifier = Modifier
-        .size(14.dp)
-        .padding(top = 2.dp)
-    )
-    Spacer(modifier = Modifier.width(8.dp))
-    Text(
-      text = item.text + if (item.running) "▍" else "",
-      color = TextCode,
-      fontSize = 13.sp,
-      lineHeight = 18.sp
-    )
-  }
-}
-
-@Composable
-private fun ToolCallRow(item: AgentStreamItem.ToolCall) {
+private fun ToolCallRow(item: ActionBlock) {
   var expanded by remember(item.id) { mutableStateOf(false) }
+  val clipboard = LocalClipboardManager.current
   val (verb, target) = friendlyToolLabel(item.name, item.argsJson)
   val icon = toolIcon(item.name)
   val iconColor = toolColor(item.name)
@@ -347,7 +692,10 @@ private fun ToolCallRow(item: AgentStreamItem.ToolCall) {
         },
         RoundedCornerShape(10.dp)
       )
-      .clickable { if (item.detail.isNotBlank() || item.argsJson.isNotBlank()) expanded = !expanded }
+      .combinedClickable(
+        onClick = { if (item.detail.isNotBlank() || item.argsJson.isNotBlank()) expanded = !expanded },
+        onLongClick = { clipboard.setText(AnnotatedString(item.detail.ifBlank { item.argsJson })) }
+      )
       .padding(horizontal = 10.dp, vertical = 8.dp)
       .testTag("stream_tool_${item.name}")
   ) {
@@ -373,6 +721,17 @@ private fun ToolCallRow(item: AgentStreamItem.ToolCall) {
         item.success == true -> Icon(Icons.Default.CheckCircle, contentDescription = "Done", tint = TerminalGreen, modifier = Modifier.size(13.dp))
         item.success == false -> Icon(Icons.Default.Close, contentDescription = "Failed", tint = DangerRed, modifier = Modifier.size(13.dp))
       }
+      if (!item.running && item.detail.isNotBlank()) {
+        Spacer(modifier = Modifier.width(6.dp))
+        Icon(
+          Icons.Outlined.ContentCopy,
+          contentDescription = "Copy output",
+          tint = TextMuted,
+          modifier = Modifier
+            .size(12.dp)
+            .clickable { clipboard.setText(AnnotatedString(item.detail)) }
+        )
+      }
     }
 
     // Inline error/result one-liner
@@ -397,12 +756,32 @@ private fun ToolCallRow(item: AgentStreamItem.ToolCall) {
           .padding(8.dp)
       ) {
         if (item.argsJson.isNotBlank() && item.argsJson != "{}") {
-          Text("Arguments", color = TextMuted, fontSize = 9.sp)
+          Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Arguments", color = TextMuted, fontSize = 9.sp, modifier = Modifier.weight(1f))
+            Icon(
+              Icons.Outlined.ContentCopy,
+              contentDescription = "Copy arguments",
+              tint = TextMuted,
+              modifier = Modifier
+                .size(11.dp)
+                .clickable { clipboard.setText(AnnotatedString(item.argsJson)) }
+            )
+          }
           Text(prettyJson(item.argsJson), color = CyanAccent, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
           Spacer(modifier = Modifier.height(6.dp))
         }
         if (item.detail.isNotBlank()) {
-          Text("Output", color = TextMuted, fontSize = 9.sp)
+          Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Output", color = TextMuted, fontSize = 9.sp, modifier = Modifier.weight(1f))
+            Icon(
+              Icons.Outlined.ContentCopy,
+              contentDescription = "Copy output",
+              tint = TextMuted,
+              modifier = Modifier
+                .size(11.dp)
+                .clickable { clipboard.setText(AnnotatedString(item.detail)) }
+            )
+          }
           Text(item.detail, color = TextCode, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
         }
         item.exitCode?.let {
@@ -420,7 +799,7 @@ private fun ToolCallRow(item: AgentStreamItem.ToolCall) {
 }
 
 @Composable
-private fun ApprovalCard(item: AgentStreamItem.Approval, onAllow: () -> Unit, onDeny: () -> Unit) {
+private fun ApprovalCard(item: ApprovalBlock, onAllow: () -> Unit, onDeny: () -> Unit) {
   Column(
     modifier = Modifier
       .fillMaxWidth()
@@ -466,49 +845,6 @@ private fun ApprovalCard(item: AgentStreamItem.Approval, onAllow: () -> Unit, on
           contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
           modifier = Modifier.height(30.dp).testTag("btn_deny_tool")
         ) { Text("Deny", color = Color.White, fontSize = 11.sp) }
-      }
-    }
-  }
-}
-
-@Composable
-private fun FinalCard(item: AgentStreamItem.Final, onNavigate: (AppDestination) -> Unit) {
-  Column(
-    modifier = Modifier
-      .fillMaxWidth()
-      .clip(RoundedCornerShape(12.dp))
-      .background(DarkSurface)
-      .border(
-        1.dp,
-        if (item.success) TerminalGreen.copy(alpha = 0.6f) else DangerRed,
-        RoundedCornerShape(12.dp)
-      )
-      .padding(12.dp)
-      .testTag("stream_final_response")
-  ) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-      Icon(
-        if (item.success) Icons.Default.CheckCircle else Icons.Default.Close,
-        contentDescription = null,
-        tint = if (item.success) TerminalGreen else DangerRed,
-        modifier = Modifier.size(15.dp)
-      )
-      Spacer(modifier = Modifier.width(6.dp))
-      Text(
-        if (item.success) "Completed" else "Failed",
-        color = if (item.success) TerminalGreen else DangerRed,
-        fontSize = 11.sp,
-        fontWeight = FontWeight.Bold
-      )
-    }
-    Spacer(modifier = Modifier.height(6.dp))
-    Text(item.text, color = TextPrimary, fontSize = 13.sp, lineHeight = 18.sp)
-
-    if (item.success) {
-      Spacer(modifier = Modifier.height(8.dp))
-      Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        MiniAction("Review changes") { onNavigate(AppDestination.DIFF) }
-        MiniAction("Open files") { onNavigate(AppDestination.FILES) }
       }
     }
   }
@@ -749,6 +1085,18 @@ private fun ConfigDropdown(
 }
 
 // ---- helpers ----
+
+private fun relativeTime(timestamp: Long): String {
+  if (timestamp <= 0) return ""
+  val diff = System.currentTimeMillis() - timestamp
+  val minutes = diff / 60000
+  return when {
+    minutes < 1 -> "just now"
+    minutes < 60 -> "${minutes} min ago"
+    minutes < 60 * 24 -> "${minutes / 60}h ago"
+    else -> "${minutes / (60 * 24)}d ago"
+  }
+}
 
 private fun friendlyToolLabel(name: String, argsJson: String): Pair<String, String> {
   val args = runCatching { JSONObject(argsJson) }.getOrNull()

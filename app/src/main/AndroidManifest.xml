@@ -4,6 +4,10 @@
 
     <!-- Required for LLM provider communication (OkHttp) and terminal network tools. -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Importing/opening project folders outside app-private storage (e.g. SD card). -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
 
     <application
       android:name=".AgentiscoApplication"

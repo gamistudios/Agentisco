@@ -321,7 +321,11 @@ class RunCommandTool(private val tm: TerminalProcessManager) : AgentTool {
     }
 
     val out = StringBuilder()
-    val exitCode = tm.executeCommand(ctx.terminalSession, command) { line -> out.appendLine(line.text) }
+    val exitCode = tm.executeCommand(
+      ctx.terminalSession, command,
+      { line -> out.appendLine(line.text) },
+      projectDir = File(ctx.project.path).takeIf { it.isDirectory }
+    )
     return ToolResult(success = exitCode == 0, output = out.toString().trim().take(8000), exitCode = exitCode)
   }
 }
@@ -358,7 +362,11 @@ abstract class ScriptTool(
     val hasNpm = File(ctx.project.path, "package.json").exists()
     val command = if (hasNpm) "npm run $script${if (extra.isBlank()) "" else " -- $extra"}" else "echo 'No package.json in ${ctx.project.name}'"
     val out = StringBuilder()
-    val exitCode = tm.executeCommand(ctx.terminalSession, command) { line -> out.appendLine(line.text) }
+    val exitCode = tm.executeCommand(
+      ctx.terminalSession, command,
+      { line -> out.appendLine(line.text) },
+      projectDir = File(ctx.project.path).takeIf { it.isDirectory }
+    )
     return ToolResult(success = exitCode == 0, output = out.toString().trim().take(8000), exitCode = exitCode, metadata = mapOf("command" to command))
   }
 }

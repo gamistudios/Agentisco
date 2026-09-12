@@ -43,6 +43,9 @@ class WorkspaceRepository(
   private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
   private val appContext: Context? = context?.applicationContext
 
+  /** SQLite-backed persistence for agent sessions/messages/turn-blocks. */
+  val chatStore = AgentChatStore(context)
+
   val fileSystem = ProjectFileSystem(baseDir)
   val gitManager = GitRepositoryManager(fileSystem)
 
@@ -78,12 +81,72 @@ class WorkspaceRepository(
   )
   val agentRuntime = AgentRuntime(fileSystem, terminalManager, gitManager, llmService, toolRegistry)
 
-  // Current Projects
-  private val _projects = MutableStateFlow<List<Project>>(fileSystem.getProjects())
+  // Current Projects. The registry (projects.json) is the source of truth for
+  // each project's real root folder; legacy projects found on disk under the
+  // base directory are migrated into it on first launch.
+  val projectRegistry = com.agentisco.data.local.ProjectRegistryStore(context)
+  private val placeholderProject = Project(
+    id = "proj-none", name = "No project", branch = "main",
+    lastActivity = "", description = "Create or import a project to start",
+    path = "", isMissing = true
+  )
+  private val _projects = MutableStateFlow<List<Project>>(emptyList())
   val projects: StateFlow<List<Project>> = _projects.asStateFlow()
 
-  private val _activeProject = MutableStateFlow<Project>(_projects.value.first())
+  private val _activeProject = MutableStateFlow<Project>(placeholderProject)
   val activeProject: StateFlow<Project> = _activeProject.asStateFlow()
+
+  /** Rebuilds the project list from the registry, re-validating root folders. */
+  private fun refreshProjectList() {
+    val known = projectRegistry.all().map { entry ->
+      Project(
+        id = entry.id,
+        name = entry.name,
+        branch = "main",
+        lastActivity = relativeActivity(entry.lastOpenedAt),
+        changedFilesCount = 0,
+        isDirty = false,
+        description = entry.description,
+        path = entry.rootPath,
+        isMissing = !File(entry.rootPath).isDirectory,
+        isImported = entry.imported
+      )
+    }
+    // Legacy projects living under the base dir but not yet registered.
+    fileSystem.getProjects().forEach { legacy ->
+      if (known.none { it.path == legacy.path }) {
+        projectRegistry.upsert(
+          com.agentisco.data.local.ProjectRegistryEntry(
+            id = legacy.id, name = legacy.name, description = legacy.description,
+            rootPath = legacy.path,
+            createdAt = System.currentTimeMillis(),
+            lastOpenedAt = System.currentTimeMillis(),
+            imported = false
+          )
+        )
+      }
+    }
+    _projects.value = projectRegistry.all().map { entry ->
+      Project(
+        id = entry.id, name = entry.name, branch = "main",
+        lastActivity = relativeActivity(entry.lastOpenedAt),
+        description = entry.description, path = entry.rootPath,
+        isMissing = !File(entry.rootPath).isDirectory,
+        isImported = entry.imported
+      )
+    }
+  }
+
+  private fun relativeActivity(timestamp: Long): String {
+    if (timestamp <= 0) return "Active"
+    val minutes = (System.currentTimeMillis() - timestamp) / 60000
+    return when {
+      minutes < 1 -> "Just now"
+      minutes < 60 -> "${minutes}m ago"
+      minutes < 60 * 24 -> "${minutes / 60}h ago"
+      else -> "${minutes / (60 * 24)}d ago"
+    }
+  }
 
   // App Navigation Destination
   private val _currentDestination = MutableStateFlow(AppDestination.AGENT)
@@ -212,6 +275,10 @@ class WorkspaceRepository(
   val isDevServerRunning: StateFlow<Boolean> = _isDevServerRunning.asStateFlow()
 
   init {
+    refreshProjectList()
+    _activeProject.value = _projects.value.firstOrNull { !it.isMissing }
+      ?: _projects.value.firstOrNull()
+      ?: placeholderProject
     loadActiveProjectState(_activeProject.value)
     loadProviderConfiguration()
   }
@@ -345,6 +412,13 @@ class WorkspaceRepository(
   }
 
   private fun loadActiveProjectState(project: Project) {
+    if (project.path.isBlank()) {
+      _projectFiles.value = emptyList()
+      _editorContent.value = ""
+      _isEditorDirty.value = false
+      _fileDiffs.value = emptyList()
+      return
+    }
     gitManager.initializeProjectBaseline(project)
     val files = fileSystem.getFileTree(project)
     _projectFiles.value = files
@@ -397,14 +471,89 @@ class WorkspaceRepository(
   }
 
   fun selectProject(project: Project) {
+    projectRegistry.byPath(project.path)?.let { projectRegistry.touch(it.id) }
     _activeProject.value = project
     loadActiveProjectState(project)
   }
 
-  fun createProject(name: String, description: String) {
-    val newProj = fileSystem.createProject(name, description)
-    _projects.value = fileSystem.getProjects()
-    selectProject(newProj)
+  /**
+   * Creates a new project folder. When [rootPath] is blank the project lives
+   * under the default projects root (`~/projects/<name>`).
+   */
+  fun createProject(name: String, description: String, rootPath: String? = null): Project? {
+    return try {
+      val root = rootPath?.takeIf { it.isNotBlank() }?.let { expandProjectPath(it) }
+      val newProj = fileSystem.createProject(name, description, root)
+      projectRegistry.upsert(
+        com.agentisco.data.local.ProjectRegistryEntry(
+          id = newProj.id, name = newProj.name, description = newProj.description,
+          rootPath = newProj.path,
+          createdAt = System.currentTimeMillis(),
+          lastOpenedAt = System.currentTimeMillis(),
+          imported = false
+        )
+      )
+      refreshProjectList()
+      selectProject(newProj)
+      newProj
+    } catch (e: Exception) {
+      android.util.Log.e("ScoOS-Projects", "Failed to create project", e)
+      _agentStatusText.value = "Could not create project: ${e.message}"
+      null
+    }
+  }
+
+  /** Registers an existing folder as a project. Returns null when invalid. */
+  fun importProject(rootPath: String, displayName: String? = null): Project? {
+    return try {
+      val imported = fileSystem.importProject(expandProjectPath(rootPath), displayName)
+      projectRegistry.upsert(
+        com.agentisco.data.local.ProjectRegistryEntry(
+          id = imported.id, name = imported.name, description = imported.description,
+          rootPath = imported.path,
+          createdAt = System.currentTimeMillis(),
+          lastOpenedAt = System.currentTimeMillis(),
+          imported = true
+        )
+      )
+      refreshProjectList()
+      selectProject(imported)
+      imported
+    } catch (e: Exception) {
+      android.util.Log.e("ScoOS-Projects", "Failed to import project", e)
+      _agentStatusText.value = "Could not import folder: ${e.message}"
+      null
+    }
+  }
+
+  /** Forgets a project (folder and its sessions are kept on disk). */
+  fun removeProject(project: Project) {
+    projectRegistry.remove(project.id)
+    refreshProjectList()
+    if (_activeProject.value.id == project.id) {
+      _activeProject.value = _projects.value.firstOrNull { !it.isMissing }
+        ?: _projects.value.firstOrNull()
+        ?: placeholderProject
+      loadActiveProjectState(_activeProject.value)
+    }
+  }
+
+  /** Re-validates root folders (moved/deleted projects) and refreshes recency. */
+  fun refreshProjects() {
+    refreshProjectList()
+    _activeProject.value = _projects.value.firstOrNull { it.id == _activeProject.value.id }
+      ?: _activeProject.value
+  }
+
+  /** Resolves user-entered locations: `~` maps to the projects root directory. */
+  private fun expandProjectPath(raw: String): File {
+    val trimmed = raw.trim()
+    val resolved = when {
+      trimmed == "~" || trimmed.startsWith("~/") ->
+        File(fileSystem.defaultProjectsRoot(), trimmed.removePrefix("~").removePrefix("/"))
+      else -> File(trimmed)
+    }
+    return File(resolved.absolutePath)
   }
 
   fun openFile(file: ProjectFile) {
@@ -687,8 +836,9 @@ class WorkspaceRepository(
     agentRuntime.resolvePendingApproval(allowed)
   }
 
-  // Run Real Agent Task Workflow
-  suspend fun runAgentTask(prompt: String) {
+  // Run Real Agent Task Workflow. `sessionId` ties the run to a persisted chat
+  // session and feeds prior conversation turns back to the model.
+  suspend fun runAgentTask(prompt: String, sessionId: String? = null) {
     if (_isAgentWorking.value) return
 
     val model = _selectedModel.value
@@ -721,6 +871,7 @@ class WorkspaceRepository(
       apiKey = apiKey,
       permissions = _permissions.value,
       terminalSession = currentSession,
+      history = sessionId?.let { chatStore.conversationHistory(it) } ?: emptyList(),
       onRequestApproval = { approval -> _pendingApproval.value = approval },
       onEvent = { event ->
         _agentEvents.tryEmit(event)

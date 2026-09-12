@@ -19,7 +19,8 @@ class ProotArgsBuilder(
   fun buildCommand(
     guestCommand: List<String>,
     workingDir: String = "/root",
-    extraGuestEnv: Map<String, String> = emptyMap()
+    extraGuestEnv: Map<String, String> = emptyMap(),
+    bindHostDir: File? = null
   ): Pair<List<String>, Map<String, String>> {
     val proot = requireNotNull(nativeBinaries.proot) { "proot binary is missing" }
     val loader = nativeBinaries.prootLoader?.absolutePath ?: ""
@@ -32,6 +33,11 @@ class ProotArgsBuilder(
     )
     if (File("/storage/emulated/0").exists()) {
       binds += "/storage/emulated/0" to "/sdcard"
+    }
+    // The active project's real folder is mounted at a fixed guest path so the
+    // terminal and agent commands always operate inside the workspace.
+    if (bindHostDir != null && bindHostDir.isDirectory) {
+      binds += bindHostDir.absolutePath to WORKSPACE_GUEST_PATH
     }
 
     val args = mutableListOf(
@@ -63,5 +69,10 @@ class ProotArgsBuilder(
     put("LANG", "C.UTF-8")
     put("SHELL", "/bin/bash")
     putAll(extra)
+  }
+
+  companion object {
+    /** Guest-side mount point for the active project's real folder. */
+    const val WORKSPACE_GUEST_PATH = "/workspace"
   }
 }

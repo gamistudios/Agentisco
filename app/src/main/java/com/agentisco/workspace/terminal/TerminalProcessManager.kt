@@ -23,7 +23,8 @@ class TerminalProcessManager(
   suspend fun executeCommand(
     session: TerminalSession,
     command: String,
-    onLine: (TerminalLine) -> Unit
+    onLine: (TerminalLine) -> Unit,
+    projectDir: File? = null
   ): Int = withContext(Dispatchers.IO) {
     val clean = command.trim()
     if (clean.isEmpty()) return@withContext 0
@@ -35,7 +36,11 @@ class TerminalProcessManager(
       return@withContext 1
     }
 
-    val workingDirInsideRootfs = "/root/workspace"
+    // Run inside the project's real folder when one is provided (bind-mounted
+    // at a fixed guest path); fall back to the rootfs home otherwise.
+    val hasWorkspace = projectDir != null && projectDir.isDirectory
+    val workingDirInsideRootfs =
+      if (hasWorkspace) ProotArgsBuilder.WORKSPACE_GUEST_PATH else "/root"
 
     val guestCommand = listOf(
       "/usr/bin/env", "-i",
@@ -47,7 +52,11 @@ class TerminalProcessManager(
       "/bin/bash", "-c", "cd $workingDirInsideRootfs 2>/dev/null; $clean"
     )
 
-    val (argv, hostEnv) = argsBuilder.buildCommand(guestCommand)
+    val (argv, hostEnv) = if (hasWorkspace) {
+      argsBuilder.buildCommand(guestCommand, workingDir = workingDirInsideRootfs, bindHostDir = projectDir)
+    } else {
+      argsBuilder.buildCommand(guestCommand, workingDir = workingDirInsideRootfs)
+    }
 
     try {
       val processBuilder = ProcessBuilder(argv).redirectErrorStream(false)
