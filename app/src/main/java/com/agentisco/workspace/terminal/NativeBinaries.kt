@@ -11,6 +11,7 @@ import java.io.File
 class NativeBinaries(context: Context) {
 
   private val dir: String = context.applicationInfo.nativeLibraryDir
+  private val linkDir: File = File(context.filesDir, "proot-lib").apply { mkdirs() }
 
   val proot: File? = find("libproot.so")
   val prootLoader: File? = find("libproot-loader.so")
@@ -36,6 +37,24 @@ class NativeBinaries(context: Context) {
 
   /** LD_LIBRARY_PATH value so proot can locate libtalloc/libandroid-shmem. */
   val libraryPath: String = dir
+
+  /**
+   * proot's ELF dependency is `libtalloc.so.2` (versioned soname), but Android
+   * packaging only allows `lib*.so` file names. Creates a versioned symlink in
+   * a private dir and returns an LD_LIBRARY_PATH that includes it first.
+   */
+  fun ensureRuntimeLibraryPath(): String {
+    talloc?.let { talloc ->
+      val versioned = File(linkDir, "libtalloc.so.2")
+      if (!versioned.exists()) {
+        runCatching {
+          versioned.delete()
+          android.system.Os.symlink(talloc.absolutePath, versioned.absolutePath)
+        }
+      }
+    }
+    return "${linkDir.absolutePath}:$dir"
+  }
 
   private fun find(name: String): File? = File(dir, name).takeIf { it.exists() }
 }

@@ -49,7 +49,7 @@ class ProotArgsBuilder(
       "PROOT_LOADER" to loader,
       "PROOT_LOADER32" to loader32,
       "PROOT_TMP_DIR" to (rootfsDir.parent ?: "/data/local/tmp"),
-      "LD_LIBRARY_PATH" to nativeBinaries.libraryPath,
+      "LD_LIBRARY_PATH" to nativeBinaries.ensureRuntimeLibraryPath(),
       "PROOT_NO_SECCOMP" to "1"
     )
     return args to hostEnv

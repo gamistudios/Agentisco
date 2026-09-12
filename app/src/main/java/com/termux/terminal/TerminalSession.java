@@ -314,11 +314,27 @@ public final class TerminalSession extends TerminalOutput {
     }
 
     private static FileDescriptor wrapFileDescriptor(int fileDescriptor, TerminalSessionClient client) {
-        // Use ParcelFileDescriptor#adoptFd instead of reflecting into the
-        // private FileDescriptor#descriptor field: that reflection is blocked
-        // by hidden-API restrictions on many modern devices, and the original
-        // fallback called System.exit(1), killing the whole app on failure.
-        return android.os.ParcelFileDescriptor.adoptFd(fileDescriptor).getFileDescriptor();
+        // Reflect into the private FileDescriptor#descriptor field: the fd stays
+        // unowned so the later JNI.close(fd) in cleanupResources is legal.
+        // (ParcelFileDescriptor#adoptFd is NOT an option: it takes fdsan
+        // ownership and the process is aborted when the session closes the fd.)
+        FileDescriptor result = new FileDescriptor();
+        try {
+            Field descriptorField;
+            try {
+                descriptorField = FileDescriptor.class.getDeclaredField("descriptor");
+            } catch (NoSuchFieldException e) {
+                // For desktop java:
+                descriptorField = FileDescriptor.class.getDeclaredField("fd");
+            }
+            descriptorField.setAccessible(true);
+            descriptorField.set(result, fileDescriptor);
+        } catch (NoSuchFieldException | IllegalAccessException | IllegalArgumentException e) {
+            client.logStackTraceWithMessage(LOG_TAG, "Error accessing FileDescriptor#descriptor private field", e);
+            // Never System.exit: surface the failure so the caller can recover.
+            throw new IllegalStateException("Cannot wrap PTY file descriptor", e);
+        }
+        return result;
     }
 
     @SuppressLint("HandlerLeak")
