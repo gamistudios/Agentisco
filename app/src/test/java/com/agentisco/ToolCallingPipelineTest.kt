@@ -119,7 +119,7 @@ class ToolCallingPipelineTest {
     val schema = JSONObject(testTool.parametersJsonSchema())
     assertEquals("object", schema.getString("type"))
     assertEquals(
-      "Read the contents of a file in the current workspace.",
+      "File path relative to the project root.",
       schema.getJSONObject("properties").getJSONObject("path").getString("description")
     )
     val required = schema.getJSONArray("required")
@@ -227,7 +227,10 @@ class ToolCallingPipelineTest {
     val tool = body.getJSONArray("tools").getJSONObject(0)
     assertEquals("function", tool.getString("type"))
     assertEquals("read_file", tool.getJSONObject("function").getString("name"))
-    JSONObject(tool.getJSONObject("function").getString("parameters"))
+    // `parameters` is correctly embedded as a JSON Schema object on the wire.
+    val wireSchema = tool.getJSONObject("function").getJSONObject("parameters")
+    assertEquals("object", wireSchema.getString("type"))
+    assertTrue(wireSchema.getJSONObject("properties").has("path"))
 
     // The echoed assistant tool call keeps id + function name, and its
     // arguments field is a STRING containing valid JSON (never an object,
