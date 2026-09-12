@@ -1,6 +1,7 @@
 package com.agentisco
 
 import androidx.test.core.app.ApplicationProvider
+import com.agentisco.agent.llm.BaseLlmClient
 import com.agentisco.agent.llm.LlmMessage
 import com.agentisco.agent.llm.LlmRequest
 import com.agentisco.agent.llm.LlmRole
@@ -33,7 +34,9 @@ import org.robolectric.annotation.Config
 import java.io.File
 
 /** A deterministic test tool exercising the canonical schema contract. */
-private class ReadFileLikeTool(private val files: Map<String, String> = mapOf("src/App.tsx" to "export default App")) : AgentTool {
+private class ReadFileLikeTool(
+  private val files: Map<String, String> = mapOf("src/App.tsx" to "export default App")
+) : AgentTool {
   override val name = "read_file"
   override val description = "Read the contents of a file in the current workspace."
   override val params = listOf(
@@ -86,7 +89,8 @@ class ToolCallingPipelineTest {
 
   @Test
   fun `malformed truncated JSON produces a validation error not a crash`() {
-    val err = runCatching { testTool.parseAndValidate("{\"path\": \"src/").exceptionOrNull()
+    val broken = "{\"path\": \"src/"
+    val err = runCatching { testTool.parseAndValidate(broken) }.exceptionOrNull()
     assertTrue(err is ToolArgumentError)
     assertTrue(err!!.message!!.contains("JSON"))
   }
@@ -124,7 +128,9 @@ class ToolCallingPipelineTest {
 
   @Test
   fun `structured tool error is returned for a path that does not exist`() {
-    val result = kotlinx.coroutines.runBlocking { testTool.execute(JSONObject("{\"path\": \"missing.tsx\"}"), ctx) }
+    val result = kotlinx.coroutines.runBlocking {
+      testTool.execute(JSONObject("{\"path\": \"missing.tsx\"}"), ctx)
+    }
     assertFalse(result.success)
     assertTrue(result.error!!.contains("not found"))
   }
@@ -137,15 +143,17 @@ class ToolCallingPipelineTest {
     if (args != null) fn.put("arguments", args)
     val tc = JSONObject().put("index", index).put("function", fn)
     if (id != null) tc.put("id", id)
-    return JSONObject()
-      .put("choices", JSONArray().put(JSONObject().put("delta", JSONObject().put("tool_calls", JSONArray().put(tc)))))
-      .toString()
+    val delta = JSONObject().put("tool_calls", JSONArray().put(tc))
+    val choice = JSONObject().put("delta", delta)
+    return JSONObject().put("choices", JSONArray().put(choice)).toString()
   }
+
+  private fun newState() = BaseLlmClient.StreamState()
 
   @Test
   fun `streamed fragmented tool call arguments accumulate by index until complete`() {
     val client = OpenAIChatCompletionsClient(OkHttpClient())
-    val state = com.agentisco.agent.llm.BaseLlmClient.StreamState()
+    val state = newState()
     val events = mutableListOf<LlmStreamEvent>()
 
     client.handleData(openAiToolCallChunk(0, "call_abc", "read_file", "{\"pa"), state, events::add)
@@ -164,7 +172,7 @@ class ToolCallingPipelineTest {
   @Test
   fun `multiple simultaneous tool calls accumulate independently`() {
     val client = OpenAIChatCompletionsClient(OkHttpClient())
-    val state = com.agentisco.agent.llm.BaseLlmClient.StreamState()
+    val state = newState()
     val events = mutableListOf<LlmStreamEvent>()
 
     client.handleData(openAiToolCallChunk(0, "call_1", "read_file", "{\"path\":\"a.tsx\"}"), state, events::add)
@@ -179,7 +187,7 @@ class ToolCallingPipelineTest {
   @Test
   fun `json null name fragments never become the literal string null`() {
     val client = OpenAIChatCompletionsClient(OkHttpClient())
-    val state = com.agentisco.agent.llm.BaseLlmClient.StreamState()
+    val state = newState()
     val events = mutableListOf<LlmStreamEvent>()
 
     // Some providers emit "name": null on continuation chunks.
@@ -211,7 +219,10 @@ class ToolCallingPipelineTest {
       stream = false
     )
 
-    val body = JSONObject(okio.Buffer().also { request.body!!.writeTo(it) }.readUtf8())
+    val buffer = okio.Buffer()
+    request.body!!.writeTo(buffer)
+    val body = JSONObject(buffer.readUtf8())
+
     // Tool definitions are function tools with valid JSON Schema parameters.
     val tool = body.getJSONArray("tools").getJSONObject(0)
     assertEquals("function", tool.getString("type"))
@@ -225,7 +236,10 @@ class ToolCallingPipelineTest {
     val wireCall = echoed.getJSONArray("tool_calls").getJSONObject(0)
     assertEquals("call_1", wireCall.getString("id"))
     assertEquals("read_file", wireCall.getJSONObject("function").getString("name"))
-    assertEquals("src/App.tsx", JSONObject(wireCall.getJSONObject("function").getString("arguments")).getString("path"))
+    assertEquals(
+      "src/App.tsx",
+      JSONObject(wireCall.getJSONObject("function").getString("arguments")).getString("path")
+    )
 
     // The tool result references the exact tool-call id.
     val result = body.getJSONArray("messages").getJSONObject(2)
@@ -237,9 +251,10 @@ class ToolCallingPipelineTest {
 
   @Test
   fun `same model id under two providers resolves to distinct records when selecting`() {
-    val dir = File(ApplicationProvider.getApplicationContext<android.content.Context>().getDir("agentisco", android.content.Context.MODE_PRIVATE))
-    dir.listFiles()?.forEach { it.delete() }
-    val store = ProviderConfigStore(ApplicationProvider.getApplicationContext())
+    val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+    File(context.getDir("agentisco", android.content.Context.MODE_PRIVATE), "providers.json").delete()
+    File(context.getDir("agentisco", android.content.Context.MODE_PRIVATE), "credentials.json").delete()
+    val store = ProviderConfigStore(context)
     store.upsertProvider(AIProvider("p1", "A", "https://a/v1", LLMProtocol.OPENAI_CHAT_COMPLETIONS), "k1")
     store.upsertProvider(AIProvider("p2", "B", "https://b/v1", LLMProtocol.OPENAI_CHAT_COMPLETIONS), "k2")
     store.upsertModel(AIModel("m1", "p1", "shared/model", "Shared"))
