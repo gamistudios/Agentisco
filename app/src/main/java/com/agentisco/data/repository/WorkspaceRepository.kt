@@ -574,10 +574,15 @@ class WorkspaceRepository(
   fun ensurePtySession(tabId: String, name: String) {
     val manager = prootSessionManager ?: return
     if (_ptySessions.value.containsKey(tabId)) return
-    val bridge = terminalClientRegistry.getOrPut(tabId) { TerminalClientBridge() }
-    val session = manager.createSession(name, File(_activeProject.value.path), bridge)
-    if (session != null) {
-      _ptySessions.update { it + (tabId to session) }
+    try {
+      val bridge = terminalClientRegistry.getOrPut(tabId) { TerminalClientBridge() }
+      val session = manager.createSession(name, File(_activeProject.value.path), bridge)
+      if (session != null) {
+        _ptySessions.update { it + (tabId to session) }
+      }
+    } catch (t: Throwable) {
+      // Never let a failed shell spawn take the whole app down.
+      android.util.Log.e("ScoOS-Terminal", "Failed to create PTY session", t)
     }
   }
 

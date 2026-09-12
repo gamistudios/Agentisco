@@ -117,7 +117,20 @@ fun TerminalScreen(
       is LinuxEnvironmentState.Ready -> {
         var attachedSession by remember { mutableStateOf<TerminalSession?>(null) }
 
-        AndroidView(
+        if (activePty == null) {
+          Column(
+            modifier = Modifier.weight(1f).fillMaxWidth().padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp, alignment = Alignment.CenterVertically),
+            horizontalAlignment = Alignment.CenterHorizontally
+          ) {
+            Text("Starting shell…", color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            Text(
+              "If this message stays visible, the shell could not be started. Check logcat for tag \"ScoOS-Terminal\".",
+              color = TextSecondary, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
+              textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            )
+          }
+        } else AndroidView(
           factory = { ctx ->
             TerminalView(ctx, null).apply {
               setTerminalViewClient(ScoTerminalViewClient())
