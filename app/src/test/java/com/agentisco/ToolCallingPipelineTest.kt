@@ -204,7 +204,9 @@ class ToolCallingPipelineTest {
   fun `assistant tool call messages serialize arguments as a JSON object string`() {
     val client = OpenAIChatCompletionsClient(OkHttpClient())
     val provider = AIProvider("prov", "Router", "https://example.com/v1", LLMProtocol.OPENAI_CHAT_COMPLETIONS)
-    val model = AIModel("m", "prov", "test-model", "Test Model")
+    // The model must declare tool support — buildRequest only sends tools to
+    // models whose capabilities actually include them.
+    val model = AIModel("m", "prov", "test-model", "Test Model", capabilities = com.agentisco.settings.model.ModelCapabilities(tools = true))
 
     val request = client.buildRequest(
       provider, model, "sk-redacted",
