@@ -330,7 +330,7 @@ class InterruptTerminalTool(private val tm: TerminalProcessManager) : AgentTool 
   override val name = "interrupt_terminal"
   override val description =
     "Interrupt (SIGINT-style) a command that is currently running in the terminal — for example to stop a hung build or dev server."
-  override val params = emptyList()
+  override val params = emptyList<ToolParam>()
 
   override suspend fun execute(args: JSONObject, ctx: ToolContext): ToolResult {
     val sessionId = ctx.terminalSession.id
@@ -341,7 +341,7 @@ class InterruptTerminalTool(private val tm: TerminalProcessManager) : AgentTool 
 
 // ================= Development tools =================
 
-private abstract class ScriptTool(
+abstract class ScriptTool(
   private val tm: TerminalProcessManager,
   toolName: String,
   private val script: String,
@@ -372,7 +372,7 @@ class GitStatusTool(private val git: GitRepositoryManager) : AgentTool {
   override val name = "git_status"
   override val description =
     "Show which files have been modified in the workspace and whether the working tree is dirty."
-  override val params = emptyList()
+  override val params = emptyList<ToolParam>()
 
   override suspend fun execute(args: JSONObject, ctx: ToolContext): ToolResult {
     val changed = git.getChangedFiles(ctx.project)
