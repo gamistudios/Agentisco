@@ -219,7 +219,9 @@ class WorkspaceRepository(
 
   // Terminal tabs (metadata only; the actual console lives in a real PTY
   // session per tab, created on demand when the environment is bootstrapped).
-  private val _terminalSessions = MutableStateFlow<List<TerminalSession>>(getInitialTerminalSessions())
+  private val _terminalSessions = MutableStateFlow<List<TerminalSession>>(emptyList())
+  /** Terminal tabs per project: switching workspaces switches tab sets. */
+  private val terminalTabsByProject = mutableMapOf<String, MutableList<TerminalSession>>()
   val terminalSessions: StateFlow<List<TerminalSession>> = _terminalSessions.asStateFlow()
 
   private val _activeTerminalSessionId = MutableStateFlow("term-1")
@@ -439,9 +441,22 @@ class WorkspaceRepository(
     _editorContent.value = content
     _isEditorDirty.value = false
 
-    // Update terminal session directory
-    _terminalSessions.update { list ->
-      list.map { it.copy(currentDir = project.path) }
+    // Terminal tabs belong to the project: open its tab set (with the real
+    // project root as the working directory) and never inherit another
+    // project's tabs.
+    val tabs = terminalTabsByProject.getOrPut(project.id) {
+      mutableListOf(
+        TerminalSession(
+          id = "term-${System.currentTimeMillis()}",
+          name = "main",
+          currentDir = project.path,
+          projectId = project.id
+        )
+      )
+    }
+    _terminalSessions.value = tabs
+    if (_terminalSessions.value.none { it.id == _activeTerminalSessionId.value }) {
+      _activeTerminalSessionId.value = tabs.first().id
     }
 
     refreshDiffsAndGit()
@@ -709,12 +724,15 @@ class WorkspaceRepository(
   }
 
   fun createTerminalSession(name: String = "bash") {
+    val project = _activeProject.value
     val newId = "term-${System.currentTimeMillis()}"
     val newSession = TerminalSession(
       id = newId,
       name = name,
-      currentDir = _activeProject.value.path
+      currentDir = project.path,
+      projectId = project.id
     )
+    terminalTabsByProject.getOrPut(project.id) { mutableListOf() }.add(newSession)
     _terminalSessions.update { it + newSession }
     ensurePtySession(newId, name)
     _activeTerminalSessionId.value = newId
@@ -744,19 +762,23 @@ class WorkspaceRepository(
   }
 
   private fun closeTerminalSessionTab(id: String) {
+    val project = _activeProject.value
     val currentList = _terminalSessions.value
     if (currentList.size <= 1) {
       val resetSession = TerminalSession(
         id = "term-${System.currentTimeMillis()}",
         name = "main",
-        currentDir = _activeProject.value.path
+        currentDir = project.path,
+        projectId = project.id
       )
+      terminalTabsByProject[project.id] = mutableListOf(resetSession)
       _terminalSessions.value = listOf(resetSession)
       _activeTerminalSessionId.value = resetSession.id
       return
     }
 
     val remaining = currentList.filter { it.id != id }
+    terminalTabsByProject[project.id] = remaining.toMutableList()
     _terminalSessions.value = remaining
     if (_activeTerminalSessionId.value == id) {
       _activeTerminalSessionId.value = remaining.first().id
@@ -822,6 +844,11 @@ class WorkspaceRepository(
     override fun logStackTrace(tag: String, e: Exception) {}
   }
 
+  /** Aborts the in-flight streaming LLM request so Stop takes effect immediately. */
+  fun cancelAgentGeneration() {
+    llmService.cancelActive()
+  }
+
   // Permission handling
   fun updatePermissions(transform: (AgentPermissions) -> AgentPermissions) {
     _permissions.update(transform)
@@ -837,10 +864,25 @@ class WorkspaceRepository(
   }
 
   // Run Real Agent Task Workflow. `sessionId` ties the run to a persisted chat
-  // session and feeds prior conversation turns back to the model.
+  // session; every request is built from the complete persisted conversation.
   suspend fun runAgentTask(prompt: String, sessionId: String? = null) {
     if (_isAgentWorking.value) return
+    val history = sessionId?.let { chatStore.buildConversationMessages(it, excludeLastUser = true) } ?: emptyList()
+    executeAgentTask(prompt, history, resume = false)
+  }
 
+  /**
+   * Resumes a failed turn from its persisted state: the conversation is
+   * rebuilt from SQLite including the turn's tool calls/results, so the retry
+   * continues exactly where the failure happened.
+   */
+  suspend fun resumeAgentTask(turnUuid: String, sessionId: String) {
+    if (_isAgentWorking.value) return
+    val history = chatStore.buildConversationMessages(sessionId, excludeLastUser = false, currentTurnUuid = turnUuid)
+    executeAgentTask("", history, resume = true)
+  }
+
+  private suspend fun executeAgentTask(prompt: String, history: List<com.agentisco.data.repository.ChatHistoryMessage>, resume: Boolean) {
     val model = _selectedModel.value
     if (model == null) {
       _agentStatusText.value = "No model selected — configure a provider and select a model in Settings first."
@@ -863,16 +905,18 @@ class WorkspaceRepository(
     val currentSession = _terminalSessions.value.firstOrNull { it.id == _activeTerminalSessionId.value }
       ?: _terminalSessions.value.first()
 
-    val result = agentRuntime.executeTask(
-      prompt = prompt,
-      project = _activeProject.value,
-      provider = provider,
-      model = model,
-      apiKey = apiKey,
-      permissions = _permissions.value,
-      terminalSession = currentSession,
-      history = sessionId?.let { chatStore.conversationHistory(it) } ?: emptyList(),
-      onRequestApproval = { approval -> _pendingApproval.value = approval },
+    val result = try {
+      agentRuntime.executeTask(
+        prompt = prompt,
+        project = _activeProject.value,
+        provider = provider,
+        model = model,
+        apiKey = apiKey,
+        permissions = _permissions.value,
+        terminalSession = currentSession,
+        history = history,
+        resume = resume,
+        onRequestApproval = { approval -> _pendingApproval.value = approval },
       onEvent = { event ->
         _agentEvents.tryEmit(event)
         when (event) {
@@ -894,8 +938,11 @@ class WorkspaceRepository(
         }
       }
     )
-
-    _isAgentWorking.value = false
+    } finally {
+      // Always leave the "Working" state — on cancel, failure, or completion.
+      _isAgentWorking.value = false
+      _pendingApproval.value = null
+    }
     refreshFiles()
 
     // Refresh active file if modified
@@ -912,15 +959,5 @@ class WorkspaceRepository(
     _isDevServerRunning.update { !it }
   }
 
-  companion object {
-    fun getInitialTerminalSessions(): List<TerminalSession> {
-      return listOf(
-        TerminalSession(
-          id = "term-1",
-          name = "main",
-          currentDir = "~/projects/agentisco"
-        )
-      )
-    }
-  }
+  companion object
 }

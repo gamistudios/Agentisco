@@ -19,7 +19,7 @@ data class UserMessageItem(
   val timestamp: Long
 ) : ChatItem()
 
-enum class TurnStatus { RUNNING, COMPLETED, FAILED, CANCELLED, INTERRUPTED }
+enum class TurnStatus { RUNNING, PAUSED, COMPLETED, FAILED, CANCELLED, INTERRUPTED }
 
 data class AgentTurnItem(
   override val id: String,
@@ -60,6 +60,19 @@ data class ApprovalBlock(
   val allowed: Boolean
 ) : TurnBlock()
 
+/** Streamed model reasoning ("thinking"), rendered as a collapsible box. */
+data class ReasoningBlock(
+  override val id: String,
+  val text: String,
+  val streaming: Boolean
+) : TurnBlock()
+
+/** A runtime failure rendered as a single red error card in the turn. */
+data class ErrorBlock(
+  override val id: String,
+  val message: String
+) : TurnBlock()
+
 fun MessageWithBlocks.toChatItem(): ChatItem {
   val message = message
   return if (message.role == "user") {
@@ -69,6 +82,7 @@ fun MessageWithBlocks.toChatItem(): ChatItem {
       id = message.uuid,
       status = when (message.status) {
         "running" -> TurnStatus.RUNNING
+        "paused" -> TurnStatus.PAUSED
         "failed" -> TurnStatus.FAILED
         "cancelled" -> TurnStatus.CANCELLED
         "interrupted" -> TurnStatus.INTERRUPTED
@@ -82,6 +96,7 @@ fun MessageWithBlocks.toChatItem(): ChatItem {
 
 private fun AgentBlockEntity.toTurnBlock(): TurnBlock? = when (kind) {
   "text" -> TextBlock(uuid, summary, status == "streaming")
+  "reasoning" -> ReasoningBlock(uuid, summary, status == "streaming")
   "approval" -> ApprovalBlock(
     id = uuid,
     approvalId = name, // approval runtime id stored in `name`
@@ -105,5 +120,6 @@ private fun AgentBlockEntity.toTurnBlock(): TurnBlock? = when (kind) {
     detail = detail,
     exitCode = exitCode
   )
+  "error" -> ErrorBlock(uuid, summary)
   else -> null
 }

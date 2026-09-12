@@ -19,6 +19,19 @@ import kotlinx.coroutines.runBlocking
 import java.util.UUID
 
 /**
+ * One reconstructed conversation message for LLM requests, built from the
+ * persisted session: user prompts, assistant responses, tool calls with their
+ * arguments, and tool results (including failures).
+ */
+data class ChatHistoryMessage(
+  val role: String, // user | assistant | assistant_tool_call | tool
+  val content: String,
+  val toolName: String? = null,
+  val toolArgs: String? = null,
+  val toolCallId: String? = null
+)
+
+/**
  * Persistence facade for agent chat. All writes are funneled through a single
  * serialized queue so runtime events emitted at stream speed keep their order
  * in the database, and callers never block the UI collector.
@@ -131,6 +144,95 @@ class AgentChatStore(context: Context?) {
 
   fun updateBlockStatus(uuid: String, status: String) =
     enqueue { dao!!.updateBlockStatus(uuid, status) }
+
+  // ---- full conversation reconstruction (for LLM requests & retries) ----
+
+  /**
+   * Rebuilds the complete LLM conversation for [sessionId] from SQLite: user
+   * messages, assistant text, tool calls + real results, and denial outcomes.
+   *
+   * @param excludeLastUser skip the newest user message (a fresh prompt the
+   *   runtime appends itself).
+   * @param currentTurnUuid for a failed turn being retried: include only its
+   *   tool calls/results (not partial text) so the retry resumes the exact
+   *   pending request.
+   */
+  suspend fun buildConversationMessages(
+    sessionId: String,
+    excludeLastUser: Boolean = false,
+    currentTurnUuid: String? = null
+  ): List<ChatHistoryMessage> {
+    val d = dao ?: return emptyList()
+    return runCatching {
+      val messages = d.messagesOnce(sessionId)
+      val lastUserIndex = messages.indexOfLast { it.role == "user" }
+      val result = mutableListOf<ChatHistoryMessage>()
+      messages.forEachIndexed { index, m ->
+        if (m.role == "user") {
+          if (!(excludeLastUser && index == lastUserIndex) && m.content.isNotBlank()) {
+            result.add(ChatHistoryMessage("user", m.content))
+          }
+          return@forEachIndexed
+        }
+        // assistant turn
+        val blocks = d.blocksForMessage(m.uuid)
+        val includeText = m.status == "completed" && m.uuid != currentTurnUuid
+        val pendingText = StringBuilder()
+        fun flushText() {
+          val text = pendingText.toString().trim()
+          if (text.isNotEmpty()) result.add(ChatHistoryMessage("assistant", text))
+          pendingText.setLength(0)
+        }
+        blocks.forEach { b ->
+          when (b.kind) {
+            "text" -> if (includeText && b.status == "done" && b.summary.isNotBlank()) {
+              pendingText.append(b.summary).append("\n\n")
+            }
+            "tool" -> {
+              flushText()
+              val callId = "call_" + b.uuid.take(12)
+              result.add(ChatHistoryMessage("assistant_tool_call", "", toolName = b.name, toolArgs = b.argsJson, toolCallId = callId))
+              result.add(
+                ChatHistoryMessage(
+                  "tool",
+                  b.detail.ifBlank { b.summary.ifBlank { "(no output)" } },
+                  toolName = b.name, toolCallId = callId
+                )
+              )
+            }
+            "approval" -> {
+              flushText()
+              // Only denied approvals need explaining to the model.
+              if (b.status == "denied") {
+                val callId = "call_" + b.uuid.take(12)
+                val command = b.argsJson
+                val escaped = command.replace("\\", "\\\\").replace("\"", "\\\"")
+                result.add(
+                  ChatHistoryMessage(
+                    "assistant_tool_call", "", toolName = "run_command",
+                    toolArgs = "{\"command\": \"$escaped\"}", toolCallId = callId
+                  )
+                )
+                result.add(
+                  ChatHistoryMessage("tool", "User denied permission to run: $command", toolName = "run_command", toolCallId = callId)
+                )
+              }
+            }
+            // "error" blocks are UI diagnostics; the failing request itself is retried.
+          }
+        }
+        flushText()
+      }
+      result
+    }.getOrDefault(emptyList())
+  }
+
+  /** Removes persisted error cards of a turn (e.g. before a manual retry). */
+  fun clearErrorBlocks(turnUuid: String) = enqueue {
+    dao!!.deleteBlocksOfKind(turnUuid, "error")
+  }
+
+  suspend fun getMessage(turnUuid: String) = dao?.let { runCatching { it.messageByUuid(turnUuid) }.getOrNull() }
 
   companion object {
     fun newId(): String = UUID.randomUUID().toString()

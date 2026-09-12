@@ -25,7 +25,10 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Psychology
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.outlined.Build
 import androidx.compose.material.icons.outlined.Commit
@@ -62,6 +65,8 @@ import com.agentisco.ui.AgentTurnItem
 import com.agentisco.ui.ActionBlock
 import com.agentisco.ui.ApprovalBlock
 import com.agentisco.ui.ChatItem
+import com.agentisco.ui.ErrorBlock
+import com.agentisco.ui.ReasoningBlock
 import com.agentisco.ui.TextBlock
 import com.agentisco.ui.TurnBlock
 import com.agentisco.ui.TurnStatus
@@ -235,6 +240,7 @@ fun AgentScreen(
                 item = item,
                 onAllow = { viewModel.resolveApproval(true) },
                 onDeny = { viewModel.resolveApproval(false) },
+                onRetry = { viewModel.retryAgentTurn(item.id) },
                 onNavigate = onNavigate
               )
             }
@@ -293,6 +299,7 @@ fun AgentScreen(
           promptText = ""
         }
       },
+      onPause = { viewModel.pauseAgent() },
       onStop = { viewModel.cancelAgent() }
     )
   }
@@ -493,6 +500,7 @@ private fun AgentTurnCard(
   item: AgentTurnItem,
   onAllow: () -> Unit,
   onDeny: () -> Unit,
+  onRetry: () -> Unit,
   onNavigate: (AppDestination) -> Unit
 ) {
   val clipboard = LocalClipboardManager.current
@@ -508,7 +516,7 @@ private fun AgentTurnCard(
         when (item.status) {
           TurnStatus.RUNNING -> ElectricBlue.copy(alpha = 0.45f)
           TurnStatus.FAILED -> DangerRed.copy(alpha = 0.5f)
-          TurnStatus.CANCELLED, TurnStatus.INTERRUPTED -> WarningAmber.copy(alpha = 0.4f)
+          TurnStatus.PAUSED, TurnStatus.CANCELLED, TurnStatus.INTERRUPTED -> WarningAmber.copy(alpha = 0.4f)
           TurnStatus.COMPLETED -> DarkBorderSubtle
         },
         RoundedCornerShape(12.dp)
@@ -553,6 +561,7 @@ private fun AgentTurnCard(
       Text(
         text = when (item.status) {
           TurnStatus.RUNNING -> "Working"
+          TurnStatus.PAUSED -> "Paused"
           TurnStatus.COMPLETED -> "Completed"
           TurnStatus.FAILED -> "Failed"
           TurnStatus.CANCELLED -> "Cancelled"
@@ -611,8 +620,28 @@ private fun AgentTurnCard(
             )
           }
         }
+        is ReasoningBlock -> ThinkingBlock(block)
         is ActionBlock -> ToolCallRow(block)
         is ApprovalBlock -> ApprovalCard(block, onAllow, onDeny)
+        is ErrorBlock -> ErrorCard(block, showRetry = item.status == TurnStatus.FAILED, onRetry = onRetry)
+      }
+    }
+
+    // Resumable states: Resume continues a paused generation from its
+    // persisted state; failed turns offer Retry on the error card.
+    if (item.status == TurnStatus.PAUSED) {
+      Spacer(modifier = Modifier.height(8.dp))
+      Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Button(
+          onClick = onRetry,
+          colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
+          contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+          modifier = Modifier.height(30.dp).testTag("btn_resume_turn")
+        ) {
+          Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.White, modifier = Modifier.size(13.dp))
+          Spacer(modifier = Modifier.width(4.dp))
+          Text("Resume", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+        }
       }
     }
 
@@ -850,6 +879,87 @@ private fun ApprovalCard(item: ApprovalBlock, onAllow: () -> Unit, onDeny: () ->
   }
 }
 
+/** Collapsible reasoning/"thinking" box for models with reasoning enabled. */
+@Composable
+private fun ThinkingBlock(block: ReasoningBlock) {
+  var expanded by remember(block.id) { mutableStateOf(false) }
+  Column(
+    modifier = Modifier
+      .fillMaxWidth()
+      .clip(RoundedCornerShape(10.dp))
+      .background(DarkBackground.copy(alpha = 0.7f))
+      .border(1.dp, DarkBorderSubtle, RoundedCornerShape(10.dp))
+      .clickable { expanded = !expanded }
+      .padding(horizontal = 10.dp, vertical = 7.dp)
+      .testTag("stream_thinking")
+  ) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+      Icon(
+        Icons.Default.Psychology,
+        contentDescription = null,
+        tint = CyanAccent.copy(alpha = if (block.streaming) 1f else 0.6f),
+        modifier = Modifier.size(13.dp)
+      )
+      Spacer(modifier = Modifier.width(6.dp))
+      Text(
+        if (block.streaming) "Thinking..." else "Thoughts",
+        color = CyanAccent.copy(alpha = 0.85f),
+        fontSize = 10.sp,
+        fontWeight = FontWeight.SemiBold
+      )
+      Spacer(modifier = Modifier.weight(1f))
+      Text(if (expanded) "v" else ">", color = TextMuted, fontSize = 10.sp)
+    }
+    if (expanded) {
+      Spacer(modifier = Modifier.height(5.dp))
+      Text(
+        block.text,
+        color = TextMuted,
+        fontSize = 11.sp,
+        lineHeight = 15.sp,
+        fontFamily = FontFamily.Monospace
+      )
+    }
+  }
+}
+
+/** Single red error card for runtime/stream/provider failures. */
+@Composable
+private fun ErrorCard(block: ErrorBlock, showRetry: Boolean, onRetry: () -> Unit) {
+  Column(
+    modifier = Modifier
+      .fillMaxWidth()
+      .clip(RoundedCornerShape(10.dp))
+      .background(DangerRed.copy(alpha = 0.08f))
+      .border(1.dp, DangerRed.copy(alpha = 0.7f), RoundedCornerShape(10.dp))
+      .padding(12.dp)
+      .testTag("stream_error_card")
+  ) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+      Icon(Icons.Default.Close, contentDescription = null, tint = DangerRed, modifier = Modifier.size(14.dp))
+      Spacer(modifier = Modifier.width(6.dp))
+      Text("Error", color = DangerRed, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+    }
+    Spacer(modifier = Modifier.height(4.dp))
+    Text(block.message, color = TextSecondary, fontSize = 12.sp, lineHeight = 16.sp)
+    if (showRetry) {
+      Spacer(modifier = Modifier.height(8.dp))
+      Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Button(
+          onClick = onRetry,
+          colors = ButtonDefaults.buttonColors(containerColor = DangerRed),
+          contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+          modifier = Modifier.height(30.dp).testTag("btn_retry_turn")
+        ) {
+          Icon(Icons.Default.Refresh, contentDescription = null, tint = Color.White, modifier = Modifier.size(13.dp))
+          Spacer(modifier = Modifier.width(4.dp))
+          Text("Retry", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+        }
+      }
+    }
+  }
+}
+
 @Composable
 private fun MiniAction(label: String, onClick: () -> Unit) {
   Box(
@@ -875,6 +985,7 @@ private fun AgentComposer(
   onPromptChange: (String) -> Unit,
   isWorking: Boolean,
   onSend: () -> Unit,
+  onPause: () -> Unit,
   onStop: () -> Unit
 ) {
   Surface(
@@ -904,6 +1015,17 @@ private fun AgentComposer(
         )
 
         if (isWorking) {
+          IconButton(
+            onClick = onPause,
+            modifier = Modifier
+              .size(40.dp)
+              .clip(CircleShape)
+              .background(WarningAmber)
+              .testTag("btn_composer_pause")
+          ) {
+            Icon(Icons.Default.Pause, contentDescription = "Pause", tint = Color.White, modifier = Modifier.size(18.dp))
+          }
+          Spacer(modifier = Modifier.width(6.dp))
           IconButton(
             onClick = onStop,
             modifier = Modifier

@@ -33,6 +33,15 @@ class LlmService(
     .writeTimeout(60, TimeUnit.SECONDS)
     .build()
 
+  /** The in-flight streaming call, so Stop can abort a blocked socket read. */
+  @Volatile
+  private var activeCall: okhttp3.Call? = null
+
+  /** Cancels the currently streaming LLM request (safe to call anytime). */
+  fun cancelActive() {
+    LlmStreamRegistry.cancelActive()
+  }
+
   suspend fun streamChat(
     provider: AIProvider,
     model: AIModel,
@@ -142,6 +151,7 @@ internal abstract class BaseLlmClient(protected val http: OkHttpClient) {
     val state = StreamState()
     var interrupted = false
     val call = http.newCall(buildRequest(provider, model, apiKey, request, stream))
+    LlmStreamRegistry.activeCall = call
 
     try {
       onEvent(LlmStreamEvent.Started)
@@ -197,6 +207,8 @@ internal abstract class BaseLlmClient(protected val http: OkHttpClient) {
       )
       onEvent(LlmStreamEvent.Failed(err))
       throw err
+    } finally {
+      LlmStreamRegistry.clear(call)
     }
   }
 
@@ -504,5 +516,20 @@ internal class AnthropicMessagesClient(http: OkHttpClient) : BaseLlmClient(http)
     } catch (e: IOException) {
       false to "Network error: ${e.message ?: "connection failed"}"
     }
+  }
+}
+
+/** Shared holder for the in-flight streaming call so Stop can abort blocked socket reads. */
+internal object LlmStreamRegistry {
+  @Volatile
+  var activeCall: okhttp3.Call? = null
+
+  fun cancelActive() {
+    activeCall?.cancel()
+    activeCall = null
+  }
+
+  fun clear(call: okhttp3.Call) {
+    if (activeCall === call) activeCall = null
   }
 }

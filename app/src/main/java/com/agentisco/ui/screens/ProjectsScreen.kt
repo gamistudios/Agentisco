@@ -12,11 +12,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -705,14 +708,47 @@ private fun NewOrImportProjectDialog(
             lineHeight = 13.sp
           )
         } else {
-          OutlinedTextField(
-            value = importPath,
-            onValueChange = { importPath = it },
-            label = { Text("Folder path", fontSize = 11.sp) },
-            placeholder = { Text("/sdcard/MyProjects/my-app", fontSize = 11.sp) },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-          )
+          val context = LocalContext.current
+          val folderPicker = rememberLauncherForActivityResult(
+            ActivityResultContracts.OpenDocumentTree()
+          ) { uri ->
+            if (uri == null) return@rememberLauncherForActivityResult
+            com.agentisco.ui.util.FolderPathResolver.takePersistablePermission(context, uri)
+            val resolved = com.agentisco.ui.util.FolderPathResolver.resolve(context, uri)
+            if (resolved != null) {
+              importPath = resolved
+              error = null
+            } else {
+              error = "That location can't be used as a project folder. Pick a folder on internal storage or the SD card."
+            }
+          }
+          Button(
+            onClick = { folderPicker.launch(null) },
+            colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
+            modifier = Modifier.fillMaxWidth().testTag("btn_pick_folder")
+          ) {
+            Icon(Icons.Outlined.FolderOpen, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Choose folder…", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+          }
+          if (importPath.isNotBlank()) {
+            Row(
+              modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(6.dp))
+                .background(DarkBackground)
+                .padding(horizontal = 8.dp, vertical = 6.dp)
+            ) {
+              Text(
+                importPath,
+                color = TerminalGreen,
+                fontSize = 10.sp,
+                fontFamily = FontFamily.Monospace,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+              )
+            }
+          }
           OutlinedTextField(
             value = importName,
             onValueChange = { importName = it },
@@ -722,7 +758,7 @@ private fun NewOrImportProjectDialog(
             modifier = Modifier.fillMaxWidth()
           )
           Text(
-            "The folder must be readable by the app. Nothing is moved or modified — Agentisco just opens it in place.",
+            "Browse the phone's storage and pick the project folder. Nothing is moved or modified — Agentisco opens it in place.",
             color = TextMuted,
             fontSize = 9.sp,
             lineHeight = 13.sp

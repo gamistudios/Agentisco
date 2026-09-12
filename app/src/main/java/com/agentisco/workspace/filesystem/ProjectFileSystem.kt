@@ -16,14 +16,9 @@ class ProjectFileSystem(private val baseDir: File) {
     if (!baseDir.exists()) {
       baseDir.mkdirs()
     }
-    initializeDefaultProjectsIfEmpty()
   }
 
   fun getProjects(): List<Project> {
-    val dirs = baseDir.listFiles { f -> f.isDirectory } ?: emptyArray()
-    if (dirs.isEmpty()) {
-      initializeDefaultProjectsIfEmpty()
-    }
     val updatedDirs = baseDir.listFiles { f -> f.isDirectory } ?: emptyArray()
     return updatedDirs.map { dir ->
       val descFile = File(dir, ".sco_meta")

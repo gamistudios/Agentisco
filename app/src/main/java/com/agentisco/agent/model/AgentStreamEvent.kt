@@ -15,6 +15,9 @@ sealed class AgentStreamEvent {
   /** Streamed assistant text chunk. */
   data class Token(val text: String) : AgentStreamEvent()
 
+  /** Streamed reasoning/"thinking" chunk (models with reasoning enabled). */
+  data class ReasoningToken(val text: String) : AgentStreamEvent()
+
   /** The model requested a tool; arguments are validated by the runtime. */
   data class ToolStarted(val name: String, val argsJson: String) : AgentStreamEvent()
 
@@ -42,4 +45,7 @@ sealed class AgentStreamEvent {
   data class Failed(val message: String) : AgentStreamEvent()
 
   data class Cancelled(val message: String = "Task cancelled by user") : AgentStreamEvent()
+
+  /** Streamed partial text must be discarded (e.g. before an automatic retry). */
+  data class TextReset(val reason: String) : AgentStreamEvent()
 }

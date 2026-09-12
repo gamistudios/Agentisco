@@ -133,6 +133,15 @@ interface ChatDao {
   @Query("SELECT * FROM agent_messages WHERE sessionId = :sessionId ORDER BY rowId ASC")
   suspend fun messagesOnce(sessionId: String): List<AgentMessageEntity>
 
+  @Query("SELECT * FROM agent_messages WHERE uuid = :uuid LIMIT 1")
+  suspend fun messageByUuid(uuid: String): AgentMessageEntity?
+
+  @Query("SELECT * FROM agent_blocks WHERE messageUuid = :messageUuid ORDER BY rowId ASC")
+  suspend fun blocksForMessage(messageUuid: String): List<AgentBlockEntity>
+
+  @Query("DELETE FROM agent_blocks WHERE messageUuid = :messageUuid AND kind = :kind")
+  suspend fun deleteBlocksOfKind(messageUuid: String, kind: String)
+
   @Insert(onConflict = androidx.room.OnConflictStrategy.REPLACE)
   suspend fun insertMessage(message: AgentMessageEntity)
 

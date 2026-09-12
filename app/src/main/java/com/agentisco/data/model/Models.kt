@@ -69,7 +69,9 @@ data class TerminalSession(
   val name: String,
   val currentDir: String,
   val lines: List<TerminalLine> = emptyList(),
-  val isRunning: Boolean = false
+  val isRunning: Boolean = false,
+  /** The project/workspace these tabs belong to — terminals never mix projects. */
+  val projectId: String = ""
 )
 
 data class GitCommit(

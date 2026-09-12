@@ -7,6 +7,7 @@ import com.agentisco.agent.llm.LlmRequest
 import com.agentisco.agent.llm.LlmRole
 import com.agentisco.agent.llm.LlmService
 import com.agentisco.agent.llm.LlmStreamEvent
+import com.agentisco.agent.llm.LlmToolCall
 import com.agentisco.agent.model.AgentPermissions
 import com.agentisco.agent.model.AgentStreamEvent
 import com.agentisco.agent.model.PendingApproval
@@ -23,6 +24,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import android.util.Log
@@ -35,6 +37,11 @@ import android.util.Log
  * Everything the UI shows comes from the [AgentStreamEvent]s emitted here —
  * there is no simulated activity. The model never executes tools itself and
  * never sees provider credentials.
+ *
+ * Transient LLM failures (network, timeout, provider 5xx/429) are retried
+ * automatically up to [MAX_LLM_ATTEMPTS] times, resuming the exact pending
+ * request — the same conversation state including any tool results gathered so
+ * far — rather than restarting the task.
  */
 class AgentRuntime(
   private val fileSystem: com.agentisco.workspace.filesystem.ProjectFileSystem,
@@ -46,6 +53,7 @@ class AgentRuntime(
 
   private companion object {
     const val TAG = "AgentiscoAgent"
+    const val MAX_LLM_ATTEMPTS = 5
   }
 
   private var pendingApprovalDeferred: CompletableDeferred<Boolean>? = null
@@ -64,7 +72,8 @@ class AgentRuntime(
     apiKey: String,
     permissions: AgentPermissions,
     terminalSession: TerminalSession,
-    history: List<Pair<String, String>> = emptyList(),
+    history: List<com.agentisco.data.repository.ChatHistoryMessage> = emptyList(),
+    resume: Boolean = false,
     onRequestApproval: (PendingApproval) -> Unit,
     onEvent: (AgentStreamEvent) -> Unit
   ): AgentTaskResult = withContext(Dispatchers.IO) {
@@ -79,11 +88,27 @@ class AgentRuntime(
     val systemPrompt = buildSystemPrompt(project, useTools)
     val messages = mutableListOf<LlmMessage>()
     messages.add(LlmMessage(LlmRole.SYSTEM, systemPrompt))
-    // Prior conversation of the persisted session, so follow-up prompts keep context.
-    for ((role, text) in history) {
-      messages.add(LlmMessage(if (role == "user") LlmRole.USER else LlmRole.ASSISTANT, text))
+    // Prior conversation of the persisted session: user prompts, assistant
+    // responses, tool calls and their real results — so follow-up prompts and
+    // resumed turns know exactly where the work stopped.
+    for (m in history) {
+      when (m.role) {
+        "user" -> messages.add(LlmMessage(LlmRole.USER, m.content))
+        "assistant" -> messages.add(LlmMessage(LlmRole.ASSISTANT, m.content))
+        "assistant_tool_call" -> messages.add(
+          LlmMessage(
+            LlmRole.ASSISTANT, m.content,
+            toolCalls = listOf(LlmToolCall(m.toolCallId ?: "call_resumed", m.toolName ?: "unknown", m.toolArgs ?: "{}"))
+          )
+        )
+        "tool" -> messages.add(LlmMessage(LlmRole.TOOL, m.content, toolCallId = m.toolCallId, toolName = m.toolName))
+      }
     }
-    messages.add(LlmMessage(LlmRole.USER, prompt))
+    // A resumed turn already ends with tool results / prior context in history;
+    // only a fresh user prompt is appended here.
+    if (!resume && prompt.isNotBlank()) {
+      messages.add(LlmMessage(LlmRole.USER, prompt))
+    }
     val modifiedFiles = linkedSetOf<String>()
     val maxIterations = permissions.maxToolIterations.coerceAtLeast(1)
 
@@ -92,123 +117,150 @@ class AgentRuntime(
       for (iteration in 1..maxIterations) {
         if (!currentCoroutineContext().isActive) throw CancellationException("Agent task cancelled")
 
-        val assistantText = StringBuilder()
-        var completedMessage: LlmMessage? = null
-        var failure: LlmException? = null
-
-        llmService.streamChat(
-          provider = provider,
-          model = model,
-          apiKey = apiKey,
-          request = LlmRequest(
-            messages = messages,
-            tools = if (useTools) toolRegistry.specs() else emptyList(),
-            maxOutputTokens = model.maxOutputTokens
-          )
-        ) { event ->
-          when (event) {
-            is LlmStreamEvent.Started -> if (iteration == 1) onEvent(AgentStreamEvent.Status("Contacting ${provider.name} · ${model.displayName}…"))
-            is LlmStreamEvent.Token -> {
-              assistantText.append(event.text)
-              onEvent(AgentStreamEvent.Token(event.text))
-            }
-            is LlmStreamEvent.ReasoningToken -> Unit // private reasoning is never surfaced
-            is LlmStreamEvent.ToolCallRequested -> onEvent(AgentStreamEvent.Status("Model requested ${event.call.name}"))
-            is LlmStreamEvent.Completed -> completedMessage = event.message
-            is LlmStreamEvent.Interrupted -> failure = LlmException("Response stream was interrupted.", LlmErrorKind.CANCELLED)
-            is LlmStreamEvent.Failed -> failure = event.error
-          }
-        }
-
-        failure?.let { throw it }
-        val message = completedMessage ?: LlmMessage(LlmRole.ASSISTANT, assistantText.toString())
-
-        if (message.toolCalls.isEmpty() || !useTools) {
-          finalText = message.content.ifBlank { assistantText.toString() }
-          break
-        }
-
-        // Model requested tools: validate, enforce permissions, execute for real,
-        // then feed structured results back to the model. The assistant message
-        // echoed into history carries normalized canonical calls (real ids,
-        // names, and arguments as valid JSON object strings) so the next request
-        // is always well-formed for the provider.
-        val canonicalCalls = message.toolCalls.map {
-          it.copy(
-            id = it.id.ifBlank { "call_${it.hashCode()}" },
-            name = it.name.trim(),
-            argumentsJson = normalizeArgsJson(it.argumentsJson)
-          )
-        }
-        messages.add(message.copy(toolCalls = canonicalCalls))
-        for (call in canonicalCalls) {
+        var attempt = 0
+        while (true) {
+          attempt++
           if (!currentCoroutineContext().isActive) throw CancellationException("Agent task cancelled")
 
-          val requestedName = call.name.trim()
-          Log.d(TAG, "tool call id=${call.id} name=\"$requestedName\" args=${call.argumentsJson.take(300)}")
+          val assistantText = StringBuilder()
+          var completedMessage: LlmMessage? = null
+          var failure: LlmException? = null
 
-          // Never let an undefined/blank tool name reach the executor: return a
-          // structured tool error the model can correct.
-          val tool = requestedName.takeIf { it.isNotEmpty() && it != "null" }?.let { toolRegistry.get(it) }
-          if (requestedName.isEmpty() || requestedName == "null" || tool == null) {
-            val reason = "Error: \"$requestedName\" is not an available tool. Available tools: ${toolRegistry.tools.joinToString(", ") { it.name }}."
-            Log.w(TAG, "unresolved tool call id=${call.id} name=\"$requestedName\"")
-            messages.add(LlmMessage(LlmRole.TOOL, reason, toolCallId = call.id, toolName = requestedName))
-            onEvent(AgentStreamEvent.ToolFinished(requestedName.ifBlank { "unknown" }, false, "Unknown tool \"$requestedName\"", "", null))
-            continue
+          try {
+            llmService.streamChat(
+              provider = provider,
+              model = model,
+              apiKey = apiKey,
+              request = LlmRequest(
+                messages = messages,
+                tools = if (useTools) toolRegistry.specs() else emptyList(),
+                maxOutputTokens = model.maxOutputTokens
+              )
+            ) { event ->
+              when (event) {
+                is LlmStreamEvent.Started -> if (iteration == 1 && attempt == 1) onEvent(AgentStreamEvent.Status("Contacting ${provider.name} · ${model.displayName}…"))
+                is LlmStreamEvent.Token -> {
+                  assistantText.append(event.text)
+                  onEvent(AgentStreamEvent.Token(event.text))
+                }
+                is LlmStreamEvent.ReasoningToken -> onEvent(AgentStreamEvent.ReasoningToken(event.text))
+                is LlmStreamEvent.ToolCallRequested -> onEvent(AgentStreamEvent.Status("Model requested ${event.call.name}"))
+                is LlmStreamEvent.Completed -> completedMessage = event.message
+                is LlmStreamEvent.Interrupted -> failure = LlmException("Response stream was interrupted.", LlmErrorKind.CANCELLED)
+                is LlmStreamEvent.Failed -> failure = event.error
+              }
+            }
+          } catch (e: LlmException) {
+            failure = e
           }
 
-          onEvent(AgentStreamEvent.ToolStarted(tool.name, call.argumentsJson))
-
-          // Parse + schema-validate exactly once; validation failures become
-          // structured tool results so the model can retry with correct args.
-          val args: org.json.JSONObject = try {
-            tool.parseAndValidate(call.argumentsJson)
-          } catch (e: ToolArgumentError) {
-            val reason = e.message ?: "Invalid arguments"
-            Log.w(TAG, "validation failed id=${call.id} name=${tool.name}: $reason")
-            messages.add(LlmMessage(LlmRole.TOOL, "Error: $reason", toolCallId = call.id, toolName = tool.name))
-            onEvent(AgentStreamEvent.ToolFinished(tool.name, false, reason, "", null))
-            continue
-          }
-          Log.d(TAG, "validated args id=${call.id} name=${tool.name} -> $args")
-
-          val result: ToolResult = try {
-            tool.execute(args, buildToolContext(project, permissions, terminalSession, onRequestApproval, onEvent))
-          } catch (e: Exception) {
-            Log.e(TAG, "tool ${tool.name} threw", e)
-            ToolResult(success = false, error = "Tool execution failed: ${e.message ?: e.javaClass.simpleName}")
-          }
-          result.metadata["file"]?.let { modifiedFiles.add(it) }
-          Log.d(TAG, "tool ${tool.name} success=${result.success} exitCode=${result.exitCode}")
-
-          val summary = when {
-            !result.success -> result.error?.take(180) ?: "Failed"
-            else -> result.output.lineSequence().firstOrNull()?.take(140)?.ifBlank { null }
-              ?: result.exitCode?.let { "exit code $it" } ?: "Done"
-          }
-          val detail = listOfNotNull(
-            result.output.takeIf { it.isNotBlank() },
-            result.error?.takeIf { it.isNotBlank() },
-            result.exitCode?.let { "exit code: $it" }
-          ).joinToString("\n")
-          onEvent(AgentStreamEvent.ToolFinished(call.name, result.success, summary, detail, result.exitCode))
-
-          messages.add(
-            LlmMessage(
-              LlmRole.TOOL,
-              listOfNotNull(
-                result.output.takeIf { it.isNotBlank() },
-                result.error?.let { "ERROR: $it" },
-                result.exitCode?.let { "exitCode: $it" }
-              ).joinToString("\n").ifBlank { "(no output)" },
-              toolCallId = call.id,
-              toolName = call.name
+          val err = failure
+          if (err != null && isTransient(err) && attempt < MAX_LLM_ATTEMPTS && currentCoroutineContext().isActive) {
+            // Retry the exact pending request (same conversation state, same
+            // tool results) after a backoff. Partial streamed text is discarded.
+            onEvent(AgentStreamEvent.TextReset("retrying"))
+            onEvent(
+              AgentStreamEvent.Status(
+                "Temporary error: ${err.message} — retrying (attempt ${attempt + 1}/$MAX_LLM_ATTEMPTS)…"
+              )
             )
-          )
-        }
-        if (iteration == maxIterations) {
-          finalText = message.content.ifBlank { "Stopped after $maxIterations tool iterations." }
+            // Wait longer between attempts — sleeping devices / flaky mobile
+            // networks need more than one second to recover.
+            delay(2000L * attempt)
+            continue
+          }
+          err?.let { throw it }
+
+          val message = completedMessage ?: LlmMessage(LlmRole.ASSISTANT, assistantText.toString())
+
+          if (message.toolCalls.isEmpty() || !useTools) {
+            finalText = message.content.ifBlank { assistantText.toString() }
+            break
+          }
+
+          // Model requested tools: validate, enforce permissions, execute for real,
+          // then feed structured results back to the model. The assistant message
+          // echoed into history carries normalized canonical calls (real ids,
+          // names, and arguments as valid JSON object strings) so the next request
+          // is always well-formed for the provider.
+          val canonicalCalls = message.toolCalls.map {
+            it.copy(
+              id = it.id.ifBlank { "call_${it.hashCode()}" },
+              name = it.name.trim(),
+              argumentsJson = normalizeArgsJson(it.argumentsJson)
+            )
+          }
+          messages.add(message.copy(toolCalls = canonicalCalls))
+          for (call in canonicalCalls) {
+            if (!currentCoroutineContext().isActive) throw CancellationException("Agent task cancelled")
+
+            val requestedName = call.name.trim()
+            Log.d(TAG, "tool call id=${call.id} name=\"$requestedName\" args=${call.argumentsJson.take(300)}")
+
+            // Never let an undefined/blank tool name reach the executor: return a
+            // structured tool error the model can correct.
+            val tool = requestedName.takeIf { it.isNotEmpty() && it != "null" }?.let { toolRegistry.get(it) }
+            if (requestedName.isEmpty() || requestedName == "null" || tool == null) {
+              val reason = "Error: \"$requestedName\" is not an available tool. Available tools: ${toolRegistry.tools.joinToString(", ") { it.name }}."
+              Log.w(TAG, "unresolved tool call id=${call.id} name=\"$requestedName\"")
+              messages.add(LlmMessage(LlmRole.TOOL, reason, toolCallId = call.id, toolName = requestedName))
+              onEvent(AgentStreamEvent.ToolFinished(requestedName.ifBlank { "unknown" }, false, "Unknown tool \"$requestedName\"", reason, null))
+              continue
+            }
+
+            onEvent(AgentStreamEvent.ToolStarted(tool.name, call.argumentsJson))
+
+            // Parse + schema-validate exactly once; validation failures become
+            // structured tool results so the model can retry with correct args.
+            val args: org.json.JSONObject = try {
+              tool.parseAndValidate(call.argumentsJson)
+            } catch (e: ToolArgumentError) {
+              val reason = "Error: ${e.message ?: "Invalid arguments"}"
+              Log.w(TAG, "validation failed id=${call.id} name=${tool.name}: $reason")
+              messages.add(LlmMessage(LlmRole.TOOL, reason, toolCallId = call.id, toolName = tool.name))
+              onEvent(AgentStreamEvent.ToolFinished(tool.name, false, e.message ?: "Invalid arguments", reason, null))
+              continue
+            }
+            Log.d(TAG, "validated args id=${call.id} name=${tool.name} -> $args")
+
+            val result: ToolResult = try {
+              tool.execute(args, buildToolContext(project, permissions, terminalSession, onRequestApproval, onEvent))
+            } catch (e: Exception) {
+              Log.e(TAG, "tool ${tool.name} threw", e)
+              ToolResult(success = false, error = "Tool execution failed: ${e.message ?: e.javaClass.simpleName}")
+            }
+            result.metadata["file"]?.let { modifiedFiles.add(it) }
+            Log.d(TAG, "tool ${tool.name} success=${result.success} exitCode=${result.exitCode}")
+
+            val summary = when {
+              !result.success -> result.error?.take(180) ?: "Failed"
+              else -> result.output.lineSequence().firstOrNull()?.take(140)?.ifBlank { null }
+                ?: result.exitCode?.let { "exit code $it" } ?: "Done"
+            }
+            val detail = listOfNotNull(
+              result.output.takeIf { it.isNotBlank() },
+              result.error?.takeIf { it.isNotBlank() },
+              result.exitCode?.let { "exit code: $it" }
+            ).joinToString("\n")
+            onEvent(AgentStreamEvent.ToolFinished(call.name, result.success, summary, detail, result.exitCode))
+
+            messages.add(
+              LlmMessage(
+                LlmRole.TOOL,
+                listOfNotNull(
+                  result.output.takeIf { it.isNotBlank() },
+                  result.error?.let { "ERROR: $it" },
+                  result.exitCode?.let { "exitCode: $it" }
+                ).joinToString("\n").ifBlank { "(no output)" },
+                toolCallId = call.id,
+                toolName = call.name
+              )
+            )
+          }
+          if (iteration == maxIterations) {
+            finalText = message.content.ifBlank { "Stopped after $maxIterations tool iterations." }
+          }
+          break // iteration handled; next outer iteration or finish
         }
       }
 
@@ -222,14 +274,24 @@ class AgentRuntime(
       onEvent(AgentStreamEvent.Cancelled())
       throw e
     } catch (e: LlmException) {
-      val reason = e.message ?: "LLM request failed"
-      onEvent(AgentStreamEvent.Failed(reason))
-      AgentTaskResult(success = false, summary = reason, modifiedFiles = modifiedFiles.toList())
+      if (e.kind == LlmErrorKind.CANCELLED) {
+        onEvent(AgentStreamEvent.Cancelled("Generation stopped"))
+        AgentTaskResult(success = false, summary = "Cancelled", modifiedFiles = modifiedFiles.toList())
+      } else {
+        onEvent(AgentStreamEvent.Failed(e.message ?: "LLM request failed"))
+        AgentTaskResult(success = false, summary = e.message ?: "LLM request failed", modifiedFiles = modifiedFiles.toList())
+      }
     } catch (e: Exception) {
       val reason = "Agent failed: ${e.message ?: e.javaClass.simpleName}"
       onEvent(AgentStreamEvent.Failed(reason))
       AgentTaskResult(success = false, summary = reason, modifiedFiles = modifiedFiles.toList())
     }
+  }
+
+  /** Whether a failure is worth an automatic retry (transient provider/network issues). */
+  private fun isTransient(e: LlmException): Boolean = when (e.kind) {
+    LlmErrorKind.NETWORK, LlmErrorKind.TIMEOUT, LlmErrorKind.SERVER, LlmErrorKind.RATE_LIMIT -> true
+    else -> e.httpCode?.let { it == 429 || it in 500..599 } ?: false
   }
 
   private fun buildToolContext(

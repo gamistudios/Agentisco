@@ -113,12 +113,18 @@ class WorkspaceViewModel(
   private val _isAgentCancelled = MutableStateFlow(false)
   val isAgentCancelled: StateFlow<Boolean> = _isAgentCancelled.asStateFlow()
 
+  /** True while a generation is paused (resumable) rather than cancelled. */
+  private val _isAgentPaused = MutableStateFlow(false)
+
   private var agentJob: Job? = null
 
   // Per-turn stream bookkeeping: which persisted rows the live events map to.
   private var currentTurnUuid: String? = null
   private var turnText = StringBuilder()
   private var streamingTextBlockUuid: String? = null
+  private var reasoningBlockUuid: String? = null
+  private var reasoningText = StringBuilder()
+  private var reasoningFlushJob: Job? = null
   private var runningToolBlocks = mutableMapOf<String, String>() // tool name -> block uuid
   private var approvalBlocks = mutableMapOf<String, String>() // approvalId -> block uuid
   private var textFlushJob: Job? = null
@@ -151,6 +157,32 @@ class WorkspaceViewModel(
       is AgentStreamEvent.TaskStarted -> Unit
       is AgentStreamEvent.Status ->
         chatStore.updateMessageStatus(turn, "running", event.text)
+      is AgentStreamEvent.ReasoningToken -> {
+        val uuid = reasoningBlockUuid
+        if (uuid == null) {
+          val newUuid = AgentChatStore.newId()
+          reasoningBlockUuid = newUuid
+          reasoningText = StringBuilder(event.text)
+          chatStore.insertBlock(
+            AgentBlockEntity(
+              uuid = newUuid, messageUuid = turn, kind = "reasoning", name = "",
+              argsJson = "", status = "streaming", summary = event.text,
+              detail = "", exitCode = null, createdAt = System.currentTimeMillis()
+            )
+          )
+        } else {
+          reasoningText.append(event.text)
+          scheduleReasoningFlush(uuid, turn)
+        }
+      }
+      is AgentStreamEvent.TextReset -> {
+        // Keep everything streamed so far: partial text/thinking stay in the
+        // database (marked done) and the next attempt starts a fresh block, so
+        // an interrupted generation never loses visible progress.
+        closeStreamingText(turn)
+        streamingTextBlockUuid = null
+        closeStreamingReasoning()
+      }
       is AgentStreamEvent.Token -> {
         val uuid = streamingTextBlockUuid
         if (uuid == null) {
@@ -214,7 +246,11 @@ class WorkspaceViewModel(
         }
       }
       is AgentStreamEvent.Failed -> finalizeTurn(turn, session, "failed", event.message)
-      is AgentStreamEvent.Cancelled -> finalizeTurn(turn, session, "cancelled", event.message)
+      is AgentStreamEvent.Cancelled -> {
+        val status = if (_isAgentPaused.value) "paused" else "cancelled"
+        _isAgentPaused.value = false
+        finalizeTurn(turn, session, status, event.message)
+      }
     }
   }
 
@@ -226,6 +262,25 @@ class WorkspaceViewModel(
     chatStore.updateTextBlock(uuid, snapshot)
     chatStore.updateBlockStatus(uuid, "done")
     chatStore.updateMessageContent(turn, snapshot)
+  }
+
+  private fun scheduleReasoningFlush(uuid: String, turn: String) {
+    reasoningFlushJob?.cancel()
+    val snapshot = reasoningText.toString()
+    reasoningFlushJob = viewModelScope.launch {
+      delay(250)
+      chatStore.updateTextBlock(uuid, snapshot)
+    }
+  }
+
+  /** Marks the current reasoning block done and flushes its text. */
+  private fun closeStreamingReasoning() {
+    val uuid = reasoningBlockUuid ?: return
+    reasoningFlushJob?.cancel()
+    chatStore.updateTextBlock(uuid, reasoningText.toString())
+    chatStore.updateBlockStatus(uuid, "done")
+    reasoningBlockUuid = null
+    reasoningText = StringBuilder()
   }
 
   private fun scheduleTextFlush(uuid: String, turn: String) {
@@ -241,10 +296,17 @@ class WorkspaceViewModel(
   private fun finalizeTurn(turn: String, session: String?, status: String, message: String) {
     closeStreamingText(turn)
     streamingTextBlockUuid = null
-    chatStore.updateMessageStatus(turn, status, message)
-    // Failure/cancel reasons should be visible even with no streamed text.
-    if (message.isNotBlank() && turnText.isBlank()) {
-      chatStore.updateMessageContent(turn, message)
+    closeStreamingReasoning()
+    chatStore.updateMessageStatus(turn, status, "")
+    // One red error card carries the failure — not scattered across the turn.
+    if (message.isNotBlank() && status != "completed") {
+      chatStore.insertBlock(
+        AgentBlockEntity(
+          uuid = AgentChatStore.newId(), messageUuid = turn, kind = "error", name = "error",
+          argsJson = "", status = "failed", summary = message,
+          detail = "", exitCode = null, createdAt = System.currentTimeMillis()
+        )
+      )
     }
     session?.let { chatStore.setSessionStatus(it, status) }
     currentTurnUuid = null
@@ -302,10 +364,55 @@ class WorkspaceViewModel(
     }
   }
 
+  /**
+   * Pauses the running generation: stream is aborted and state persisted, but
+   * the turn stays resumable — Resume continues it from the exact state.
+   */
+  fun pauseAgent() {
+    _isAgentPaused.value = true
+    repository.cancelAgentGeneration()
+    if (repository.pendingApproval.value != null) {
+      repository.resolveApproval(false)
+    }
+    repository.interruptTerminal()
+    agentJob?.cancel()
+  }
+
   /** Interrupts the running agent task (streamed request cancellation + tool loop stop). */
   fun cancelAgent() {
+    _isAgentPaused.value = false
     _isAgentCancelled.value = true
+    // Abort the blocked network read and any running tool process immediately,
+    // then cancel the coroutine driving the loop.
+    repository.cancelAgentGeneration()
+    if (repository.pendingApproval.value != null) {
+      repository.resolveApproval(false)
+    }
+    repository.interruptTerminal()
     agentJob?.cancel()
+  }
+
+  /**
+   * Retries a failed turn from its persisted state — the same conversation,
+   * tool calls and tool results, not the user's message from scratch.
+   */
+  fun retryAgentTurn(turnUuid: String) {
+    if (repository.isAgentWorking.value) return
+    val session = _activeSessionId.value ?: return
+    _isAgentCancelled.value = false
+    agentJob = viewModelScope.launch {
+      chatStore.clearErrorBlocks(turnUuid)
+      chatStore.updateMessageStatus(turnUuid, "running", "Retrying…")
+      chatStore.setSessionStatus(session, "running")
+      currentTurnUuid = turnUuid
+      turnText = StringBuilder()
+      streamingTextBlockUuid = null
+      reasoningBlockUuid = null
+      reasoningText = StringBuilder()
+      runningToolBlocks = mutableMapOf()
+      approvalBlocks = mutableMapOf()
+      repository.resumeAgentTask(turnUuid, session)
+    }
   }
   val permissions: StateFlow<AgentPermissions> = repository.permissions
   val searchQuery: StateFlow<String> = repository.searchQuery
@@ -527,6 +634,8 @@ class WorkspaceViewModel(
       currentTurnUuid = turnUuid
       turnText = StringBuilder()
       streamingTextBlockUuid = null
+      reasoningBlockUuid = null
+      reasoningText = StringBuilder()
       runningToolBlocks = mutableMapOf()
       approvalBlocks = mutableMapOf()
 
