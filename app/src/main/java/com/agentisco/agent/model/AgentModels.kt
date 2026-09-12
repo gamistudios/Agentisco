@@ -52,11 +52,15 @@ enum class PermissionMode {
   NEVER_ALLOW
 }
 
+/** Sentinel for an unlimited agent tool loop. */
+const val UNLIMITED_ITERATIONS = Int.MAX_VALUE
+
 data class AgentPermissions(
   val fileEditing: PermissionMode = PermissionMode.ALWAYS_ASK,
   val terminalCommands: PermissionMode = PermissionMode.ALWAYS_ASK,
   val networkAccess: Boolean = true,
-  val maxToolIterations: Int = 10,
+  /** Tool-loop budget; [UNLIMITED_ITERATIONS] means the agent works until the task completes. */
+  val maxToolIterations: Int = UNLIMITED_ITERATIONS,
   val readFiles: Boolean = true,
   val createFiles: Boolean = true,
   val modifyFiles: Boolean = true,

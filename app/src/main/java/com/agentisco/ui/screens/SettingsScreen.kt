@@ -16,11 +16,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.agentisco.core.model.AppDestination
 import com.agentisco.agent.model.PermissionMode
+import com.agentisco.agent.model.UNLIMITED_ITERATIONS
 import com.agentisco.ui.WorkspaceViewModel
 import com.agentisco.ui.theme.*
 
@@ -161,7 +163,14 @@ fun SettingsScreen(
             Switch(
               checked = permissions.networkAccess,
               onCheckedChange = { ch -> viewModel.updatePermissions { it.copy(networkAccess = ch) } },
-              colors = SwitchDefaults.colors(checkedThumbColor = ElectricBlue)
+              colors = SwitchDefaults.colors(
+              checkedThumbColor = ElectricBlue,
+              checkedTrackColor = ElectricBlue.copy(alpha = 0.35f),
+              checkedBorderColor = ElectricBlue,
+              uncheckedThumbColor = TextSecondary,
+              uncheckedTrackColor = DarkSurfaceHighlight,
+              uncheckedBorderColor = DarkBorder
+            )
             )
           }
 
@@ -172,17 +181,64 @@ fun SettingsScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
           ) {
-            Column {
+            Column(modifier = Modifier.weight(1f)) {
               Text("Max Tool Iterations", color = TextPrimary, fontSize = 13.sp)
-              Text("Safety cutoff for agent reasoning loop", color = TextMuted, fontSize = 11.sp)
+              Text("Unlimited lets the agent work fully autonomously", color = TextMuted, fontSize = 11.sp)
             }
-            Box(
-              modifier = Modifier
-                .clip(RoundedCornerShape(6.dp))
-                .background(DarkSurfaceElevated)
-                .padding(horizontal = 10.dp, vertical = 6.dp)
-            ) {
-              Text("${permissions.maxToolIterations} iterations", color = ElectricBlueGlow, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+              Box(
+                modifier = Modifier
+                  .size(30.dp)
+                  .clip(RoundedCornerShape(6.dp))
+                  .background(DarkSurfaceElevated)
+                  .border(1.dp, DarkBorderSubtle, RoundedCornerShape(6.dp))
+                  .clickable {
+                    viewModel.updatePermissions {
+                      val v = it.maxToolIterations
+                      it.copy(maxToolIterations = when {
+                        v == UNLIMITED_ITERATIONS -> 100
+                        else -> (v - 5).coerceAtLeast(1)
+                      })
+                    }
+                  }
+                  .testTag("btn_iter_decrease"),
+                contentAlignment = Alignment.Center
+              ) { Text("−", color = TextPrimary, fontSize = 14.sp) }
+              Box(
+                modifier = Modifier
+                  .padding(horizontal = 10.dp)
+                  .clip(RoundedCornerShape(6.dp))
+                  .background(DarkSurfaceElevated)
+                  .padding(horizontal = 10.dp, vertical = 6.dp)
+                  .testTag("txt_iter_value")
+              ) {
+                Text(
+                  if (permissions.maxToolIterations == UNLIMITED_ITERATIONS) "∞" else "${permissions.maxToolIterations}",
+                  color = ElectricBlueGlow,
+                  fontSize = 13.sp,
+                  fontWeight = FontWeight.SemiBold,
+                  fontFamily = FontFamily.Monospace
+                )
+              }
+              Box(
+                modifier = Modifier
+                  .size(30.dp)
+                  .clip(RoundedCornerShape(6.dp))
+                  .background(DarkSurfaceElevated)
+                  .border(1.dp, DarkBorderSubtle, RoundedCornerShape(6.dp))
+                  .clickable {
+                    viewModel.updatePermissions {
+                      val v = it.maxToolIterations
+                      it.copy(maxToolIterations = when {
+                        v == UNLIMITED_ITERATIONS -> v
+                        v >= 100 -> UNLIMITED_ITERATIONS
+                        else -> v + 5
+                      })
+                    }
+                  }
+                  .testTag("btn_iter_increase"),
+                contentAlignment = Alignment.Center
+              ) { Text("+", color = TextPrimary, fontSize = 14.sp) }
             }
           }
         }
@@ -261,7 +317,14 @@ private fun NotificationToggleRow(label: String, initial: Boolean) {
     Switch(
       checked = checked,
       onCheckedChange = { checked = it },
-      colors = SwitchDefaults.colors(checkedThumbColor = ElectricBlue)
+      colors = SwitchDefaults.colors(
+              checkedThumbColor = ElectricBlue,
+              checkedTrackColor = ElectricBlue.copy(alpha = 0.35f),
+              checkedBorderColor = ElectricBlue,
+              uncheckedThumbColor = TextSecondary,
+              uncheckedTrackColor = DarkSurfaceHighlight,
+              uncheckedBorderColor = DarkBorder
+            )
     )
   }
 }

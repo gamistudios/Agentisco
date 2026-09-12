@@ -101,18 +101,28 @@ class LlmService(
 /** Shared HTTP/SSE plumbing for both protocol clients. */
 internal abstract class BaseLlmClient(protected val http: OkHttpClient) {
 
-  protected abstract fun buildRequest(provider: AIProvider, model: AIModel, apiKey: String, request: LlmRequest, stream: Boolean): Request
+  internal abstract fun buildRequest(provider: AIProvider, model: AIModel, apiKey: String, request: LlmRequest, stream: Boolean): Request
 
   /** Parses one SSE data payload; returns true when the stream is complete. */
-  protected abstract fun handleData(data: String, state: StreamState, onEvent: (LlmStreamEvent) -> Unit): Boolean
+  internal abstract fun handleData(data: String, state: StreamState, onEvent: (LlmStreamEvent) -> Unit): Boolean
 
   /** Free credential/endpoint probe via the provider's model listing (no tokens billed). */
   internal abstract suspend fun probeModels(provider: AIProvider, apiKey: String): Pair<Boolean, String>
 
-  protected class StreamState {
+  internal class StreamState {
     val content = StringBuilder()
-    val toolCalls = LinkedHashMap<String, LlmToolCall>()
+    // Keyed by provider block index: OpenAI streams tool-call argument
+    // fragments across chunks where only the first carries the id/name.
+    val toolCalls = LinkedHashMap<Int, LlmToolCall>()
     var sawAnyData = false
+  }
+
+  internal fun normalizeArgs(raw: String?): String {
+    val text = raw?.trim().orEmpty()
+    if (text.isEmpty() || text == "null") return "{}"
+    // Never double-parse fragments; normalize only complete argument strings so
+    // the wire format is always a valid JSON object string.
+    return runCatching { JSONObject(text).toString() }.getOrDefault(text)
   }
 
   suspend fun streamChat(
@@ -219,7 +229,7 @@ internal abstract class BaseLlmClient(protected val http: OkHttpClient) {
 /** OpenAI Chat Completions protocol (also used by OpenAI-compatible routers). */
 internal class OpenAIChatCompletionsClient(http: OkHttpClient) : BaseLlmClient(http) {
 
-  override fun buildRequest(provider: AIProvider, model: AIModel, apiKey: String, request: LlmRequest, stream: Boolean): Request {
+  override internal fun buildRequest(provider: AIProvider, model: AIModel, apiKey: String, request: LlmRequest, stream: Boolean): Request {
     val body = JSONObject().apply {
       put("model", model.modelId)
       put("stream", stream)
@@ -279,7 +289,7 @@ internal class OpenAIChatCompletionsClient(http: OkHttpClient) : BaseLlmClient(h
       .build()
   }
 
-  override fun handleData(data: String, state: StreamState, onEvent: (LlmStreamEvent) -> Unit): Boolean {
+  override internal fun handleData(data: String, state: StreamState, onEvent: (LlmStreamEvent) -> Unit): Boolean {
     if (data == "[DONE]") return true
     val obj = runCatching { JSONObject(data) }.getOrElse {
       throw LlmException("Provider returned invalid JSON.", LlmErrorKind.INVALID_RESPONSE)
@@ -301,18 +311,23 @@ internal class OpenAIChatCompletionsClient(http: OkHttpClient) : BaseLlmClient(h
       for (i in 0 until toolCalls.length()) {
         val tc = toolCalls.optJSONObject(i) ?: continue
         val idx = tc.optInt("index", i)
-        val key = tc.optString("id").ifBlank { "call-$idx" }
         val fn = tc.optJSONObject("function")
-        val existing = state.toolCalls[key]
-        state.toolCalls[key] = LlmToolCall(
-          id = existing?.id ?: key,
-          name = existing?.name ?: fn?.optString("name").orEmpty(),
-          argumentsJson = (existing?.argumentsJson ?: "") + fn?.optString("arguments").orEmpty()
+        val fragmentId = cleanWireString(tc.optString("id"))
+        val fragmentName = cleanWireString(fn?.optString("name"))
+        val fragmentArgs = fn?.optString("arguments") ?: ""
+        val existing = state.toolCalls[idx]
+        state.toolCalls[idx] = LlmToolCall(
+          id = existing?.id?.takeIf { it.isNotEmpty() } ?: fragmentId.ifEmpty { "call_$idx" },
+          name = existing?.name?.takeIf { it.isNotEmpty() } ?: fragmentName,
+          argumentsJson = (existing?.argumentsJson ?: "") + fragmentArgs
         )
       }
     }
     return false
   }
+
+  /** org.json renders JSON null as the literal string "null" — treat it as absent. */
+  private fun cleanWireString(v: String?): String = if (v.isNullOrEmpty() || v == "null") "" else v
 
   override suspend fun probeModels(provider: AIProvider, apiKey: String): Pair<Boolean, String> {
     return try {
@@ -321,12 +336,14 @@ internal class OpenAIChatCompletionsClient(http: OkHttpClient) : BaseLlmClient(h
         .header("Authorization", "Bearer $apiKey")
         .get()
         .build()
-      http.newCall(request).execute().use { response ->
+      withContext(Dispatchers.IO) {
+        http.newCall(request).execute().use { response ->
         when {
           response.isSuccessful -> true to "Connected"
           else -> {
             val body = response.body?.string().orEmpty().take(2000)
             false to (httpError(response.code, body).message ?: "Connection failed")
+            }
           }
         }
       }
@@ -339,7 +356,7 @@ internal class OpenAIChatCompletionsClient(http: OkHttpClient) : BaseLlmClient(h
 /** Anthropic Messages protocol. */
 internal class AnthropicMessagesClient(http: OkHttpClient) : BaseLlmClient(http) {
 
-  override fun buildRequest(provider: AIProvider, model: AIModel, apiKey: String, request: LlmRequest, stream: Boolean): Request {
+  override internal fun buildRequest(provider: AIProvider, model: AIModel, apiKey: String, request: LlmRequest, stream: Boolean): Request {
     val body = JSONObject().apply {
       put("model", model.modelId)
       put("stream", stream)
@@ -368,7 +385,7 @@ internal class AnthropicMessagesClient(http: OkHttpClient) : BaseLlmClient(http)
                   put("type", "tool_use")
                   put("id", tc.id)
                   put("name", tc.name)
-                  put("input", JSONObject(parseToolArguments(tc.argumentsJson)))
+                  put("input", runCatching { JSONObject(normalizeArgs(tc.argumentsJson)) }.getOrDefault(JSONObject()))
                 })
               }
             })
@@ -400,7 +417,7 @@ internal class AnthropicMessagesClient(http: OkHttpClient) : BaseLlmClient(http)
       .build()
   }
 
-  override fun handleData(data: String, state: StreamState, onEvent: (LlmStreamEvent) -> Unit): Boolean {
+  override internal fun handleData(data: String, state: StreamState, onEvent: (LlmStreamEvent) -> Unit): Boolean {
     val obj = runCatching { JSONObject(data) }.getOrElse {
       throw LlmException("Provider returned invalid JSON.", LlmErrorKind.INVALID_RESPONSE)
     }
@@ -420,8 +437,11 @@ internal class AnthropicMessagesClient(http: OkHttpClient) : BaseLlmClient(http)
                 onEvent(LlmStreamEvent.Token(it))
               }
               "tool_use" -> content.optJSONObject(i)?.let { b ->
-                val id = b.optString("id")
-                state.toolCalls[id] = LlmToolCall(id = id, name = b.optString("name"), argumentsJson = b.optJSONObject("input")?.toString() ?: "{}")
+                state.toolCalls[i] = LlmToolCall(
+                  id = b.optString("id"),
+                  name = b.optString("name"),
+                  argumentsJson = normalizeArgs(b.optJSONObject("input")?.toString() ?: "{}")
+                )
               }
             }
           }
@@ -431,8 +451,12 @@ internal class AnthropicMessagesClient(http: OkHttpClient) : BaseLlmClient(http)
       "content_block_start" -> {
         val block = obj.optJSONObject("content_block")
         if (block?.optString("type") == "tool_use") {
-          val id = block.optString("id")
-          state.toolCalls[id] = LlmToolCall(id = id, name = block.optString("name"), argumentsJson = "")
+          val idx = obj.optInt("index", state.toolCalls.size)
+          state.toolCalls[idx] = LlmToolCall(
+            id = block.optString("id"),
+            name = cleanWireString(block.optString("name")),
+            argumentsJson = ""
+          )
         }
       }
       "content_block_delta" -> {
@@ -444,9 +468,10 @@ internal class AnthropicMessagesClient(http: OkHttpClient) : BaseLlmClient(http)
           }
           "thinking_delta" -> delta.optString("thinking", "").takeIf { it.isNotEmpty() }?.let { onEvent(LlmStreamEvent.ReasoningToken(it)) }
           "input_json_delta" -> {
-            val last = state.toolCalls.values.lastOrNull()
-            if (last != null) {
-              state.toolCalls[last.id] = last.copy(argumentsJson = last.argumentsJson + delta.optString("partial_json"))
+            val idx = obj.optInt("index", -1).let { if (it < 0) state.toolCalls.keys.lastOrNull() ?: 0 else it }
+            val existing = state.toolCalls[idx]
+            if (existing != null) {
+              state.toolCalls[idx] = existing.copy(argumentsJson = existing.argumentsJson + delta.optString("partial_json"))
             }
           }
         }
@@ -464,12 +489,14 @@ internal class AnthropicMessagesClient(http: OkHttpClient) : BaseLlmClient(http)
         .header("anthropic-version", "2023-06-01")
         .get()
         .build()
-      http.newCall(request).execute().use { response ->
+      withContext(Dispatchers.IO) {
+        http.newCall(request).execute().use { response ->
         when {
           response.isSuccessful -> true to "Connected"
           else -> {
             val body = response.body?.string().orEmpty().take(2000)
             false to (httpError(response.code, body).message ?: "Connection failed")
+            }
           }
         }
       }

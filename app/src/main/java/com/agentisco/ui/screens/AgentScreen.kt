@@ -63,6 +63,7 @@ fun AgentScreen(
   val isWorking by viewModel.isAgentWorking.collectAsState()
   val stream by viewModel.agentStream.collectAsState()
   val permissions by viewModel.permissions.collectAsState()
+  val allModels by viewModel.aiModels.collectAsState()
 
   var promptText by remember { mutableStateOf("") }
   val listState = rememberLazyListState()
@@ -89,20 +90,14 @@ fun AgentScreen(
       // Keep the composer usable above the soft keyboard.
       .imePadding()
   ) {
-    // Compact agent header: model (name + provider) and live agent state.
+    // Compact agent header: live agent state only — model selection lives in the composer.
     Row(
       modifier = Modifier
         .fillMaxWidth()
         .padding(horizontal = 14.dp, vertical = 8.dp),
-      horizontalArrangement = Arrangement.SpaceBetween,
+      horizontalArrangement = Arrangement.End,
       verticalAlignment = Alignment.CenterVertically
     ) {
-      ModelChip(
-        model = selectedModel,
-        providers = providers,
-        onClick = { viewModel.toggleModelSheet(true) }
-      )
-
       if (isWorking) {
         Row(verticalAlignment = Alignment.CenterVertically) {
           Box(
@@ -192,12 +187,16 @@ fun AgentScreen(
       }
     }
 
-    // Sticky agent composer.
+    // Sticky agent composer with inline configuration row.
     AgentComposer(
+      viewModel = viewModel,
+      selectedModel = selectedModel,
+      providers = providers,
+      models = allModels,
+      permissions = permissions,
       promptText = promptText,
       onPromptChange = { promptText = it },
       isWorking = isWorking,
-      permissions = permissions,
       onSend = {
         val p = promptText.trim()
         if (p.isNotEmpty()) {
@@ -206,48 +205,6 @@ fun AgentScreen(
         }
       },
       onStop = { viewModel.cancelAgent() }
-    )
-  }
-}
-
-@Composable
-private fun ModelChip(
-  model: com.agentisco.settings.model.AIModel?,
-  providers: List<com.agentisco.settings.model.AIProvider>,
-  onClick: () -> Unit
-) {
-  val providerName = model?.let { m -> providers.firstOrNull { it.id == m.providerId }?.name }
-  Column(
-    modifier = Modifier
-      .clip(RoundedCornerShape(10.dp))
-      .background(DarkSurface)
-      .border(1.dp, DarkBorder, RoundedCornerShape(10.dp))
-      .clickable(onClick = onClick)
-      .padding(horizontal = 12.dp, vertical = 6.dp)
-      .testTag("top_model_selector")
-  ) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-      Text(
-        text = model?.displayName ?: "No model selected",
-        color = if (model == null) TextMuted else ElectricBlueGlow,
-        fontSize = 12.sp,
-        fontWeight = FontWeight.SemiBold,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis
-      )
-      Spacer(modifier = Modifier.width(4.dp))
-      Icon(
-        Icons.Default.Check, contentDescription = null,
-        tint = if (model == null) TextMuted else ElectricBlueGlow,
-        modifier = Modifier.size(10.dp)
-      )
-    }
-    Text(
-      text = providerName ?: "tap to configure",
-      color = TextMuted,
-      fontSize = 9.sp,
-      maxLines = 1,
-      overflow = TextOverflow.Ellipsis
     )
   }
 }
@@ -573,10 +530,14 @@ private fun MiniAction(label: String, onClick: () -> Unit) {
 
 @Composable
 private fun AgentComposer(
+  viewModel: WorkspaceViewModel,
+  selectedModel: com.agentisco.settings.model.AIModel?,
+  providers: List<com.agentisco.settings.model.AIProvider>,
+  models: List<com.agentisco.settings.model.AIModel>,
+  permissions: com.agentisco.agent.model.AgentPermissions,
   promptText: String,
   onPromptChange: (String) -> Unit,
   isWorking: Boolean,
-  permissions: com.agentisco.agent.model.AgentPermissions,
   onSend: () -> Unit,
   onStop: () -> Unit
 ) {
@@ -634,28 +595,154 @@ private fun AgentComposer(
 
       Spacer(modifier = Modifier.height(2.dp))
 
-      Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(
-          text = when (permissions.terminalCommands) {
-            PermissionMode.ALLOW_ALL -> "Full access"
-            PermissionMode.ALLOW_SAFE -> "Safe commands"
-            PermissionMode.NEVER_ALLOW -> "Read-only"
-            else -> "Ask first"
+      // Inline configuration row: model, file-edit policy, terminal policy.
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        // Model dropdown grouped by provider (desktop-reference style).
+        val providerName = selectedModel?.let { m -> providers.firstOrNull { it.id == m.providerId }?.name }
+        ConfigDropdown(
+          label = selectedModel?.displayName ?: "Select model",
+          sublabel = providerName,
+          tint = if (selectedModel == null) TextMuted else ElectricBlueGlow,
+          options = buildList {
+            providers.forEach { provider ->
+              add(DropdownOption(header = true, label = provider.name))
+              models.filter { it.providerId == provider.id }.forEach { m ->
+                add(DropdownOption(label = m.displayName, sublabel = m.modelId, tag = "${m.id}|${m.displayName}"))
+              }
+            }
+            if (models.isEmpty()) add(DropdownOption(header = true, label = "No models configured"))
+            add(DropdownOption(label = "Configure providers…", configure = true))
           },
-          color = when (permissions.terminalCommands) {
-            PermissionMode.ALLOW_ALL -> WarningAmber
-            PermissionMode.NEVER_ALLOW -> TextMuted
-            else -> TerminalGreen
+          onPick = { option ->
+            if (option.configure) {
+              viewModel.navigateTo(AppDestination.SETTINGS)
+            } else {
+              val recordId = option.tag?.substringBefore("|")
+              models.firstOrNull { it.id == recordId }?.let { viewModel.selectModel(it) }
+            }
           },
-          fontSize = 10.sp,
-          fontWeight = FontWeight.Medium
+          modifier = Modifier.testTag("composer_model_selector")
         )
-        Spacer(modifier = Modifier.weight(1f))
-        Text(
-          text = "Agent tools require approval per Settings",
-          color = TextMuted,
-          fontSize = 9.sp
+
+        // File editing policy dropdown
+        ConfigDropdown(
+          label = when (permissions.fileEditing) {
+            PermissionMode.ALWAYS_ASK -> "Edits: ask"
+            PermissionMode.AUTO_APPROVE_PROJECT -> "Edits: auto"
+            PermissionMode.NEVER_ALLOW -> "Edits: off"
+            else -> "Edits: ask"
+          },
+          tint = if (permissions.fileEditing == PermissionMode.NEVER_ALLOW) DangerRed else TerminalGreen,
+          options = listOf(
+            DropdownOption(label = "Ask before editing", tag = PermissionMode.ALWAYS_ASK.name),
+            DropdownOption(label = "Auto-approve in workspace", tag = PermissionMode.AUTO_APPROVE_PROJECT.name),
+            DropdownOption(label = "Never edit files", tag = PermissionMode.NEVER_ALLOW.name)
+          ),
+          onPick = { option ->
+            option.tag?.let { PermissionMode.valueOf(it) }?.let { mode ->
+              viewModel.updatePermissions { it.copy(fileEditing = mode) }
+            }
+          }
         )
+
+        // Terminal execution strategy dropdown
+        ConfigDropdown(
+          label = when (permissions.terminalCommands) {
+            PermissionMode.ALLOW_ALL -> "Terminal: all"
+            PermissionMode.ALLOW_SAFE -> "Terminal: safe"
+            PermissionMode.NEVER_ALLOW -> "Terminal: off"
+            else -> "Terminal: ask"
+          },
+          tint = if (permissions.terminalCommands == PermissionMode.ALLOW_ALL) WarningAmber else TerminalGreen,
+          options = listOf(
+            DropdownOption(label = "Ask before running", tag = PermissionMode.ALWAYS_ASK.name),
+            DropdownOption(label = "Allow safe commands", tag = PermissionMode.ALLOW_SAFE.name),
+            DropdownOption(label = "Allow all commands", tag = PermissionMode.ALLOW_ALL.name),
+            DropdownOption(label = "Never run commands", tag = PermissionMode.NEVER_ALLOW.name)
+          ),
+          onPick = { option ->
+            option.tag?.let { PermissionMode.valueOf(it) }?.let { mode ->
+              viewModel.updatePermissions { it.copy(terminalCommands = mode) }
+            }
+          }
+        )
+      }
+    }
+  }
+}
+
+data class DropdownOption(
+  val label: String,
+  val sublabel: String? = null,
+  val tag: String? = null,
+  val header: Boolean = false,
+  val configure: Boolean = false
+)
+
+@Composable
+private fun ConfigDropdown(
+  label: String,
+  options: List<DropdownOption>,
+  onPick: (DropdownOption) -> Unit,
+  modifier: Modifier = Modifier,
+  sublabel: String? = null,
+  tint: Color = TextSecondary
+) {
+  var expanded by remember { mutableStateOf(false) }
+  Box(modifier = modifier) {
+    Row(
+      verticalAlignment = Alignment.CenterVertically,
+      modifier = Modifier
+        .clip(RoundedCornerShape(6.dp))
+        .clickable { expanded = true }
+        .padding(horizontal = 4.dp, vertical = 4.dp)
+    ) {
+      Column {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          Text(label, color = tint, fontSize = 11.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+          Spacer(modifier = Modifier.width(3.dp))
+          Text("▾", color = TextMuted, fontSize = 9.sp)
+        }
+        sublabel?.let {
+          Text(it, color = TextMuted, fontSize = 8.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+      }
+    }
+    DropdownMenu(
+      expanded = expanded,
+      onDismissRequest = { expanded = false },
+      containerColor = DarkSurfaceElevated,
+      modifier = Modifier.heightIn(max = 360.dp)
+    ) {
+      options.forEach { option ->
+        if (option.header) {
+          Box(modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
+            Text(option.label, color = TextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+          }
+        } else {
+          DropdownMenuItem(
+            text = {
+              Column {
+                Text(
+                  option.label,
+                  color = if (option.configure) ElectricBlueGlow else TextPrimary,
+                  fontSize = 13.sp
+                )
+                option.sublabel?.let {
+                  Text(it, color = TextMuted, fontSize = 10.sp, fontFamily = FontFamily.Monospace, maxLines = 1)
+                }
+              }
+            },
+            onClick = {
+              expanded = false
+              onPick(option)
+            }
+          )
+        }
       }
     }
   }
@@ -668,7 +755,8 @@ private fun friendlyToolLabel(name: String, argsJson: String): Pair<String, Stri
   fun arg(key: String) = args?.optString(key).orEmpty().take(80)
   return when (name) {
     "read_file" -> "Reading" to arg("path")
-    "write_file" -> "Editing" to arg("path")
+    "write_file" -> "Writing" to arg("path")
+    "edit_file" -> "Editing" to arg("path")
     "create_file" -> "Creating" to arg("path")
     "delete_file" -> "Deleting" to arg("path")
     "move_file" -> "Moving" to arg("new_path")

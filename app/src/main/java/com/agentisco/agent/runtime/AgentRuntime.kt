@@ -25,6 +25,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
+import android.util.Log
 
 /**
  * Drives the agent loop: LLM request → (streamed) response → model-requested
@@ -42,6 +43,10 @@ class AgentRuntime(
   private val llmService: LlmService,
   private val toolRegistry: AgentToolRegistry
 ) {
+
+  private companion object {
+    const val TAG = "AgentiscoAgent"
+  }
 
   private var pendingApprovalDeferred: CompletableDeferred<Boolean>? = null
 
@@ -117,25 +122,58 @@ class AgentRuntime(
         }
 
         // Model requested tools: validate, enforce permissions, execute for real,
-        // then feed structured results back to the model.
-        messages.add(message)
-        for (call in message.toolCalls) {
+        // then feed structured results back to the model. The assistant message
+        // echoed into history carries normalized canonical calls (real ids,
+        // names, and arguments as valid JSON object strings) so the next request
+        // is always well-formed for the provider.
+        val canonicalCalls = message.toolCalls.map {
+          it.copy(
+            id = it.id.ifBlank { "call_${it.hashCode()}" },
+            name = it.name.trim(),
+            argumentsJson = normalizeArgsJson(it.argumentsJson)
+          )
+        }
+        messages.add(message.copy(toolCalls = canonicalCalls))
+        for (call in canonicalCalls) {
           if (!currentCoroutineContext().isActive) throw CancellationException("Agent task cancelled")
 
-          val tool = toolRegistry.get(call.name)
-          if (tool == null) {
-            messages.add(LlmMessage(LlmRole.TOOL, "Error: unknown tool \"${call.name}\".", toolCallId = call.id, toolName = call.name))
-            onEvent(AgentStreamEvent.ToolFinished(call.name, false, "Unknown tool \"${call.name}\"", "", null))
+          val requestedName = call.name.trim()
+          Log.d(TAG, "tool call id=${call.id} name=\"$requestedName\" args=${call.argumentsJson.take(300)}")
+
+          // Never let an undefined/blank tool name reach the executor: return a
+          // structured tool error the model can correct.
+          val tool = requestedName.takeIf { it.isNotEmpty() && it != "null" }?.let { toolRegistry.get(it) }
+          if (requestedName.isEmpty() || requestedName == "null" || tool == null) {
+            val reason = "Error: \"$requestedName\" is not an available tool. Available tools: ${toolRegistry.tools.joinToString(", ") { it.name }}."
+            Log.w(TAG, "unresolved tool call id=${call.id} name=\"$requestedName\"")
+            messages.add(LlmMessage(LlmRole.TOOL, reason, toolCallId = call.id, toolName = requestedName))
+            onEvent(AgentStreamEvent.ToolFinished(requestedName.ifBlank { "unknown" }, false, "Unknown tool \"$requestedName\"", "", null))
             continue
           }
 
-          onEvent(AgentStreamEvent.ToolStarted(call.name, call.argumentsJson))
-          val result: ToolResult = try {
-            tool.execute(call.argumentsJson, buildToolContext(project, permissions, terminalSession, onRequestApproval, onEvent))
+          onEvent(AgentStreamEvent.ToolStarted(tool.name, call.argumentsJson))
+
+          // Parse + schema-validate exactly once; validation failures become
+          // structured tool results so the model can retry with correct args.
+          val args: org.json.JSONObject = try {
+            tool.parseAndValidate(call.argumentsJson)
           } catch (e: ToolArgumentError) {
-            ToolResult(success = false, error = e.message ?: "Invalid tool arguments")
+            val reason = e.message ?: "Invalid arguments"
+            Log.w(TAG, "validation failed id=${call.id} name=${tool.name}: $reason")
+            messages.add(LlmMessage(LlmRole.TOOL, "Error: $reason", toolCallId = call.id, toolName = tool.name))
+            onEvent(AgentStreamEvent.ToolFinished(tool.name, false, reason, "", null))
+            continue
+          }
+          Log.d(TAG, "validated args id=${call.id} name=${tool.name} -> $args")
+
+          val result: ToolResult = try {
+            tool.execute(args, buildToolContext(project, permissions, terminalSession, onRequestApproval, onEvent))
+          } catch (e: Exception) {
+            Log.e(TAG, "tool ${tool.name} threw", e)
+            ToolResult(success = false, error = "Tool execution failed: ${e.message ?: e.javaClass.simpleName}")
           }
           result.metadata["file"]?.let { modifiedFiles.add(it) }
+          Log.d(TAG, "tool ${tool.name} success=${result.success} exitCode=${result.exitCode}")
 
           val summary = when {
             !result.success -> result.error?.take(180) ?: "Failed"
@@ -243,6 +281,17 @@ class AgentRuntime(
       }
     }
   }
+}
+
+/**
+ * Normalizes model-supplied tool arguments to a valid JSON object string so
+ * echoing the assistant tool-call message back never produces a provider 400
+ * ("arguments must be a valid JSON object string").
+ */
+private fun normalizeArgsJson(raw: String): String {
+  val text = raw.trim()
+  if (text.isEmpty() || text == "null") return "{}"
+  return runCatching { org.json.JSONObject(text).toString() }.getOrDefault("{}")
 }
 
 data class AgentTaskResult(
