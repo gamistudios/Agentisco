@@ -204,7 +204,9 @@ class WorkspaceViewModel(
       is AgentStreamEvent.ToolStarted -> {
         closeStreamingText(turn)
         val uuid = AgentChatStore.newId()
-        runningToolBlocks[event.name] = uuid
+        // Parallel batched calls can share a tool name — key by callId.
+        if (event.callId.isNotBlank()) runningToolBlocks[event.callId] = uuid
+        else runningToolBlocks[event.name] = uuid
         chatStore.insertBlock(
           AgentBlockEntity(
             uuid = uuid, messageUuid = turn, kind = "tool", name = event.name,
@@ -214,7 +216,7 @@ class WorkspaceViewModel(
         )
       }
       is AgentStreamEvent.ToolFinished -> {
-        val uuid = runningToolBlocks.remove(event.name)
+        val uuid = runningToolBlocks.remove(event.callId.ifBlank { event.name })
         if (uuid != null) {
           chatStore.updateToolBlock(
             uuid = uuid,
@@ -442,6 +444,12 @@ class WorkspaceViewModel(
     repository.refreshProjects()
   }
 
+  val isGitRepository: StateFlow<Boolean?> = repository.isGitRepository
+
+  fun initGitRepository() {
+    repository.initGitRepository()
+  }
+
   fun openFile(file: ProjectFile) {
     repository.openFile(file)
   }
@@ -599,6 +607,7 @@ class WorkspaceViewModel(
       val project = activeProject.value
       // Ensure a session: reuse the active one or create one titled from the prompt.
       var sessionId = _activeSessionId.value
+      var isNewSession = false
       val now = System.currentTimeMillis()
       if (sessionId == null) {
         val session = AgentSessionEntity(
@@ -609,37 +618,70 @@ class WorkspaceViewModel(
         chatStore.createSessionBlocking(session)
         sessionId = session.id
         _activeSessionId.value = sessionId
+        isNewSession = true
       } else {
         chatStore.setSessionStatus(sessionId, "running")
       }
+      if (isNewSession) autoTitleSession(sessionId, prompt)
 
-      // Persist the user prompt and the agent turn immediately — one row each,
-      // with stable UUIDs, so restart/reconnect can never duplicate them.
-      val userUuid = AgentChatStore.newId()
-      val turnUuid = AgentChatStore.newId()
-      chatStore.insertMessage(
-        AgentMessageEntity(
-          uuid = userUuid, sessionId = sessionId, role = "user", content = prompt,
-          status = "sent", statusMessage = "", createdAt = now
-        )
+      launchTurn(prompt, sessionId)
+    }
+  }
+
+  /**
+   * Starts a file-context request ("Ask Agent on <file>") in its own separate
+   * session, so per-file conversations never append to the active chat.
+   */
+  fun runAgentTaskInNewSession(prompt: String) {
+    if (repository.isAgentWorking.value) return
+    _isAgentCancelled.value = false
+    agentJob = viewModelScope.launch {
+      val project = activeProject.value
+      val now = System.currentTimeMillis()
+      val session = AgentSessionEntity(
+        id = AgentChatStore.newId(), projectId = project.path,
+        title = prompt.lineSequence().firstOrNull()?.take(48) ?: "New session",
+        status = "running", createdAt = now, updatedAt = now
       )
-      chatStore.insertMessage(
-        AgentMessageEntity(
-          uuid = turnUuid, sessionId = sessionId, role = "assistant_turn", content = "",
-          status = "running", statusMessage = "Starting…", createdAt = System.currentTimeMillis()
-        )
+      chatStore.createSessionBlocking(session)
+      _activeSessionId.value = session.id
+      autoTitleSession(session.id, prompt)
+      launchTurn(prompt, session.id)
+    }
+  }
+
+  /** Persists the user prompt + agent turn rows, then drives the runtime. */
+  private suspend fun launchTurn(prompt: String, sessionId: String) {
+    val userUuid = AgentChatStore.newId()
+    val turnUuid = AgentChatStore.newId()
+    chatStore.insertMessage(
+      AgentMessageEntity(
+        uuid = userUuid, sessionId = sessionId, role = "user", content = prompt,
+        status = "sent", statusMessage = "", createdAt = System.currentTimeMillis()
       )
+    )
+    chatStore.insertMessage(
+      AgentMessageEntity(
+        uuid = turnUuid, sessionId = sessionId, role = "assistant_turn", content = "",
+        status = "running", statusMessage = "Starting…", createdAt = System.currentTimeMillis()
+      )
+    )
+    currentTurnUuid = turnUuid
+    turnText = StringBuilder()
+    streamingTextBlockUuid = null
+    reasoningBlockUuid = null
+    reasoningText = StringBuilder()
+    runningToolBlocks = mutableMapOf()
+    approvalBlocks = mutableMapOf()
+    repository.runAgentTask(prompt, sessionId)
+  }
 
-      // Reset per-turn stream bookkeeping before the runtime starts emitting.
-      currentTurnUuid = turnUuid
-      turnText = StringBuilder()
-      streamingTextBlockUuid = null
-      reasoningBlockUuid = null
-      reasoningText = StringBuilder()
-      runningToolBlocks = mutableMapOf()
-      approvalBlocks = mutableMapOf()
-
-      repository.runAgentTask(prompt, sessionId)
+  /** AI-generated session name (max 6 words); falls back to the prompt slice. */
+  private fun autoTitleSession(sessionId: String, prompt: String) {
+    viewModelScope.launch {
+      repository.requestSessionTitle(prompt)?.let { title ->
+        chatStore.renameSession(sessionId, title)
+      }
     }
   }
 

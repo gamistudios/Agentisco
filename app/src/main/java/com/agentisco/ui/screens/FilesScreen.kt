@@ -464,27 +464,27 @@ fun FilesScreen(
         ) {
           AskAgentOptionItem("Explain this file", "Break down functionality & data flow") {
             showAskAgentDialog = false
-            viewModel.runAgentTask("Explain the structure, logic, and state flow in ${file.name}")
+            viewModel.runAgentTaskInNewSession("Explain the structure, logic, and state flow in ${file.name}")
             onNavigate(AppDestination.AGENT)
           }
           AskAgentOptionItem("Find bugs", "Static analysis and edge-case inspection") {
             showAskAgentDialog = false
-            viewModel.runAgentTask("Inspect ${file.name} for subtle bugs, memory leaks, and race conditions")
+            viewModel.runAgentTaskInNewSession("Inspect ${file.name} for subtle bugs, memory leaks, and race conditions")
             onNavigate(AppDestination.AGENT)
           }
           AskAgentOptionItem("Refactor", "Clean code, simplify types and imports") {
             showAskAgentDialog = false
-            viewModel.runAgentTask("Refactor ${file.name} to modern idiomatic patterns")
+            viewModel.runAgentTaskInNewSession("Refactor ${file.name} to modern idiomatic patterns")
             onNavigate(AppDestination.AGENT)
           }
           AskAgentOptionItem("Write tests", "Generate unit and integration test suite") {
             showAskAgentDialog = false
-            viewModel.runAgentTask("Write comprehensive Vitest unit tests for ${file.name}")
+            viewModel.runAgentTaskInNewSession("Write comprehensive Vitest unit tests for ${file.name}")
             onNavigate(AppDestination.AGENT)
           }
           AskAgentOptionItem("Optimize", "Enhance performance and memoization") {
             showAskAgentDialog = false
-            viewModel.runAgentTask("Optimize rendering performance and listeners in ${file.name}")
+            viewModel.runAgentTaskInNewSession("Optimize rendering performance and listeners in ${file.name}")
             onNavigate(AppDestination.AGENT)
           }
         }

@@ -23,25 +23,34 @@ import com.agentisco.settings.model.AIProvider
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import android.util.Log
 
 /**
  * Drives the agent loop: LLM request → (streamed) response → model-requested
- * tool calls → validation → permission policy → real tool execution → tool
- * results back to the model → repeat, until a final answer or the iteration cap.
+ * tool calls → validation → permission policy → real tool execution (parallel
+ * for batched calls) → tool results back to the model → repeat, until a final
+ * answer or the iteration cap.
  *
  * Everything the UI shows comes from the [AgentStreamEvent]s emitted here —
  * there is no simulated activity. The model never executes tools itself and
  * never sees provider credentials.
  *
- * Transient LLM failures (network, timeout, provider 5xx/429) are retried
- * automatically up to [MAX_LLM_ATTEMPTS] times, resuming the exact pending
- * request — the same conversation state including any tool results gathered so
- * far — rather than restarting the task.
+ * - Transient LLM failures (network, timeout, provider 5xx/429) are retried
+ *   automatically up to [MAX_LLM_ATTEMPTS] times, resuming the exact pending
+ *   request rather than restarting the task.
+ * - The model may batch several tool calls in one response; they execute
+ *   concurrently (bounded) and all results are sent back in a single round trip.
  */
 class AgentRuntime(
   private val fileSystem: com.agentisco.workspace.filesystem.ProjectFileSystem,
@@ -54,9 +63,13 @@ class AgentRuntime(
   private companion object {
     const val TAG = "AgentiscoAgent"
     const val MAX_LLM_ATTEMPTS = 5
+    const val MAX_PARALLEL_TOOLS = 4
   }
 
+  /** Serializes approval requests when tools run concurrently. */
+  private val approvalMutex = Mutex()
   private var pendingApprovalDeferred: CompletableDeferred<Boolean>? = null
+  private val toolParallelism = Semaphore(MAX_PARALLEL_TOOLS)
 
   fun resolvePendingApproval(allowed: Boolean) {
     val deferred = pendingApprovalDeferred
@@ -109,14 +122,12 @@ class AgentRuntime(
     if (!resume && prompt.isNotBlank()) {
       messages.add(LlmMessage(LlmRole.USER, prompt))
     }
-    val modifiedFiles = linkedSetOf<String>()
+    val modifiedFiles = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
     val maxIterations = permissions.maxToolIterations.coerceAtLeast(1)
 
     try {
       var finalText = ""
-      for (iteration in 1..maxIterations) {
-        if (!currentCoroutineContext().isActive) throw CancellationException("Agent task cancelled")
-
+      taskLoop@ for (iteration in 1..maxIterations) {
         var attempt = 0
         while (true) {
           attempt++
@@ -157,7 +168,8 @@ class AgentRuntime(
           val err = failure
           if (err != null && isTransient(err) && attempt < MAX_LLM_ATTEMPTS && currentCoroutineContext().isActive) {
             // Retry the exact pending request (same conversation state, same
-            // tool results) after a backoff. Partial streamed text is discarded.
+            // tool results) after a backoff. Partial streamed text is kept in
+            // the UI and the retry starts a fresh text block.
             onEvent(AgentStreamEvent.TextReset("retrying"))
             onEvent(
               AgentStreamEvent.Status(
@@ -175,14 +187,14 @@ class AgentRuntime(
 
           if (message.toolCalls.isEmpty() || !useTools) {
             finalText = message.content.ifBlank { assistantText.toString() }
-            break
+            break@taskLoop // task complete — do NOT start another request
           }
 
-          // Model requested tools: validate, enforce permissions, execute for real,
-          // then feed structured results back to the model. The assistant message
-          // echoed into history carries normalized canonical calls (real ids,
-          // names, and arguments as valid JSON object strings) so the next request
-          // is always well-formed for the provider.
+          // Model requested tools: validate, enforce permissions, execute for
+          // real (batched calls run concurrently), then feed structured results
+          // back to the model. The assistant message echoed into history carries
+          // normalized canonical calls (real ids, names, and arguments as valid
+          // JSON object strings) so the next request is always well-formed.
           val canonicalCalls = message.toolCalls.map {
             it.copy(
               id = it.id.ifBlank { "call_${it.hashCode()}" },
@@ -191,66 +203,38 @@ class AgentRuntime(
             )
           }
           messages.add(message.copy(toolCalls = canonicalCalls))
-          for (call in canonicalCalls) {
-            if (!currentCoroutineContext().isActive) throw CancellationException("Agent task cancelled")
 
-            val requestedName = call.name.trim()
-            Log.d(TAG, "tool call id=${call.id} name=\"$requestedName\" args=${call.argumentsJson.take(300)}")
+          // Announce every call up front, in the model's own order, so the UI
+          // shows the batch in a deterministic order (not execution order).
+          canonicalCalls.forEach { call ->
+            onEvent(AgentStreamEvent.ToolStarted(call.name, call.argumentsJson, call.id))
+          }
 
-            // Never let an undefined/blank tool name reach the executor: return a
-            // structured tool error the model can correct.
-            val tool = requestedName.takeIf { it.isNotEmpty() && it != "null" }?.let { toolRegistry.get(it) }
-            if (requestedName.isEmpty() || requestedName == "null" || tool == null) {
-              val reason = "Error: \"$requestedName\" is not an available tool. Available tools: ${toolRegistry.tools.joinToString(", ") { it.name }}."
-              Log.w(TAG, "unresolved tool call id=${call.id} name=\"$requestedName\"")
-              messages.add(LlmMessage(LlmRole.TOOL, reason, toolCallId = call.id, toolName = requestedName))
-              onEvent(AgentStreamEvent.ToolFinished(requestedName.ifBlank { "unknown" }, false, "Unknown tool \"$requestedName\"", reason, null))
-              continue
-            }
+          val results: List<Pair<LlmToolCall, ToolResult>> = coroutineScope {
+            canonicalCalls.map { call ->
+              async {
+                val outcome: Pair<LlmToolCall, ToolResult> = toolParallelism.withPermit {
+                  if (!currentCoroutineContext().isActive) {
+                    call to ToolResult(success = false, error = "Agent task cancelled")
+                  } else {
+                    call to executeToolCall(call, project, permissions, terminalSession, onRequestApproval, onEvent, modifiedFiles)
+                  }
+                }
+                outcome
+              }
+            }.awaitAll()
+          }
 
-            onEvent(AgentStreamEvent.ToolStarted(tool.name, call.argumentsJson))
-
-            // Parse + schema-validate exactly once; validation failures become
-            // structured tool results so the model can retry with correct args.
-            val args: org.json.JSONObject = try {
-              tool.parseAndValidate(call.argumentsJson)
-            } catch (e: ToolArgumentError) {
-              val reason = "Error: ${e.message ?: "Invalid arguments"}"
-              Log.w(TAG, "validation failed id=${call.id} name=${tool.name}: $reason")
-              messages.add(LlmMessage(LlmRole.TOOL, reason, toolCallId = call.id, toolName = tool.name))
-              onEvent(AgentStreamEvent.ToolFinished(tool.name, false, e.message ?: "Invalid arguments", reason, null))
-              continue
-            }
-            Log.d(TAG, "validated args id=${call.id} name=${tool.name} -> $args")
-
-            val result: ToolResult = try {
-              tool.execute(args, buildToolContext(project, permissions, terminalSession, onRequestApproval, onEvent))
-            } catch (e: Exception) {
-              Log.e(TAG, "tool ${tool.name} threw", e)
-              ToolResult(success = false, error = "Tool execution failed: ${e.message ?: e.javaClass.simpleName}")
-            }
-            result.metadata["file"]?.let { modifiedFiles.add(it) }
-            Log.d(TAG, "tool ${tool.name} success=${result.success} exitCode=${result.exitCode}")
-
-            val summary = when {
-              !result.success -> result.error?.take(180) ?: "Failed"
-              else -> result.output.lineSequence().firstOrNull()?.take(140)?.ifBlank { null }
-                ?: result.exitCode?.let { "exit code $it" } ?: "Done"
-            }
-            val detail = listOfNotNull(
-              result.output.takeIf { it.isNotBlank() },
-              result.error?.takeIf { it.isNotBlank() },
-              result.exitCode?.let { "exit code: $it" }
-            ).joinToString("\n")
-            onEvent(AgentStreamEvent.ToolFinished(call.name, result.success, summary, detail, result.exitCode))
-
+          // Tool results go back as structured TOOL messages, in call order,
+          // so a batched round trip costs exactly one request.
+          for ((call, result) in results) {
             messages.add(
               LlmMessage(
                 LlmRole.TOOL,
                 listOfNotNull(
                   result.output.takeIf { it.isNotBlank() },
                   result.error?.let { "ERROR: $it" },
-                  result.exitCode?.let { "exitCode: $it" }
+                  result.exitCode?.let { "exit code: $it" }
                 ).joinToString("\n").ifBlank { "(no output)" },
                 toolCallId = call.id,
                 toolName = call.name
@@ -259,8 +243,9 @@ class AgentRuntime(
           }
           if (iteration == maxIterations) {
             finalText = message.content.ifBlank { "Stopped after $maxIterations tool iterations." }
+            break@taskLoop
           }
-          break // iteration handled; next outer iteration or finish
+          break // next iteration: request a new model response
         }
       }
 
@@ -288,6 +273,64 @@ class AgentRuntime(
     }
   }
 
+  /** Validates, permission-checks, and executes one tool call; emits its events. */
+  private suspend fun executeToolCall(
+    call: LlmToolCall,
+    project: Project,
+    permissions: AgentPermissions,
+    terminalSession: TerminalSession,
+    onRequestApproval: (PendingApproval) -> Unit,
+    onEvent: (AgentStreamEvent) -> Unit,
+    modifiedFiles: MutableSet<String>
+  ): ToolResult {
+    val requestedName = call.name.trim()
+    Log.d(TAG, "tool call id=${call.id} name=\"$requestedName\" args=${call.argumentsJson.take(300)}")
+
+    // Never let an undefined/blank tool name reach the executor: return a
+    // structured tool error the model can correct.
+    val tool = requestedName.takeIf { it.isNotEmpty() && it != "null" }?.let { toolRegistry.get(it) }
+    if (requestedName.isEmpty() || requestedName == "null" || tool == null) {
+      val reason = "Error: \"$requestedName\" is not an available tool. Available tools: ${toolRegistry.tools.joinToString(", ") { it.name }}."
+      Log.w(TAG, "unresolved tool call id=${call.id} name=\"$requestedName\"")
+      onEvent(AgentStreamEvent.ToolFinished(requestedName.ifBlank { "unknown" }, false, "Unknown tool \"$requestedName\"", reason, null, call.id))
+      return ToolResult(success = false, error = reason)
+    }
+
+    // Parse + schema-validate exactly once; validation failures become
+    // structured tool results so the model can retry with correct args.
+    val args: org.json.JSONObject = try {
+      tool.parseAndValidate(call.argumentsJson)
+    } catch (e: ToolArgumentError) {
+      val reason = "Error: ${e.message ?: "Invalid arguments"}"
+      Log.w(TAG, "validation failed id=${call.id} name=${tool.name}: $reason")
+      onEvent(AgentStreamEvent.ToolFinished(tool.name, false, e.message ?: "Invalid arguments", reason, null, call.id))
+      return ToolResult(success = false, error = reason)
+    }
+    Log.d(TAG, "validated args id=${call.id} name=${tool.name} -> $args")
+
+    val result: ToolResult = try {
+      tool.execute(args, buildToolContext(project, permissions, terminalSession, onRequestApproval, onEvent))
+    } catch (e: Exception) {
+      Log.e(TAG, "tool ${tool.name} threw", e)
+      ToolResult(success = false, error = "Tool execution failed: ${e.message ?: e.javaClass.simpleName}")
+    }
+    result.metadata["file"]?.let { modifiedFiles.add(it) }
+    Log.d(TAG, "tool ${tool.name} success=${result.success} exitCode=${result.exitCode}")
+
+    val summary = when {
+      !result.success -> result.error?.take(180) ?: "Failed"
+      else -> result.output.lineSequence().firstOrNull()?.take(140)?.ifBlank { null }
+        ?: result.exitCode?.let { "exit code $it" } ?: "Done"
+    }
+    val detail = listOfNotNull(
+      result.output.takeIf { it.isNotBlank() },
+      result.error?.takeIf { it.isNotBlank() },
+      result.exitCode?.let { "exit code: $it" }
+    ).joinToString("\n")
+    onEvent(AgentStreamEvent.ToolFinished(call.name, result.success, summary, detail, result.exitCode, call.id))
+    return result
+  }
+
   /** Whether a failure is worth an automatic retry (transient provider/network issues). */
   private fun isTransient(e: LlmException): Boolean = when (e.kind) {
     LlmErrorKind.NETWORK, LlmErrorKind.TIMEOUT, LlmErrorKind.SERVER, LlmErrorKind.RATE_LIMIT -> true
@@ -305,20 +348,23 @@ class AgentRuntime(
     permissions = permissions,
     terminalSession = terminalSession,
     requestApproval = { approval ->
-      onEvent(
-        AgentStreamEvent.ApprovalRequested(
-          approvalId = approval.id,
-          command = approval.command,
-          title = approval.title,
-          impact = approval.impactDescription
+      // Concurrent tools queue here; approvals resolve strictly one at a time.
+      approvalMutex.withLock {
+        onEvent(
+          AgentStreamEvent.ApprovalRequested(
+            approvalId = approval.id,
+            command = approval.command,
+            title = approval.title,
+            impact = approval.impactDescription
+          )
         )
-      )
-      val deferred = CompletableDeferred<Boolean>()
-      pendingApprovalDeferred = deferred
-      onRequestApproval(approval)
-      val allowed = deferred.await()
-      onEvent(AgentStreamEvent.ApprovalResolved(approval.id, allowed))
-      allowed
+        val deferred = CompletableDeferred<Boolean>()
+        pendingApprovalDeferred = deferred
+        onRequestApproval(approval)
+        val allowed = deferred.await()
+        onEvent(AgentStreamEvent.ApprovalResolved(approval.id, allowed))
+        allowed
+      }
     },
     activeSessions = { listOf(terminalSession) }
   )
@@ -344,6 +390,15 @@ class AgentRuntime(
         appendLine()
         appendLine("You can request tools (read_file, write_file, run_command, git_*, ...) to inspect and modify this workspace.")
         appendLine("Use tools to do real work instead of describing changes. The user must approve protected operations.")
+        appendLine()
+        appendLine("IMPORTANT - batching: request ALL independent tool calls together in ONE response")
+        appendLine("(e.g. every file you need to read, several searches, multiple commands).")
+        appendLine("All results are returned together in a single round trip; do not request one tool per response.")
+        appendLine("Only wait for a result when a later call depends on it.")
+        appendLine()
+        appendLine("IMPORTANT - finishing: once the work is done, ALWAYS end with a final plain-text")
+        appendLine("response (no tool calls): a concise summary of what you did, the files you changed,")
+        appendLine("and the results/outcome. The user reads that summary as the answer.")
       } else {
         appendLine()
         appendLine("This model cannot call tools. Answer with descriptions/snippets only.")

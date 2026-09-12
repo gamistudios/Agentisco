@@ -97,7 +97,7 @@ fun toolTypeFor(name: String): ToolType = when {
   name == "run_command" || name == "build" || name == "test" || name == "run" ||
     name.startsWith("terminal") -> ToolType.TERMINAL
   name == "write_file" || name == "create_file" || name == "edit_file" || name == "move_file" || name == "delete_file" -> ToolType.EDIT_FILE
-  name == "search_files" -> ToolType.SEARCH
+  name == "search_files" || name == "regex_search" || name == "glob_files" -> ToolType.SEARCH
   else -> ToolType.READ_FILE
 }
 

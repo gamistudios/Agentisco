@@ -35,7 +35,13 @@ class AgentToolRegistry(
   val tools: List<AgentTool> = listOf(
     ListFilesTool(fileSystem),
     ReadFileTool(fileSystem),
+    ReadFilesTool(fileSystem),
     SearchFilesTool(fileSystem),
+    RegexSearchTool(fileSystem),
+    GlobFilesTool(fileSystem),
+    FileInfoTool(fileSystem),
+    DirectoryTreeTool(fileSystem),
+    TaskPlanTool(),
     WriteFileTool(fileSystem, ::checkFileWrite),
     EditFileTool(fileSystem, ::checkFileWrite),
     CreateFileTool(fileSystem, ::checkFileWrite),
@@ -321,8 +327,13 @@ class RunCommandTool(private val tm: TerminalProcessManager) : AgentTool {
     }
 
     val out = StringBuilder()
+    // Unique process id per call so batched parallel commands never overwrite
+    // each other's entry in the process registry.
+    val runnerSession = ctx.terminalSession.copy(
+      id = ctx.terminalSession.id + "-run-" + java.util.UUID.randomUUID().toString().take(8)
+    )
     val exitCode = tm.executeCommand(
-      ctx.terminalSession, command,
+      runnerSession, command,
       { line -> out.appendLine(line.text) },
       projectDir = File(ctx.project.path).takeIf { it.isDirectory }
     )
@@ -362,8 +373,11 @@ abstract class ScriptTool(
     val hasNpm = File(ctx.project.path, "package.json").exists()
     val command = if (hasNpm) "npm run $script${if (extra.isBlank()) "" else " -- $extra"}" else "echo 'No package.json in ${ctx.project.name}'"
     val out = StringBuilder()
+    val runnerSession = ctx.terminalSession.copy(
+      id = ctx.terminalSession.id + "-run-" + java.util.UUID.randomUUID().toString().take(8)
+    )
     val exitCode = tm.executeCommand(
-      ctx.terminalSession, command,
+      runnerSession, command,
       { line -> out.appendLine(line.text) },
       projectDir = File(ctx.project.path).takeIf { it.isDirectory }
     )

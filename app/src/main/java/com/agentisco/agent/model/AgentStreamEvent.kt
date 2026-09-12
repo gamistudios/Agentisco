@@ -18,8 +18,9 @@ sealed class AgentStreamEvent {
   /** Streamed reasoning/"thinking" chunk (models with reasoning enabled). */
   data class ReasoningToken(val text: String) : AgentStreamEvent()
 
-  /** The model requested a tool; arguments are validated by the runtime. */
-  data class ToolStarted(val name: String, val argsJson: String) : AgentStreamEvent()
+  /** The model requested a tool; arguments are validated by the runtime.
+   *  [callId] disambiguates parallel batched calls with the same tool name. */
+  data class ToolStarted(val name: String, val argsJson: String, val callId: String = "") : AgentStreamEvent()
 
   /** Structured result of a tool execution. */
   data class ToolFinished(
@@ -27,7 +28,8 @@ sealed class AgentStreamEvent {
     val success: Boolean,
     val summary: String,
     val detail: String,
-    val exitCode: Int?
+    val exitCode: Int?,
+    val callId: String = ""
   ) : AgentStreamEvent()
 
   /** A protected operation needs explicit user approval before it can run. */

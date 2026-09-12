@@ -505,6 +505,11 @@ private fun AgentTurnCard(
 ) {
   val clipboard = LocalClipboardManager.current
   val fullText = item.blocks.filterIsInstance<TextBlock>().joinToString("\n\n") { it.text }
+  // The model's final answer (last completed text block of a finished turn)
+  // gets the highlighted, copyable response treatment.
+  val finalResponseId = if (item.status == TurnStatus.COMPLETED) {
+    item.blocks.lastOrNull { it is TextBlock && (it as? TextBlock)?.text?.isNotBlank() == true }?.id
+  } else null
 
   Column(
     modifier = Modifier
@@ -613,11 +618,15 @@ private fun AgentTurnCard(
       when (block) {
         is TextBlock -> {
           if (block.text.isNotBlank()) {
-            MarkdownText(
-              text = block.text,
-              streaming = block.streaming,
-              modifier = Modifier.fillMaxWidth()
-            )
+            if (block.id == finalResponseId) {
+              ResponseCard(block)
+            } else {
+              MarkdownText(
+                text = block.text,
+                streaming = block.streaming,
+                modifier = Modifier.fillMaxWidth()
+              )
+            }
           }
         }
         is ReasoningBlock -> ThinkingBlock(block)
@@ -876,6 +885,48 @@ private fun ApprovalCard(item: ApprovalBlock, onAllow: () -> Unit, onDeny: () ->
         ) { Text("Deny", color = Color.White, fontSize = 11.sp) }
       }
     }
+  }
+}
+
+/** Highlighted, copyable card for the agent's final answer. */
+@Composable
+private fun ResponseCard(block: TextBlock) {
+  val clipboard = LocalClipboardManager.current
+  Column(
+    modifier = Modifier
+      .fillMaxWidth()
+      .clip(RoundedCornerShape(12.dp))
+      .background(TerminalGreen.copy(alpha = 0.06f))
+      .border(1.dp, TerminalGreen.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+      .padding(12.dp)
+      .testTag("chat_final_response")
+  ) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+      Icon(
+        Icons.Default.CheckCircle,
+        contentDescription = null,
+        tint = TerminalGreen,
+        modifier = Modifier.size(14.dp)
+      )
+      Spacer(modifier = Modifier.width(6.dp))
+      Text(
+        "Response",
+        color = TerminalGreen,
+        fontSize = 10.sp,
+        fontWeight = FontWeight.Bold
+      )
+      Spacer(modifier = Modifier.weight(1f))
+      Icon(
+        Icons.Outlined.ContentCopy,
+        contentDescription = "Copy response",
+        tint = TextMuted,
+        modifier = Modifier
+          .size(13.dp)
+          .clickable { clipboard.setText(AnnotatedString(block.text)) }
+      )
+    }
+    Spacer(modifier = Modifier.height(6.dp))
+    MarkdownText(text = block.text, modifier = Modifier.fillMaxWidth())
   }
 }
 
@@ -1225,6 +1276,12 @@ private fun friendlyToolLabel(name: String, argsJson: String): Pair<String, Stri
   fun arg(key: String) = args?.optString(key).orEmpty().take(80)
   return when (name) {
     "read_file" -> "Reading" to arg("path")
+    "read_files" -> "Reading files" to ""
+    "glob_files" -> "Finding files" to arg("pattern")
+    "regex_search" -> "Regex search" to arg("pattern")
+    "file_info" -> "Inspecting" to arg("path")
+    "directory_tree" -> "Listing tree" to arg("path").ifBlank { "workspace" }
+    "task_plan" -> "Planning" to ""
     "write_file" -> "Writing" to arg("path")
     "edit_file" -> "Editing" to arg("path")
     "create_file" -> "Creating" to arg("path")

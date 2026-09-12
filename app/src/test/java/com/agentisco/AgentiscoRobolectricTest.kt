@@ -90,41 +90,62 @@ class ExampleRobolectricTest {
     assertFalse(fs.exists(project, "src/components/Button.tsx"))
   }
 
+  /** Runs a git command for tests using the real git binary on PATH. */
+  private fun runGitForTest(projectPath: String, args: String): com.agentisco.workspace.git.GitRunResult {
+    val tokens = Regex("\"[^\"]*\"|'[^']*'|\\S+").findAll(args).map { m ->
+      val t = m.value
+      if (t.startsWith("\"") || t.startsWith("'")) t.substring(1, t.length - 1)
+      else t.replace("HEAD:", "HEAD:")
+    }.filter { it != "2>/dev/null" }.toList()
+    val process = ProcessBuilder(tokens)
+      .directory(File(projectPath))
+      .redirectErrorStream(true)
+      .start()
+    val output = process.inputStream.bufferedReader().readText()
+    return com.agentisco.workspace.git.GitRunResult(process.waitFor(), output)
+  }
+
   @Test
   fun `git repository manager tracks changes reverts files and commits`() {
-    val tempDir = File(System.getProperty("java.io.tmpdir"), "test_git_${System.currentTimeMillis()}")
-    tempDir.deleteOnExit()
-    val fs = ProjectFileSystem(tempDir)
-    val project = fs.createProject("GitTest", "Git testing")
+    kotlinx.coroutines.runBlocking {
+      val tempDir = File(System.getProperty("java.io.tmpdir"), "test_git_${System.currentTimeMillis()}")
+      tempDir.deleteOnExit()
+      val fs = ProjectFileSystem(tempDir)
+      val project = fs.createProject("GitTest", "Git testing")
+      val git = GitRepositoryManager(fs) { path, args -> runGitForTest(path, args) }
 
-    val git = GitRepositoryManager(fs)
-    git.initializeProjectBaseline(project)
+      // Real git repository initialization
+      assertTrue(git.initRepository(project))
+      // Local identity so commits work in the test environment
+      runGitForTest(project.path, "git config user.name Test")
+      runGitForTest(project.path, "git config user.email test@test")
+      assertTrue(git.isGitRepository(project))
 
-    // Initially clean
-    val initialDiffs = git.computeAllDiffs(project)
-    assertTrue(initialDiffs.isEmpty())
+      // Initially clean (no commits yet, but also no changes vs empty index)
+      assertTrue(git.getChangedFiles(project).isEmpty())
 
-    // Modify a file
-    fs.writeFile(project, "package.json", "{\n  \"name\": \"gittest-modified\"\n}")
-    val changedDiffs = git.computeAllDiffs(project)
-    assertEquals(1, changedDiffs.size)
-    assertEquals("package.json", changedDiffs.first().filePath)
+      // Modify a file and verify it is detected
+      fs.writeFile(project, "package.json", "{\n  \"name\": \"gittest-modified\"\n}")
+      val changedDiffs = git.computeAllDiffs(project)
+      assertEquals(1, changedDiffs.size)
+      assertEquals("package.json", changedDiffs.first().filePath)
 
-    // Commit changes
-    val commit = git.commit(project, setOf("package.json"), "Update package name")
-    assertNotNull(commit)
-    assertEquals("Update package name", commit?.message)
+      // Commit changes
+      val commit = git.commit(project, setOf("package.json"), "Update package name")
+      assertNotNull(commit)
+      assertEquals("Update package name", commit?.message)
+      assertTrue(git.getCommitHistory(project).any { it.message == "Update package name" })
 
-    // After commit, should be clean
-    val afterCommitDiffs = git.computeAllDiffs(project)
-    assertTrue(afterCommitDiffs.isEmpty())
+      // After commit, should be clean
+      assertTrue(git.computeAllDiffs(project).isEmpty())
 
-    // Modify again, then revert
-    fs.writeFile(project, "package.json", "corrupted")
-    assertTrue(git.computeAllDiffs(project).isNotEmpty())
-    val reverted = git.revertFile(project, "package.json")
-    assertTrue(reverted)
-    assertEquals("{\n  \"name\": \"gittest-modified\"\n}", fs.readFile(project, "package.json"))
+      // Modify again, then revert to the committed content
+      fs.writeFile(project, "package.json", "corrupted")
+      assertTrue(git.computeAllDiffs(project).isNotEmpty())
+      val reverted = git.revertFile(project, "package.json")
+      assertTrue(reverted)
+      assertEquals("{\n  \"name\": \"gittest-modified\"\n}", fs.readFile(project, "package.json"))
+    }
   }
 
   @Test

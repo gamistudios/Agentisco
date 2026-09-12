@@ -47,7 +47,28 @@ class WorkspaceRepository(
   val chatStore = AgentChatStore(context)
 
   val fileSystem = ProjectFileSystem(baseDir)
-  val gitManager = GitRepositoryManager(fileSystem)
+  val gitManager = GitRepositoryManager(fileSystem) { projectPath, args ->
+    runGitCommand(projectPath, args)
+  }
+
+  /**
+   * Executes a real `git` command inside the rootfs with the project folder
+   * mounted as the workspace — the same environment the terminal uses.
+   */
+  private suspend fun runGitCommand(projectPath: String, args: String): com.agentisco.workspace.git.GitRunResult {
+    val out = StringBuilder()
+    val runnerSession = TerminalSession(
+      id = "git-runner-" + projectPath.hashCode(),
+      name = "git",
+      currentDir = projectPath
+    )
+    val code = terminalManager.executeCommand(
+      runnerSession, args,
+      { line -> out.appendLine(line.text) },
+      projectDir = File(projectPath).takeIf { it.isDirectory }
+    )
+    return com.agentisco.workspace.git.GitRunResult(code, out.toString())
+  }
 
   // Real Linux terminal stack: proot binaries (bundled via jniLibs) + a
   // Debian-based rootfs downloaded and verified on first use. Null when no
@@ -210,6 +231,10 @@ class WorkspaceRepository(
   // Git State
   private val _stagedFiles = MutableStateFlow<Set<String>>(emptySet())
   val stagedFiles: StateFlow<Set<String>> = _stagedFiles.asStateFlow()
+
+  /** null = unknown/unchecked, false = project folder is not a git repository yet. */
+  private val _isGitRepository = MutableStateFlow<Boolean?>(null)
+  val isGitRepository: StateFlow<Boolean?> = _isGitRepository.asStateFlow()
 
   private val _commitMessage = MutableStateFlow("Fix chat message lifecycle and store recreation")
   val commitMessage: StateFlow<String> = _commitMessage.asStateFlow()
@@ -421,7 +446,6 @@ class WorkspaceRepository(
       _fileDiffs.value = emptyList()
       return
     }
-    gitManager.initializeProjectBaseline(project)
     val files = fileSystem.getFileTree(project)
     _projectFiles.value = files
 
@@ -467,17 +491,38 @@ class WorkspaceRepository(
     refreshDiffsAndGit()
   }
 
+  /** Refreshes diffs/staging/history from real git, asynchronously. */
   private fun refreshDiffsAndGit() {
-    val diffs = gitManager.computeAllDiffs(_activeProject.value)
-    _fileDiffs.value = diffs
-    val changedFiles = gitManager.getChangedFiles(_activeProject.value)
-    _activeProject.update {
-      it.copy(
-        changedFilesCount = changedFiles.size,
-        isDirty = changedFiles.isNotEmpty()
-      )
+    val project = _activeProject.value
+    if (project.path.isBlank()) {
+      _fileDiffs.value = emptyList()
+      _commitHistory.value = emptyList()
+      _stagedFiles.value = emptySet()
+      _isGitRepository.value = null
+      return
     }
-    _commitHistory.value = gitManager.getCommitHistory(_activeProject.value)
+    repositoryScope.launch {
+      try {
+        val isRepo = gitManager.isGitRepository(project)
+        _isGitRepository.value = isRepo
+        if (!isRepo) {
+          _fileDiffs.value = emptyList()
+          _commitHistory.value = emptyList()
+          _stagedFiles.value = emptySet()
+          _activeProject.update { it.copy(changedFilesCount = 0, isDirty = false) }
+          return@launch
+        }
+        _fileDiffs.value = gitManager.computeAllDiffs(project)
+        _stagedFiles.value = gitManager.getStagedFiles(project).toSet()
+        val changedFiles = gitManager.getChangedFiles(project)
+        _activeProject.update {
+          it.copy(changedFilesCount = changedFiles.size, isDirty = changedFiles.isNotEmpty())
+        }
+        _commitHistory.value = gitManager.getCommitHistory(project)
+      } catch (e: Exception) {
+        android.util.Log.e("ScoOS-Git", "git refresh failed", e)
+      }
+    }
   }
 
   // Navigation
@@ -646,68 +691,169 @@ class WorkspaceRepository(
   }
 
   fun toggleFileStaged(filePath: String) {
-    _stagedFiles.update { current ->
-      if (current.contains(filePath)) current - filePath else current + filePath
+    val isStaged = _stagedFiles.value.contains(filePath)
+    repositoryScope.launch {
+      val project = _activeProject.value
+      if (isStaged) {
+        runGitCommand(project.path, "git restore --staged -- \"" + filePath + "\" 2>/dev/null")
+      } else {
+        runGitCommand(project.path, "git add -- \"" + filePath + "\"")
+      }
+      refreshDiffsAndGit()
     }
   }
 
   fun stageAll() {
-    val allChanged = gitManager.getChangedFiles(_activeProject.value)
-    _stagedFiles.value = allChanged.toSet()
+    repositoryScope.launch {
+      runGitCommand(_activeProject.value.path, "git add -A")
+      refreshDiffsAndGit()
+    }
   }
 
   fun unstageAll() {
-    _stagedFiles.value = emptySet()
+    repositoryScope.launch {
+      runGitCommand(_activeProject.value.path, "git reset 2>/dev/null")
+      refreshDiffsAndGit()
+    }
   }
 
   fun updateCommitMessage(msg: String) {
     _commitMessage.value = msg
   }
 
+  /**
+   * Generates a conventional-commit message from the real staged diff
+   * (`git diff --cached`). Uses the selected LLM; falls back to a simple
+   * summary when no model is configured.
+   */
   fun generateCommitMessageWithAgent() {
-    val changed = gitManager.getChangedFiles(_activeProject.value)
-    val filesDesc = if (changed.isNotEmpty()) changed.joinToString(", ") { it.substringAfterLast("/") } else "code"
-    val suggested = listOf(
-      "fix($filesDesc): update component lifecycle and state consistency",
-      "refactor($filesDesc): improve data flow and type safety",
-      "feat($filesDesc): implement requested updates from agent workflow",
-      "chore: update project configuration and verification tests"
-    ).random()
-    _commitMessage.value = suggested
+    repositoryScope.launch {
+      val project = _activeProject.value
+      _commitMessage.value = ""
+      try {
+        if (!gitManager.isGitRepository(project)) {
+          _commitMessage.value = "Not a git repository"
+          return@launch
+        }
+        val staged = gitManager.stagedDiff(project).take(12000)
+        if (staged.isBlank()) {
+          _commitMessage.value = "Nothing staged - stage changes first"
+          return@launch
+        }
+        val generated = requestLlmText(
+          system = "You are a git commit message generator. Follow Conventional Commits strictly.",
+          user = buildString {
+            appendLine("Generate a git commit message for this staged diff.")
+            appendLine("Rules:")
+            appendLine("- First line: type prefix (feat|fix|chore|docs|refactor|test|perf|build|ci|style), optional scope in parentheses, colon, then an imperative summary (max 72 chars).")
+            appendLine("- If the change is non-trivial, add one blank line, then a short bullet list of the key changes.")
+            appendLine("- Reply with ONLY the commit message text, no code fences, no explanations.")
+            appendLine()
+            append("Staged diff:\n" + staged)
+          },
+          maxTokens = 300
+        )
+        _commitMessage.value = generated ?: simpleCommitFallback(staged)
+      } catch (e: Exception) {
+        android.util.Log.e("ScoOS-Git", "commit message generation failed", e)
+        _commitMessage.value = "chore: update project files"
+      }
+    }
   }
 
-  fun commitStagedChanges() {
-    val commit = gitManager.commit(_activeProject.value, _stagedFiles.value, _commitMessage.value)
-    if (commit != null) {
-      _stagedFiles.value = emptySet()
+  private fun simpleCommitFallback(diff: String): String {
+    val files = Regex("^diff --git a/(\\S+)").findAll(diff).toList()
+    val scope = files.maxOfOrNull { it.groupValues[1].substringAfterLast('/') } ?: "project"
+    return "chore(" + scope + "): update " + files.size + " file" + if (files.size == 1) "" else "s"
+  }
+
+  /** Minimal non-streaming LLM helper for one-shot text generation. */
+  private suspend fun requestLlmText(system: String, user: String, maxTokens: Int): String? {
+    val model = _selectedModel.value ?: return null
+    val connection = resolveProviderForModel(model) ?: return null
+    val (provider, apiKey) = connection
+    return try {
+      val collected = StringBuilder()
+      llmService.streamChat(
+        provider = provider, model = model, apiKey = apiKey,
+        request = com.agentisco.agent.llm.LlmRequest(
+          messages = listOf(
+            com.agentisco.agent.llm.LlmMessage(com.agentisco.agent.llm.LlmRole.SYSTEM, system),
+            com.agentisco.agent.llm.LlmMessage(com.agentisco.agent.llm.LlmRole.USER, user)
+          ),
+          maxOutputTokens = maxTokens
+        )
+      ) { event ->
+        if (event is com.agentisco.agent.llm.LlmStreamEvent.Token) collected.append(event.text)
+      }
+      collected.toString().trim().ifBlank { null }
+    } catch (e: Exception) {
+      android.util.Log.w("ScoOS-Git", "LLM text request failed: " + e.message)
+      null
+    }
+  }
+
+  /** AI-generated short session title (max 6 words) for a new conversation. */
+  suspend fun requestSessionTitle(prompt: String): String? {
+    val title = requestLlmText(
+      system = "You generate very short chat session titles. Reply with only the title text.",
+      user = "Create a title of at most 6 words (no quotes, no ending punctuation) for a coding-agent conversation that starts with this request: \"" + prompt.take(400) + "\"",
+      maxTokens = 32
+    ) ?: return null
+    return title.split(Regex("\\s+")).take(6).joinToString(" ").take(60).ifBlank { null }
+  }
+
+  /** Creates a real git repository in the project folder (VS Code-style init). */
+  fun initGitRepository() {
+    repositoryScope.launch {
+      gitManager.initRepository(_activeProject.value)
       refreshDiffsAndGit()
     }
   }
 
+  fun commitStagedChanges() {
+    val staged = _stagedFiles.value
+    val message = _commitMessage.value
+    repositoryScope.launch {
+      try {
+        val commit = gitManager.commit(_activeProject.value, staged, message)
+        if (commit != null) {
+          _stagedFiles.value = emptySet()
+          refreshDiffsAndGit()
+        }
+      } catch (e: Exception) {
+        android.util.Log.e("ScoOS-Git", "commit failed", e)
+      }
+    }
+  }
+
   fun acceptAllDiffs() {
-    // Staging all and setting baseline to current
-    val changed = gitManager.getChangedFiles(_activeProject.value)
-    gitManager.commit(_activeProject.value, changed.toSet(), "Accept changes")
-    _stagedFiles.value = emptySet()
-    refreshDiffsAndGit()
+    // Stage every working-tree change (the user reviews/commits from the Git tab).
+    repositoryScope.launch {
+      runGitCommand(_activeProject.value.path, "git add -A")
+      refreshDiffsAndGit()
+    }
   }
 
   fun rejectAllDiffs() {
-    gitManager.revertAllFiles(_activeProject.value)
-    refreshFiles()
-    // Reload active file content if it was reverted
-    val reloaded = fileSystem.readFile(_activeProject.value, _activeFile.value.path)
-    _editorContent.value = reloaded
-    _isEditorDirty.value = false
+    repositoryScope.launch {
+      gitManager.revertAllFiles(_activeProject.value)
+      refreshFiles()
+      val reloaded = fileSystem.readFile(_activeProject.value, _activeFile.value.path)
+      _editorContent.value = reloaded
+      _isEditorDirty.value = false
+    }
   }
 
   fun rejectDiff(filePath: String) {
-    gitManager.revertFile(_activeProject.value, filePath)
-    refreshFiles()
-    if (_activeFile.value.path == filePath) {
-      val reloaded = fileSystem.readFile(_activeProject.value, filePath)
-      _editorContent.value = reloaded
-      _isEditorDirty.value = false
+    repositoryScope.launch {
+      gitManager.revertFile(_activeProject.value, filePath)
+      refreshFiles()
+      if (_activeFile.value.path == filePath) {
+        val reloaded = fileSystem.readFile(_activeProject.value, _activeFile.value.path)
+        _editorContent.value = reloaded
+        _isEditorDirty.value = false
+      }
     }
   }
 
