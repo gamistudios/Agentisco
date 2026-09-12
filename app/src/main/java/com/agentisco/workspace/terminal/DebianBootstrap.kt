@@ -6,18 +6,16 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
-import okhttp3.Request
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.security.MessageDigest
-import java.util.concurrent.TimeUnit
+import java.util.zip.GZIPInputStream
 
 sealed class LinuxEnvironmentState {
   data object NotBootstrapped : LinuxEnvironmentState()
-  data class Downloading(val bytesSoFar: Long, val totalBytes: Long) : LinuxEnvironmentState()
+  data class Verifying(val bytesChecked: Long, val totalBytes: Long) : LinuxEnvironmentState()
   data class Extracting(val currentPath: String, val entriesDone: Int) : LinuxEnvironmentState()
   data class Configuring(val detail: String) : LinuxEnvironmentState()
   data object Ready : LinuxEnvironmentState()
@@ -25,45 +23,46 @@ sealed class LinuxEnvironmentState {
 }
 
 /**
- * Downloads, verifies and extracts the Debian-based rootfs that the terminal
- * runs inside via proot. Nothing here is simulated: the tarball comes from the
- * official Ubuntu CD image server, is SHA-256 verified before extraction, and
- * the first boot performs a real `apt-get update && apt-get install` against
- * ports.ubuntu.com.
+ * Prepares the Debian-based rootfs the terminal runs inside via proot. The
+ * rootfs tarball ships **inside the APK** (per-ABI, via jniLibs), so there is
+ * no first-launch download: this class verifies the archive's SHA-256, extracts
+ * it to app-private storage and writes the guest configuration. The first
+ * terminal session then performs a real `apt-get` transaction over the network.
  */
 class DebianBootstrap(
   private val context: Context,
   private val nativeBinaries: NativeBinaries
 ) {
 
-  private val _state = MutableStateFlow<LinuxEnvironmentState>(initialState())
+  private val _state = MutableStateFlow<LinuxEnvironmentState>(LinuxEnvironmentState.NotBootstrapped)
   val state: StateFlow<LinuxEnvironmentState> = _state.asStateFlow()
 
   val rootfsDir: File = File(context.filesDir, "linux-rootfs")
-  private val archiveFile: File = File(context.cacheDir, "linux-rootfs.tar.gz")
-
-  private val okHttpClient = OkHttpClient.Builder()
-    .connectTimeout(30, TimeUnit.SECONDS)
-    .readTimeout(60, TimeUnit.SECONDS)
-    .build()
 
   fun isBootstrapped(): Boolean = File(rootfsDir, ".scoos-ready").exists() && rootfsDir.resolve("bin").exists()
 
-  private fun initialState(): LinuxEnvironmentState = LinuxEnvironmentState.NotBootstrapped
-
-  /** Runs the full bootstrap; safe to call only when not already bootstrapped. */
+  /** Verifies, extracts and configures the bundled rootfs. Idempotent. */
   suspend fun bootstrap(): Boolean = withContext(Dispatchers.IO) {
-    val entry = RootfsCatalog.forDevice()
+    val abi = android.os.Build.SUPPORTED_ABIS.firstOrNull()
+    val entry = abi?.let { RootfsCatalog.forAbi(it) }
+    val archive = nativeBinaries.rootfsArchive
     when {
-      entry == null -> { _state.value = LinuxEnvironmentState.Failed("Unsupported device ABI: ${android.os.Build.SUPPORTED_ABIS.joinToString()}"); false }
+      entry == null -> {
+        _state.value = LinuxEnvironmentState.Failed("Unsupported device ABI: ${android.os.Build.SUPPORTED_ABIS.joinToString()}")
+        false
+      }
+      archive == null -> {
+        _state.value = LinuxEnvironmentState.Failed("Rootfs archive missing from the APK (no librootfs for this ABI)")
+        false
+      }
       !nativeBinaries.isComplete() -> {
         _state.value = LinuxEnvironmentState.Failed("Missing native binaries: ${nativeBinaries.missingFiles().joinToString()}")
         false
       }
       else -> try {
+        verify(archive, entry)
         if (rootfsDir.exists()) rootfsDir.deleteRecursively()
-        downloadAndVerify(entry)
-        extract(entry)
+        extract()
         configure(entry)
         File(rootfsDir, ".scoos-ready").writeText(entry.fileName)
         _state.value = LinuxEnvironmentState.Ready
@@ -75,37 +74,29 @@ class DebianBootstrap(
     }
   }
 
-  private fun downloadAndVerify(entry: RootfsEntry) {
-    _state.value = LinuxEnvironmentState.Downloading(0, entry.sizeBytes)
-    val request = Request.Builder().url(entry.url).build()
-    okHttpClient.newCall(request).execute().use { response ->
-      check(response.isSuccessful) { "Rootfs download failed: HTTP ${response.code}" }
-      val body = response.body ?: error("Rootfs download returned an empty body")
-      val digest = MessageDigest.getInstance("SHA-256")
-      var bytesSoFar = 0L
-      body.byteStream().use { input ->
-        FileOutputStream(archiveFile).use { output ->
-          val buffer = ByteArray(64 * 1024)
-          while (true) {
-            val read = input.read(buffer)
-            if (read < 0) break
-            digest.update(buffer, 0, read)
-            output.write(buffer, 0, read)
-            bytesSoFar += read
-            _state.value = LinuxEnvironmentState.Downloading(bytesSoFar, entry.sizeBytes)
-          }
-        }
+  private fun verify(archive: File, entry: RootfsEntry) {
+    _state.value = LinuxEnvironmentState.Verifying(0, archive.length())
+    val digest = MessageDigest.getInstance("SHA-256")
+    var checked = 0L
+    archive.inputStream().buffered(256 * 1024).use { input ->
+      val buffer = ByteArray(256 * 1024)
+      while (true) {
+        val read = input.read(buffer)
+        if (read < 0) break
+        digest.update(buffer, 0, read)
+        checked += read
+        _state.value = LinuxEnvironmentState.Verifying(checked, archive.length())
       }
-      val actual = digest.digest().joinToString("") { "%02x".format(it) }
-      check(actual == entry.sha256) {
-        "Rootfs checksum mismatch: expected ${entry.sha256.take(12)}…, got ${actual.take(12)}…"
-      }
+    }
+    val actual = digest.digest().joinToString("") { "%02x".format(it) }
+    check(actual == entry.sha256) {
+      "Rootfs checksum mismatch: expected ${entry.sha256.take(12)}…, got ${actual.take(12)}…"
     }
   }
 
-  private fun extract(entry: RootfsEntry) {
+  private fun extract() {
     var entriesDone = 0
-    java.util.zip.GZIPInputStream(archiveFile.inputStream().buffered(256 * 1024)).use { gzip ->
+    GZIPInputStream(rootfsArchiveStream().buffered(256 * 1024)).use { gzip ->
       TarArchiveInputStream(gzip).use { tar ->
         while (true) {
           val archiveEntry = tar.nextEntry as? TarArchiveEntry ?: break
@@ -138,9 +129,7 @@ class DebianBootstrap(
             }
           }
           if (!archiveEntry.isDirectory) {
-            // 0644/0755 permission bits from the tarball, mapped onto the owner mask.
-            val mode = archiveEntry.mode
-            try { android.system.Os.chmod(target.absolutePath, mode.toInt()) } catch (_: Exception) {}
+            try { android.system.Os.chmod(target.absolutePath, archiveEntry.mode.toInt()) } catch (_: Exception) {}
           }
           entriesDone++
           if (entriesDone % 200 == 0) {
@@ -149,7 +138,12 @@ class DebianBootstrap(
         }
       }
     }
-    archiveFile.delete()
+  }
+
+  private fun rootfsArchiveStream() = when {
+    nativeBinaries.rootfs64?.exists() == true &&
+      android.os.Build.SUPPORTED_ABIS.firstOrNull() == "arm64-v8a" -> nativeBinaries.rootfs64!!.inputStream()
+    else -> nativeBinaries.rootfsArchive?.inputStream() ?: error("Rootfs archive not found")
   }
 
   private fun configure(entry: RootfsEntry) {

@@ -356,7 +356,7 @@ private fun SessionTabs(
   }
 }
 
-/** Full-screen bootstrap progress shown while the Debian rootfs is being set up. */
+/** Full-screen bootstrap progress shown while the bundled Debian rootfs is set up. */
 @Composable
 private fun BootstrapPane(state: LinuxEnvironmentState, onRetry: () -> Unit, modifier: Modifier = Modifier) {
   Column(
@@ -367,15 +367,45 @@ private fun BootstrapPane(state: LinuxEnvironmentState, onRetry: () -> Unit, mod
     horizontalAlignment = Alignment.CenterHorizontally
   ) {
     val (title, detail) = when (state) {
-      is LinuxEnvironmentState.NotBootstrapped -> "Preparing Linux environment" to "The Debian-based rootfs will be downloaded once and stored in app-private storage."
-      is LinuxEnvironmentState.Downloading -> {
-        val pct = if (state.totalBytes > 0) (state.bytesSoFar * 100 / state.totalBytes).coerceIn(0, 100) else 0
-        "Downloading Debian rootfs — $pct%" to "${formatBytes(state.bytesSoFar)} of ${formatBytes(state.totalBytes)}"
+      is LinuxEnvironmentState.NotBootstrapped -> "Preparing Linux environment" to "The bundled Debian-based rootfs will be extracted to app-private storage."
+      is LinuxEnvironmentState.Verifying -> {
+        val pct = if (state.totalBytes > 0) (state.bytesChecked * 100 / state.totalBytes).coerceIn(0, 100) else 0
+        "Verifying rootfs — $pct%" to "${formatBytes(state.bytesChecked)} of ${formatBytes(state.totalBytes)} checked"
       }
       is LinuxEnvironmentState.Extracting -> "Extracting rootfs (${state.entriesDone} files)" to state.currentPath
       is LinuxEnvironmentState.Configuring -> "Configuring environment" to state.detail
-      is LinuxEnvironmentState.Failed -> "Bootstrap failed" to state.reason
+      is LinuxEnvironmentState.Failed -> "Setup failed" to state.reason
       is LinuxEnvironmentState.Ready -> "Ready" to ""
+    }
+
+    // Stage checklist so the user always knows where setup stands.
+    val stageIndex = when (state) {
+      is LinuxEnvironmentState.NotBootstrapped -> 0
+      is LinuxEnvironmentState.Verifying -> 0
+      is LinuxEnvironmentState.Extracting -> 1
+      is LinuxEnvironmentState.Configuring -> 2
+      is LinuxEnvironmentState.Ready -> 3
+      is LinuxEnvironmentState.Failed -> 0
+    }
+    val stages = listOf("Verify", "Extract", "Configure")
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+      stages.forEachIndexed { index, label ->
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          Icon(
+            imageVector = if (index < stageIndex) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+            contentDescription = null,
+            tint = when {
+              index < stageIndex -> TerminalGreen
+              index == stageIndex && state !is LinuxEnvironmentState.Failed -> ElectricBlueGlow
+              else -> TextMuted
+            },
+            modifier = Modifier.size(14.dp)
+          )
+          Spacer(modifier = Modifier.width(3.dp))
+          Text(label, color = if (index == stageIndex) TextPrimary else TextMuted, fontSize = 11.sp)
+        }
+        if (index < stages.lastIndex) Text("—", color = TextMuted, fontSize = 11.sp)
+      }
     }
 
     Text(title, color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
@@ -390,19 +420,24 @@ private fun BootstrapPane(state: LinuxEnvironmentState, onRetry: () -> Unit, mod
         textAlign = androidx.compose.ui.text.style.TextAlign.Center
       )
     }
-    if (state is LinuxEnvironmentState.Downloading) {
-      LinearProgressIndicator(
+    when (state) {
+      is LinuxEnvironmentState.Verifying -> LinearProgressIndicator(
         progress = {
-          if (state.totalBytes > 0) (state.bytesSoFar.toFloat() / state.totalBytes).coerceIn(0f, 1f) else 0f
+          if (state.totalBytes > 0) (state.bytesChecked.toFloat() / state.totalBytes).coerceIn(0f, 1f) else 0f
         },
         modifier = Modifier.fillMaxWidth(),
         color = ElectricBlue
       )
-    }
-    if (state is LinuxEnvironmentState.Failed) {
-      Button(onClick = onRetry, colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue)) {
+      is LinuxEnvironmentState.Extracting, is LinuxEnvironmentState.Configuring -> LinearProgressIndicator(
+        modifier = Modifier.fillMaxWidth(),
+        color = ElectricBlue
+      )
+      is LinuxEnvironmentState.Failed -> Button(onClick = onRetry, colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue)) {
+        Icon(Icons.Default.Refresh, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+        Spacer(modifier = Modifier.width(6.dp))
         Text("Retry", color = Color.White)
       }
+      else -> Unit
     }
     Text(
       "Real apt, real dpkg, real shell — nothing is simulated.",

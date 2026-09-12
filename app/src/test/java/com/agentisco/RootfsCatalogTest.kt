@@ -9,14 +9,13 @@ import org.junit.Test
 class RootfsCatalogTest {
 
   @Test
-  fun `arm64 entry points at official Ubuntu CD image with valid checksum`() {
+  fun `arm64 entry has valid checksum and bundled archive name`() {
     val entry = RootfsCatalog.forAbi("arm64-v8a")
     assertNotNull(entry)
     entry!!
-    assertTrue(entry.url.startsWith("https://cdimage.ubuntu.com/"))
-    assertTrue("checksum must be 64 hex chars", entry.sha256.length == 64 && entry.sha256.all { it.isDigit() || it in 'a'..'f' })
-    assertTrue(entry.sizeBytes > 1_000_000)
+    assertEquals("librootfs64.so", entry.bundledName)
     assertEquals("ubuntu-base-24.04.5-base-arm64.tar.gz", entry.fileName)
+    assertTrue("checksum must be 64 hex chars", entry.sha256.length == 64 && entry.sha256.all { it.isDigit() || it in 'a'..'f' })
   }
 
   @Test
@@ -24,6 +23,7 @@ class RootfsCatalogTest {
     val entry = RootfsCatalog.forAbi("armeabi-v7a")
     assertNotNull(entry)
     entry!!
+    assertEquals("librootfs32.so", entry.bundledName)
     assertEquals(64, entry.sha256.length)
   }
 }

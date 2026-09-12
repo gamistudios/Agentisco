@@ -83,6 +83,13 @@ android {
     }
   }
   ndkVersion = "27.2.12479018"
+  packaging {
+    jniLibs {
+      // The bundled Linux rootfs tarballs (librootfs*.so) are gzip archives,
+      // not ELF objects — strip must not touch them.
+      keepDebugSymbols += "**/librootfs*.so"
+    }
+  }
   lint {
     // targetSdk 28 is deliberate (see comment in defaultConfig): Android denies
     // execve of app-data binaries at targetSdk >= 29, which proot requires.
