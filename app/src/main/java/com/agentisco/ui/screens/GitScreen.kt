@@ -38,6 +38,7 @@ fun GitScreen(
   val commitMessage by viewModel.commitMessage.collectAsState()
   val commitHistory by viewModel.commitHistory.collectAsState()
   val isGitRepository by viewModel.isGitRepository.collectAsState()
+  val gitError by viewModel.gitError.collectAsState()
 
   // VS Code-style split: staged files are listed under "Staged Changes",
   // everything else under "Changes". The staging area (git index) is the
@@ -80,6 +81,31 @@ fun GitScreen(
           modifier = Modifier.height(32.dp)
         ) {
           Text("Diff All", fontSize = 11.sp, color = TextSecondary)
+        }
+      }
+    }
+
+    if (gitError != null) {
+      item {
+        Row(
+          modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(DangerRed.copy(alpha = 0.1f))
+            .border(1.dp, DangerRed.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Text(
+            gitError!!,
+            color = DangerRed,
+            fontSize = 11.sp,
+            lineHeight = 14.sp,
+            modifier = Modifier.weight(1f)
+          )
+          TextButton(onClick = { viewModel.dismissGitError() }) {
+            Text("Dismiss", color = TextMuted, fontSize = 10.sp)
+          }
         }
       }
     }
@@ -258,7 +284,7 @@ fun GitScreen(
         ChangeRow(
           diff = diff,
           staged = true,
-          onToggle = { viewModel.toggleFileStaged(diff.filePath) },
+          onToggle = { viewModel.setFileStaged(diff.filePath, stage = false) },
           onViewDiff = { onNavigate(AppDestination.DIFF) }
         )
       }
@@ -308,7 +334,7 @@ fun GitScreen(
         ChangeRow(
           diff = diff,
           staged = false,
-          onToggle = { viewModel.toggleFileStaged(diff.filePath) },
+          onToggle = { viewModel.setFileStaged(diff.filePath, stage = true) },
           onViewDiff = { onNavigate(AppDestination.DIFF) }
         )
       }

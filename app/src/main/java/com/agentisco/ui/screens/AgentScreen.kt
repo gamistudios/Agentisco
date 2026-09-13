@@ -241,6 +241,9 @@ fun AgentScreen(
                 onAllow = { viewModel.resolveApproval(true) },
                 onDeny = { viewModel.resolveApproval(false) },
                 onRetry = { viewModel.retryAgentTurn(item.id) },
+                onCancelTool = { viewModel.cancelToolCall(it) },
+                onRetryTool = { viewModel.resolveToolCancellation(it, retry = true) },
+                onContinueTool = { viewModel.resolveToolCancellation(it, retry = false) },
                 onNavigate = onNavigate
               )
             }
@@ -501,6 +504,9 @@ private fun AgentTurnCard(
   onAllow: () -> Unit,
   onDeny: () -> Unit,
   onRetry: () -> Unit,
+  onCancelTool: (String) -> Unit,
+  onRetryTool: (String) -> Unit,
+  onContinueTool: (String) -> Unit,
   onNavigate: (AppDestination) -> Unit
 ) {
   val clipboard = LocalClipboardManager.current
@@ -630,7 +636,12 @@ private fun AgentTurnCard(
           }
         }
         is ReasoningBlock -> ThinkingBlock(block)
-        is ActionBlock -> ToolCallRow(block)
+        is ActionBlock -> ToolCallRow(
+          item = block,
+          onCancelTool = { onCancelTool(block.callId) },
+          onRetryTool = { onRetryTool(block.callId) },
+          onContinueTool = { onContinueTool(block.callId) }
+        )
         is ApprovalBlock -> ApprovalCard(block, onAllow, onDeny)
         is ErrorBlock -> ErrorCard(block, showRetry = item.status == TurnStatus.FAILED, onRetry = onRetry)
       }
@@ -709,7 +720,12 @@ private fun AgentEmptyState(project: com.agentisco.data.model.Project, hasHistor
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ToolCallRow(item: ActionBlock) {
+private fun ToolCallRow(
+  item: ActionBlock,
+  onCancelTool: () -> Unit = {},
+  onRetryTool: () -> Unit = {},
+  onContinueTool: () -> Unit = {}
+) {
   var expanded by remember(item.id) { mutableStateOf(false) }
   val clipboard = LocalClipboardManager.current
   val (verb, target) = friendlyToolLabel(item.name, item.argsJson)
@@ -725,6 +741,7 @@ private fun ToolCallRow(item: ActionBlock) {
         1.dp,
         when {
           item.running -> ElectricBlue.copy(alpha = 0.5f)
+          item.cancelled -> WarningAmber.copy(alpha = 0.6f)
           item.success == false -> DangerRed.copy(alpha = 0.5f)
           else -> DarkBorderSubtle
         },
@@ -755,7 +772,28 @@ private fun ToolCallRow(item: ActionBlock) {
       }
       Spacer(modifier = Modifier.weight(1f))
       when {
-        item.running -> CircularProgressIndicator(modifier = Modifier.size(12.dp), color = ElectricBlueGlow, strokeWidth = 1.8.dp)
+        item.running -> {
+          CircularProgressIndicator(modifier = Modifier.size(12.dp), color = ElectricBlueGlow, strokeWidth = 1.8.dp)
+          // SIGKILL this specific call without stopping the whole task.
+          if (item.callId.isNotBlank()) {
+            Spacer(modifier = Modifier.width(4.dp))
+            IconButton(
+              onClick = onCancelTool,
+              modifier = Modifier
+                .size(22.dp)
+                .clip(RoundedCornerShape(6.dp))
+                .testTag("btn_cancel_tool")
+            ) {
+              Icon(Icons.Default.Stop, contentDescription = "Cancel this step", tint = DangerRed, modifier = Modifier.size(13.dp))
+            }
+          }
+        }
+        item.cancelled -> Icon(
+          Icons.Default.Stop,
+          contentDescription = "Cancelled",
+          tint = WarningAmber,
+          modifier = Modifier.size(13.dp)
+        )
         item.success == true -> Icon(Icons.Default.CheckCircle, contentDescription = "Done", tint = TerminalGreen, modifier = Modifier.size(13.dp))
         item.success == false -> Icon(Icons.Default.Close, contentDescription = "Failed", tint = DangerRed, modifier = Modifier.size(13.dp))
       }
@@ -776,12 +814,35 @@ private fun ToolCallRow(item: ActionBlock) {
     if (!item.running) {
       Spacer(modifier = Modifier.height(3.dp))
       Text(
-        text = item.summary,
-        color = if (item.success == false) DangerRed.copy(alpha = 0.9f) else TextMuted,
+        text = if (item.cancelled) "Cancelled by user" else item.summary,
+        color = when {
+          item.cancelled -> WarningAmber
+          item.success == false -> DangerRed.copy(alpha = 0.9f)
+          else -> TextMuted
+        },
         fontSize = 10.sp,
         maxLines = if (expanded) Int.MAX_VALUE else 1,
         overflow = TextOverflow.Ellipsis
       )
+    }
+
+    // Cancelled calls: retry the same call, or continue and tell the model.
+    if (item.cancelled && item.callId.isNotBlank()) {
+      Spacer(modifier = Modifier.height(6.dp))
+      Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Button(
+          onClick = onRetryTool,
+          colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
+          contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
+          modifier = Modifier.height(28.dp).testTag("btn_retry_tool")
+        ) { Text("Retry", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold) }
+        Button(
+          onClick = onContinueTool,
+          colors = ButtonDefaults.buttonColors(containerColor = TerminalGreen),
+          contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
+          modifier = Modifier.height(28.dp).testTag("btn_continue_tool")
+        ) { Text("Continue", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold) }
+      }
     }
 
     if (expanded) {

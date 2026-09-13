@@ -30,13 +30,15 @@ class GitRepositoryManager(
   /** One-time identity/safety config inside the rootfs (git needs it to commit). */
   private suspend fun ensureGitEnv(projectPath: String) {
     if (gitEnvConfigured) return
-    runGit(
+    val result = runGit(
       projectPath,
       "git config --global --add safe.directory '*' 2>/dev/null; " +
         "git config --global user.name 'Agentisco Developer' 2>/dev/null; " +
         "git config --global user.email 'agentisco@localhost' 2>/dev/null; true"
     )
-    gitEnvConfigured = true
+    // Only remember success — if the Linux environment wasn't ready (e.g. the
+    // rootfs wasn't bootstrapped yet), retry on the next git operation.
+    if (result.exitCode == 0) gitEnvConfigured = true
   }
 
   private suspend fun git(project: Project, args: String): GitRunResult {

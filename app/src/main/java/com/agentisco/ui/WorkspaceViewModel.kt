@@ -211,9 +211,16 @@ class WorkspaceViewModel(
           AgentBlockEntity(
             uuid = uuid, messageUuid = turn, kind = "tool", name = event.name,
             argsJson = event.argsJson, status = "running", summary = "Running…",
-            detail = "", exitCode = null, createdAt = System.currentTimeMillis()
+            detail = "", exitCode = null, createdAt = System.currentTimeMillis(),
+            callId = event.callId.ifBlank { null }
           )
         )
+      }
+      is AgentStreamEvent.ToolCancelled -> {
+        // The user SIGKILLed this call; the card shows Retry / Continue.
+        runningToolBlocks.remove(event.callId)?.let { uuid ->
+          chatStore.updateBlockStatus(uuid, "cancelled")
+        }
       }
       is AgentStreamEvent.ToolFinished -> {
         val uuid = runningToolBlocks.remove(event.callId.ifBlank { event.name })
@@ -536,6 +543,11 @@ class WorkspaceViewModel(
     repository.toggleFileStaged(filePath)
   }
 
+  /** Explicit staging intent from the Git tab (VS Code-style +/− rows). */
+  fun setFileStaged(filePath: String, stage: Boolean) {
+    repository.setFileStaged(filePath, stage)
+  }
+
   fun stageAll() {
     repository.stageAll()
   }
@@ -599,6 +611,22 @@ class WorkspaceViewModel(
 
   fun resolveApproval(allowed: Boolean) {
     repository.resolveApproval(allowed)
+  }
+
+  /** SIGKILLs a specific running tool call (process kill, task keeps going). */
+  fun cancelToolCall(callId: String) {
+    repository.cancelToolCall(callId)
+  }
+
+  /** Retry re-runs the cancelled call; continue tells the model it was cancelled. */
+  fun resolveToolCancellation(callId: String, retry: Boolean) {
+    repository.resolveToolCancellation(callId, retry)
+  }
+
+  val gitError: StateFlow<String?> = repository.gitError
+
+  fun dismissGitError() {
+    repository.clearGitError()
   }
 
   fun updatePermissions(transform: (AgentPermissions) -> AgentPermissions) {

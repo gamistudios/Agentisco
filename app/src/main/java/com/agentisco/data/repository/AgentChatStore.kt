@@ -40,7 +40,7 @@ class AgentChatStore(context: Context?) {
 
   private val db: ChatDatabase? = context?.let {
     Room.databaseBuilder(it.applicationContext, ChatDatabase::class.java, "agentisco_chat.db")
-      .fallbackToDestructiveMigration()
+      .addMigrations(ChatDatabase.MIGRATION_1_2)
       .build()
   }
   private val dao: ChatDao? = db?.chatDao()

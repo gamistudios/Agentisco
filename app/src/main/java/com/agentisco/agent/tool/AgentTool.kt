@@ -98,6 +98,7 @@ fun toolTypeFor(name: String): ToolType = when {
     name.startsWith("terminal") -> ToolType.TERMINAL
   name == "write_file" || name == "create_file" || name == "edit_file" || name == "move_file" || name == "delete_file" -> ToolType.EDIT_FILE
   name == "search_files" || name == "regex_search" || name == "glob_files" -> ToolType.SEARCH
+  name == "task_plan" -> ToolType.BUILD
   else -> ToolType.READ_FILE
 }
 
@@ -111,5 +112,7 @@ class ToolContext(
   val permissions: AgentPermissions,
   val terminalSession: TerminalSession,
   val requestApproval: suspend (PendingApproval) -> Boolean,
-  val activeSessions: () -> List<TerminalSession>
+  val activeSessions: () -> List<TerminalSession>,
+  /** The model's id for the call being executed (used for per-call cancellation). */
+  val toolCallId: String = ""
 )

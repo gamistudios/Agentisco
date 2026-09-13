@@ -236,6 +236,22 @@ class WorkspaceRepository(
   private val _isGitRepository = MutableStateFlow<Boolean?>(null)
   val isGitRepository: StateFlow<Boolean?> = _isGitRepository.asStateFlow()
 
+  /** Last git operation failure, surfaced in the Git tab for debugging. */
+  private val _gitError = MutableStateFlow<String?>(null)
+  val gitError: StateFlow<String?> = _gitError.asStateFlow()
+
+  fun clearGitError() {
+    _gitError.value = null
+  }
+
+  private fun reportGitError(operation: String, result: com.agentisco.workspace.git.GitRunResult?) {
+    _gitError.value = when {
+      result == null -> null
+      result.exitCode == 0 -> null
+      else -> "$operation failed (exit ${result.exitCode}): ${result.output.take(200).ifBlank { "no output" }}"
+    }
+  }
+
   private val _commitMessage = MutableStateFlow("Fix chat message lifecycle and store recreation")
   val commitMessage: StateFlow<String> = _commitMessage.asStateFlow()
 
@@ -690,29 +706,38 @@ class WorkspaceRepository(
     _searchQuery.value = query
   }
 
-  fun toggleFileStaged(filePath: String) {
-    val isStaged = _stagedFiles.value.contains(filePath)
+  /** Stages or unstages one file — the UI states the intent explicitly, so a
+   *  stale staged-files snapshot can never swap add/unstage. */
+  fun setFileStaged(filePath: String, stage: Boolean) {
     repositoryScope.launch {
       val project = _activeProject.value
-      if (isStaged) {
-        runGitCommand(project.path, "git restore --staged -- \"" + filePath + "\" 2>/dev/null")
-      } else {
+      val result = if (stage) {
         runGitCommand(project.path, "git add -- \"" + filePath + "\"")
+      } else {
+        runGitCommand(project.path, "git restore --staged -- \"" + filePath + "\"")
       }
+      reportGitError(if (stage) "Stage" else "Unstage", result.takeIf { it.exitCode != 0 })
       refreshDiffsAndGit()
     }
   }
 
+  /** Kept for compatibility; infers current state from the git index snapshot. */
+  fun toggleFileStaged(filePath: String) {
+    setFileStaged(filePath, !_stagedFiles.value.contains(filePath))
+  }
+
   fun stageAll() {
     repositoryScope.launch {
-      runGitCommand(_activeProject.value.path, "git add -A")
+      val result = runGitCommand(_activeProject.value.path, "git add -A")
+      reportGitError("Stage all", result.takeIf { it.exitCode != 0 })
       refreshDiffsAndGit()
     }
   }
 
   fun unstageAll() {
     repositoryScope.launch {
-      runGitCommand(_activeProject.value.path, "git reset 2>/dev/null")
+      val result = runGitCommand(_activeProject.value.path, "git reset")
+      reportGitError("Unstage all", result.takeIf { it.exitCode != 0 })
       refreshDiffsAndGit()
     }
   }
@@ -806,7 +831,8 @@ class WorkspaceRepository(
   /** Creates a real git repository in the project folder (VS Code-style init). */
   fun initGitRepository() {
     repositoryScope.launch {
-      gitManager.initRepository(_activeProject.value)
+      val ok = gitManager.initRepository(_activeProject.value)
+      _gitError.value = if (ok) null else "git init failed — is the Linux environment bootstrapped (open the Terminal tab once)?"
       refreshDiffsAndGit()
     }
   }
@@ -818,11 +844,15 @@ class WorkspaceRepository(
       try {
         val commit = gitManager.commit(_activeProject.value, staged, message)
         if (commit != null) {
+          _gitError.value = null
           _stagedFiles.value = emptySet()
           refreshDiffsAndGit()
+        } else {
+          _gitError.value = "Commit failed. Is the folder a git repository (initialize it above) and is the commit message non-empty?"
         }
       } catch (e: Exception) {
         android.util.Log.e("ScoOS-Git", "commit failed", e)
+        _gitError.value = "Commit failed: " + (e.message ?: e.javaClass.simpleName)
       }
     }
   }
@@ -993,6 +1023,16 @@ class WorkspaceRepository(
   /** Aborts the in-flight streaming LLM request so Stop takes effect immediately. */
   fun cancelAgentGeneration() {
     llmService.cancelActive()
+  }
+
+  /** SIGKILLs one specific running tool call (the task keeps running). */
+  fun cancelToolCall(callId: String) {
+    agentRuntime.cancelToolCall(callId)
+  }
+
+  /** Retry re-executes a cancelled tool call; continue feeds a cancellation result. */
+  fun resolveToolCancellation(callId: String, retry: Boolean) {
+    agentRuntime.resolveToolCancellation(callId, retry)
   }
 
   // Permission handling

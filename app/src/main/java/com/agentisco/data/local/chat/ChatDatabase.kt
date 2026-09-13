@@ -89,7 +89,9 @@ data class AgentBlockEntity(
   /** tool output detail, approval impact description. */
   val detail: String,
   val exitCode: Int?,
-  val createdAt: Long
+  val createdAt: Long,
+  /** The model's tool-call id (null for legacy rows) — used for per-call cancellation. */
+  val callId: String? = null
 )
 
 data class MessageWithBlocks(
@@ -189,9 +191,17 @@ interface ChatDao {
 
 @Database(
   entities = [AgentSessionEntity::class, AgentMessageEntity::class, AgentBlockEntity::class],
-  version = 1,
+  version = 2,
   exportSchema = false
 )
 abstract class ChatDatabase : RoomDatabase() {
   abstract fun chatDao(): ChatDao
+
+  companion object {
+    val MIGRATION_1_2 = object : androidx.room.migration.Migration(1, 2) {
+      override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE agent_blocks ADD COLUMN callId TEXT")
+      }
+    }
+  }
 }

@@ -47,7 +47,11 @@ data class ActionBlock(
   val success: Boolean?,
   val summary: String,
   val detail: String,
-  val exitCode: Int?
+  val exitCode: Int?,
+  /** The model's tool-call id — lets the UI cancel/retry this specific call. */
+  val callId: String = "",
+  /** True when the user SIGKILLed this call and a retry/continue choice is pending. */
+  val cancelled: Boolean = false
 ) : TurnBlock()
 
 data class ApprovalBlock(
@@ -118,7 +122,9 @@ private fun AgentBlockEntity.toTurnBlock(): TurnBlock? = when (kind) {
     },
     summary = summary,
     detail = detail,
-    exitCode = exitCode
+    exitCode = exitCode,
+    callId = callId.orEmpty(),
+    cancelled = status == "cancelled"
   )
   "error" -> ErrorBlock(uuid, summary)
   else -> null

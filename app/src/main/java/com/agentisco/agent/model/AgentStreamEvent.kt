@@ -50,4 +50,7 @@ sealed class AgentStreamEvent {
 
   /** Streamed partial text must be discarded (e.g. before an automatic retry). */
   data class TextReset(val reason: String) : AgentStreamEvent()
+
+  /** The user cancelled a specific running tool call (SIGKILL); awaits a retry/continue decision. */
+  data class ToolCancelled(val callId: String, val name: String) : AgentStreamEvent()
 }

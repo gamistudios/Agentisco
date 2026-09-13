@@ -328,15 +328,22 @@ class RunCommandTool(private val tm: TerminalProcessManager) : AgentTool {
 
     val out = StringBuilder()
     // Unique process id per call so batched parallel commands never overwrite
-    // each other's entry in the process registry.
+    // each other's entry in the process registry, and so the UI can SIGKILL
+    // this exact command.
     val runnerSession = ctx.terminalSession.copy(
       id = ctx.terminalSession.id + "-run-" + java.util.UUID.randomUUID().toString().take(8)
     )
-    val exitCode = tm.executeCommand(
-      runnerSession, command,
-      { line -> out.appendLine(line.text) },
-      projectDir = File(ctx.project.path).takeIf { it.isDirectory }
-    )
+    val killKey = ctx.toolCallId.ifBlank { runnerSession.id }
+    ToolCancellation.register(killKey) { tm.interrupt(runnerSession.id) }
+    val exitCode = try {
+      tm.executeCommand(
+        runnerSession, command,
+        { line -> out.appendLine(line.text) },
+        projectDir = File(ctx.project.path).takeIf { it.isDirectory }
+      )
+    } finally {
+      ToolCancellation.unregister(killKey)
+    }
     return ToolResult(success = exitCode == 0, output = out.toString().trim().take(8000), exitCode = exitCode)
   }
 }
@@ -376,11 +383,17 @@ abstract class ScriptTool(
     val runnerSession = ctx.terminalSession.copy(
       id = ctx.terminalSession.id + "-run-" + java.util.UUID.randomUUID().toString().take(8)
     )
-    val exitCode = tm.executeCommand(
-      runnerSession, command,
-      { line -> out.appendLine(line.text) },
-      projectDir = File(ctx.project.path).takeIf { it.isDirectory }
-    )
+    val killKey = ctx.toolCallId.ifBlank { runnerSession.id }
+    ToolCancellation.register(killKey) { tm.interrupt(runnerSession.id) }
+    val exitCode = try {
+      tm.executeCommand(
+        runnerSession, command,
+        { line -> out.appendLine(line.text) },
+        projectDir = File(ctx.project.path).takeIf { it.isDirectory }
+      )
+    } finally {
+      ToolCancellation.unregister(killKey)
+    }
     return ToolResult(success = exitCode == 0, output = out.toString().trim().take(8000), exitCode = exitCode, metadata = mapOf("command" to command))
   }
 }

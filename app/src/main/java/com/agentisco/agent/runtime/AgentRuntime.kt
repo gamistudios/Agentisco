@@ -71,10 +71,29 @@ class AgentRuntime(
   private var pendingApprovalDeferred: CompletableDeferred<Boolean>? = null
   private val toolParallelism = Semaphore(MAX_PARALLEL_TOOLS)
 
+  /** Tool calls the user SIGKILLed; keyed by the model's call id. */
+  private val userCancelledCalls: MutableSet<String> =
+    java.util.Collections.synchronizedSet(HashSet())
+  /** Awaits the user's retry/continue decision for a cancelled tool call. */
+  private val toolCancelDecisions =
+    java.util.concurrent.ConcurrentHashMap<String, CompletableDeferred<Boolean>>()
+
   fun resolvePendingApproval(allowed: Boolean) {
     val deferred = pendingApprovalDeferred
     pendingApprovalDeferred = null
     deferred?.complete(allowed)
+  }
+
+  /** SIGKILLs a specific running tool call; the loop then awaits user guidance. */
+  fun cancelToolCall(callId: String) {
+    if (callId.isBlank()) return
+    userCancelledCalls.add(callId)
+    com.agentisco.agent.tool.ToolCancellation.kill(callId)
+  }
+
+  /** Resolves a cancelled tool call: retry re-executes it, continue moves on. */
+  fun resolveToolCancellation(callId: String, retry: Boolean) {
+    toolCancelDecisions.remove(callId)?.complete(retry)
   }
 
   suspend fun executeTask(
@@ -308,27 +327,53 @@ class AgentRuntime(
     }
     Log.d(TAG, "validated args id=${call.id} name=${tool.name} -> $args")
 
-    val result: ToolResult = try {
-      tool.execute(args, buildToolContext(project, permissions, terminalSession, onRequestApproval, onEvent))
-    } catch (e: Exception) {
-      Log.e(TAG, "tool ${tool.name} threw", e)
-      ToolResult(success = false, error = "Tool execution failed: ${e.message ?: e.javaClass.simpleName}")
-    }
-    result.metadata["file"]?.let { modifiedFiles.add(it) }
-    Log.d(TAG, "tool ${tool.name} success=${result.success} exitCode=${result.exitCode}")
+    val toolContext = buildToolContext(call.id, project, permissions, terminalSession, onRequestApproval, onEvent)
+    while (true) {
+      val result: ToolResult = try {
+        tool.execute(args, toolContext)
+      } catch (e: Exception) {
+        Log.e(TAG, "tool ${tool.name} threw", e)
+        ToolResult(success = false, error = "Tool execution failed: ${e.message ?: e.javaClass.simpleName}")
+      }
 
-    val summary = when {
+      // The user SIGKILLed this exact call: let them choose retry or continue
+      // instead of silently feeding a failure result to the model.
+      if (userCancelledCalls.remove(call.id)) {
+        onEvent(AgentStreamEvent.ToolCancelled(call.id, tool.name))
+        val retry = try {
+          val deferred = CompletableDeferred<Boolean>()
+          toolCancelDecisions[call.id] = deferred
+          deferred.await()
+        } catch (e: Exception) {
+          false
+        }
+        if (retry && currentCoroutineContext().isActive) {
+          Log.d(TAG, "tool ${tool.name} re-run after user retry")
+          continue
+        }
+        return ToolResult(
+          success = false,
+          error = "User cancelled this operation (process killed) and chose to continue without it. " +
+            "The user may complete it manually — do not repeat it automatically unless asked."
+        )
+      }
+
+      result.metadata["file"]?.let { modifiedFiles.add(it) }
+      Log.d(TAG, "tool ${tool.name} success=${result.success} exitCode=${result.exitCode}")
+
+      val summary = when {
       !result.success -> result.error?.take(180) ?: "Failed"
       else -> result.output.lineSequence().firstOrNull()?.take(140)?.ifBlank { null }
         ?: result.exitCode?.let { "exit code $it" } ?: "Done"
+      }
+      val detail = listOfNotNull(
+        result.output.takeIf { it.isNotBlank() },
+        result.error?.takeIf { it.isNotBlank() },
+        result.exitCode?.let { "exit code: $it" }
+      ).joinToString("\n")
+      onEvent(AgentStreamEvent.ToolFinished(call.name, result.success, summary, detail, result.exitCode, call.id))
+      return result
     }
-    val detail = listOfNotNull(
-      result.output.takeIf { it.isNotBlank() },
-      result.error?.takeIf { it.isNotBlank() },
-      result.exitCode?.let { "exit code: $it" }
-    ).joinToString("\n")
-    onEvent(AgentStreamEvent.ToolFinished(call.name, result.success, summary, detail, result.exitCode, call.id))
-    return result
   }
 
   /** Whether a failure is worth an automatic retry (transient provider/network issues). */
@@ -338,6 +383,7 @@ class AgentRuntime(
   }
 
   private fun buildToolContext(
+    callId: String,
     project: Project,
     permissions: AgentPermissions,
     terminalSession: TerminalSession,
@@ -345,6 +391,7 @@ class AgentRuntime(
     onEvent: (AgentStreamEvent) -> Unit
   ): ToolContext = ToolContext(
     project = project,
+    toolCallId = callId,
     permissions = permissions,
     terminalSession = terminalSession,
     requestApproval = { approval ->
