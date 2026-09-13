@@ -264,6 +264,11 @@ class WorkspaceViewModel(
     chatStore.updateTextBlock(uuid, snapshot)
     chatStore.updateBlockStatus(uuid, "done")
     chatStore.updateMessageContent(turn, snapshot)
+    // Clear the pointer so the model's NEXT text segment starts its own block —
+    // this keeps narration -> tools -> narration in chronological order even
+    // with parallel batched tool calls.
+    streamingTextBlockUuid = null
+    turnText = StringBuilder()
   }
 
   private fun scheduleReasoningFlush(uuid: String, turn: String) {
