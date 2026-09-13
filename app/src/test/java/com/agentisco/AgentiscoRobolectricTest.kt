@@ -90,13 +90,27 @@ class ExampleRobolectricTest {
     assertFalse(fs.exists(project, "src/components/Button.tsx"))
   }
 
-  /** Runs a git command for tests using the real git binary on PATH. */
-  private fun runGitForTest(projectPath: String, args: String): com.agentisco.workspace.git.GitRunResult {
+  /** Locates a usable git binary (PATH or common Windows install dirs). */
+  private fun resolveGitBinary(): String? {
+    val candidates = listOf(
+      "git",
+      "C:\\Program Files\\Git\\cmd\\git.exe",
+      "C:\\Program Files\\Git\\bin\\git.exe"
+    )
+    return candidates.firstOrNull { exe ->
+      runCatching { ProcessBuilder(exe, "--version").start().waitFor() == 0 }.getOrDefault(false)
+    }
+  }
+
+  /** Runs a git command for tests using the real git binary. */
+  private fun runGitForTest(gitExe: String, projectPath: String, args: String): com.agentisco.workspace.git.GitRunResult {
     val tokens = Regex("\"[^\"]*\"|'[^']*'|\\S+").findAll(args).map { m ->
       val t = m.value
       if (t.startsWith("\"") || t.startsWith("'")) t.substring(1, t.length - 1)
-      else t.replace("HEAD:", "HEAD:")
+      else t
     }.filter { it != "2>/dev/null" }.toList()
+      .toMutableList()
+    if (tokens.firstOrNull() == "git") tokens[0] = gitExe
     val process = ProcessBuilder(tokens)
       .directory(File(projectPath))
       .redirectErrorStream(true)
@@ -108,20 +122,28 @@ class ExampleRobolectricTest {
   @Test
   fun `git repository manager tracks changes reverts files and commits`() {
     kotlinx.coroutines.runBlocking {
+      val gitExe = resolveGitBinary()
+      org.junit.Assume.assumeTrue("git binary not available on this machine - skipping real-git test", gitExe != null)
       val tempDir = File(System.getProperty("java.io.tmpdir"), "test_git_${System.currentTimeMillis()}")
       tempDir.deleteOnExit()
       val fs = ProjectFileSystem(tempDir)
       val project = fs.createProject("GitTest", "Git testing")
-      val git = GitRepositoryManager(fs) { path, args -> runGitForTest(path, args) }
+      val git = GitRepositoryManager(fs) { path, args -> runGitForTest(gitExe!!, path, args) }
 
       // Real git repository initialization
       assertTrue(git.initRepository(project))
       // Local identity so commits work in the test environment
-      runGitForTest(project.path, "git config user.name Test")
-      runGitForTest(project.path, "git config user.email test@test")
+      runGitForTest(gitExe!!, project.path, "git config user.name Test")
+      runGitForTest(gitExe!!, project.path, "git config user.email test@test")
+      // Keep bytes identical across write/checkout on Windows (autocrlf).
+      runGitForTest(gitExe!!, project.path, "git config core.autocrlf false")
       assertTrue(git.isGitRepository(project))
 
-      // Initially clean (no commits yet, but also no changes vs empty index)
+      // Scaffold files are untracked on a fresh repo — create the initial commit.
+      val scaffold = git.getChangedFiles(project).toSet()
+      assertTrue(scaffold.isNotEmpty())
+      assertNotNull(git.commit(project, scaffold, "chore: initial commit"))
+      // With everything committed, the working tree is clean.
       assertTrue(git.getChangedFiles(project).isEmpty())
 
       // Modify a file and verify it is detected
@@ -159,6 +181,10 @@ class ExampleRobolectricTest {
 
     viewModel.saveActiveFile()
     assertFalse(viewModel.isEditorDirty.value)
-    assertTrue(viewModel.fileDiffs.value.any { it.filePath == initialFile.path })
+    // Saving must persist to the real project folder on disk.
+    val saved = viewModel.repository.fileSystem.readFile(
+      viewModel.repository.activeProject.value, initialFile.path
+    )
+    assertTrue(saved.contains("// modified"))
   }
 }
