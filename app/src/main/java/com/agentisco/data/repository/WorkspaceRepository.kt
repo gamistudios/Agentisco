@@ -347,6 +347,11 @@ class WorkspaceRepository(
   private val _isDevServerRunning = MutableStateFlow(true)
   val isDevServerRunning: StateFlow<Boolean> = _isDevServerRunning.asStateFlow()
 
+  /** Model used for background tasks: the user's default, else the selected one. */
+  private val _defaultTaskModelId = MutableStateFlow(providerStore?.getDefaultTaskModelId())
+  val defaultTaskModelId: StateFlow<String?> = _defaultTaskModelId.asStateFlow()
+
+
   init {
     repositoryScope.launch {
       migrateLegacyProjects()
@@ -368,6 +373,7 @@ class WorkspaceRepository(
       _providers.value = store.getProviders()
       _aiModels.value = store.getModels()
       _selectedModel.value = store.getSelectedModelId()?.let { id -> _aiModels.value.firstOrNull { it.id == id } }
+      _defaultTaskModelId.value = ensureDefaultTaskModel()
     } else {
       // No durable store (tests/previews): operate in-memory.
       _providers.value = emptyList()
@@ -985,25 +991,30 @@ class WorkspaceRepository(
           return@launch
         }
         val generated = requestLlmText(
-          system = "You are a git commit message generator. Follow Conventional Commits strictly.",
+          system = "You are a commit message writer. You output exactly one git commit message and NOTHING else. " +
+            "No greetings, no reasoning, no analysis, no alternatives, no per-file breakdown, no markdown, no quotes, no code fences.",
           user = buildString {
-            appendLine("Generate a concise git commit message for this staged diff.")
-            appendLine("Rules:")
-            appendLine("- First line: type prefix (feat|fix|chore|docs|refactor|test|perf|build|ci|style), optional scope in parentheses, colon, then an imperative summary (max 72 chars).")
-            appendLine("- If the change is non-trivial, add one blank line, then a short bullet list of the key changes.")
-            appendLine("- Reply with ONLY the commit message text, no code fences, no explanations.")
+            appendLine("Write ONE commit message summarizing ALL staged changes together as a single unit of work.")
+            appendLine("Hard rules:")
+            appendLine("- Output ONLY the commit message. Your entire response is the commit message itself.")
+            appendLine("- Exactly one message for the whole diff — NEVER one message per file, never multiple messages.")
+            appendLine("- First line: type prefix (feat|fix|chore|docs|refactor|test|perf|build|ci|style), optional scope, colon, imperative summary (max 72 chars).")
+            appendLine("- If the change is non-trivial, one blank line, then a short bullet list of the key changes.")
+            appendLine("- Do not write anything before or after the message. No 'Let me', 'Here is', 'Sure', commentary, or reasoning.")
             appendLine()
             append("Staged diff:\n" + staged.take(12000))
           },
-          maxTokens = 300
+          maxTokens = 300,
+          disableReasoning = true
         )
-        if (generated.isNullOrBlank()) {
+        val sanitized = generated?.let { sanitizeCommitMessage(it) }
+        if (sanitized.isNullOrBlank()) {
           _commitGenState.value = CommitGenState.Failed(
             "The model returned an empty response. Try again or pick a different default model in Settings."
           )
         } else {
-          _commitMessage.value = generated
-          _commitGenState.value = CommitGenState.Done(generated)
+          _commitMessage.value = sanitized
+          _commitGenState.value = CommitGenState.Done(sanitized)
         }
       } catch (e: Exception) {
         android.util.Log.e("ScoOS-Git", "commit message generation failed", e)
@@ -1016,15 +1027,70 @@ class WorkspaceRepository(
     _commitGenState.value = CommitGenState.Idle
   }
 
+  private val commitPrefixRegex = Regex(
+    "^(feat|fix|chore|docs|refactor|test|perf|build|ci|style|revert)(\\([^)]*\\))?\\s?:\\s?.+",
+    RegexOption.IGNORE_CASE
+  )
+
+  /**
+   * Extracts the actual commit message from model output, tolerating chatter,
+   * code fences, and per-file message lists: finds the first conventional
+   * commit line, keeps its bullet body, and drops everything else.
+   */
+  private fun sanitizeCommitMessage(raw: String): String? {
+    val lines = raw
+      .replace("```", "")
+      .lines()
+      .map { it.trimEnd() }
+    val start = lines.indexOfFirst { commitPrefixRegex.containsMatchIn(it.trim()) }
+    if (start < 0) return raw.trim().lineSequence().firstOrNull()?.take(200)?.ifBlank { null }
+    val body = mutableListOf(lines[start].trim())
+    var i = start + 1
+    var sawBody = false
+    while (i < lines.size) {
+      val line = lines[i].trim()
+      if (line.isBlank()) {
+        // Allow one blank line between subject and bullets; stop after the body ends.
+        if (sawBody) break
+        i++
+        continue
+      }
+      if (commitPrefixRegex.containsMatchIn(line)) break // another message = stop
+      if (line.startsWith("-") || line.startsWith("*") || line.startsWith("•")) {
+        body.add(line)
+        sawBody = true
+      } else if (sawBody && !line.startsWith("#")) {
+        body.add(line)
+      } else if (!sawBody && body.size == 1) {
+        break // chatter after the subject line
+      }
+      i++
+    }
+    return body.joinToString("\n").take(600).ifBlank { null }
+  }
+
+  /**
+   * Guarantees a usable default task model: the stored one if still valid,
+   * otherwise the first model in the catalog (persisted so there is always
+   * exactly one default).
+   */
+  private fun ensureDefaultTaskModel(): String? {
+    val models = _aiModels.value
+    val current = _defaultTaskModelId.value
+    if (current != null && models.any { it.id == current }) return current
+    val fallback = models.firstOrNull()?.id
+    if (fallback != null && fallback != current) {
+      providerStore?.setDefaultTaskModelId(fallback)
+      _defaultTaskModelId.value = fallback
+    }
+    return fallback
+  }
+
   private fun simpleCommitFallback(diff: String): String {
     val files = Regex("^diff --git a/(\\S+)").findAll(diff).toList()
     val scope = files.maxOfOrNull { it.groupValues[1].substringAfterLast('/') } ?: "project"
     return "chore(" + scope + "): update " + files.size + " file" + if (files.size == 1) "" else "s"
   }
-
-  /** Model used for background tasks: the user's default, else the selected one. */
-  private val _defaultTaskModelId = MutableStateFlow(providerStore?.getDefaultTaskModelId())
-  val defaultTaskModelId: StateFlow<String?> = _defaultTaskModelId.asStateFlow()
 
   fun setDefaultTaskModel(modelId: String?) {
     providerStore?.setDefaultTaskModelId(modelId)
@@ -1043,7 +1109,8 @@ class WorkspaceRepository(
    * configured; otherwise throws the real provider/network error so callers
    * can surface exactly what went wrong.
    */
-  private suspend fun requestLlmText(system: String, user: String, maxTokens: Int): String? {
+  private suspend fun requestLlmText(system: String, user: String, maxTokens: Int, disableReasoning: Boolean = false): String? {
+    ensureDefaultTaskModel()
     val model = resolveTaskModel() ?: return null
     val connection = resolveProviderForModel(model)
       ?: throw IllegalStateException("Provider for model \"${model.displayName}\" has no API key configured.")
@@ -1056,7 +1123,8 @@ class WorkspaceRepository(
           com.agentisco.agent.llm.LlmMessage(com.agentisco.agent.llm.LlmRole.SYSTEM, system),
           com.agentisco.agent.llm.LlmMessage(com.agentisco.agent.llm.LlmRole.USER, user)
         ),
-        maxOutputTokens = maxTokens
+        maxOutputTokens = maxTokens,
+        disableReasoning = disableReasoning
       )
     ) { event ->
       if (event is com.agentisco.agent.llm.LlmStreamEvent.Token) collected.append(event.text)

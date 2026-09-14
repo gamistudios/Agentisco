@@ -295,7 +295,7 @@ internal class OpenAIChatCompletionsClient(http: OkHttpClient) : BaseLlmClient(h
         if (model.capabilities.maxTokensParameter) put("max_completion_tokens", maxTokens) else put("max_tokens", maxTokens)
       }
       request.temperature?.let { put("temperature", it) }
-      model.reasoning?.takeIf { it.enabled }?.let { put("reasoning_effort", it.effort) }
+      model.reasoning?.takeIf { it.enabled && !request.disableReasoning }?.let { put("reasoning_effort", it.effort) }
     }
     return Request.Builder()
       .url(provider.baseUrl.trimEnd('/') + "/chat/completions")

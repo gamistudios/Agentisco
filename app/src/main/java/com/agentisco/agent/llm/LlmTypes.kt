@@ -28,7 +28,9 @@ data class LlmRequest(
   val messages: List<LlmMessage>,
   val tools: List<LlmToolSpec> = emptyList(),
   val maxOutputTokens: Int? = null,
-  val temperature: Double? = null
+  val temperature: Double? = null,
+  /** Background tasks (commit msgs, titles) suppress the model's reasoning mode. */
+  val disableReasoning: Boolean = false
 )
 
 /** Errors surfaced by the LLM communication layer; user-facing, never containing secrets. */
