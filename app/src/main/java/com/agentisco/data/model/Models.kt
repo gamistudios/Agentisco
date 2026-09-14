@@ -15,7 +15,11 @@ data class Project(
   /** True when the project's root folder no longer exists on disk. */
   val isMissing: Boolean = false,
   /** True when the project was registered from an existing folder. */
-  val isImported: Boolean = false
+  val isImported: Boolean = false,
+  /** The original folder this project was imported from ("" = none). */
+  val sourcePath: String = "",
+  /** Mirror changes back to [sourcePath] automatically. */
+  val autoSyncToSource: Boolean = true
 )
 
 data class ProjectFile(

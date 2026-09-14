@@ -123,6 +123,9 @@ interface ChatDao {
   @Query("UPDATE agent_sessions SET status = 'interrupted' WHERE status = 'running'")
   suspend fun interruptRunningSessions()
 
+  @Query("UPDATE agent_sessions SET projectId = :newProjectId WHERE projectId = :oldProjectId")
+  suspend fun remapProjectSessions(oldProjectId: String, newProjectId: String)
+
   @Query("DELETE FROM agent_sessions WHERE id = :id")
   suspend fun deleteSession(id: String)
 

@@ -23,6 +23,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.agentisco.core.model.AppDestination
+import com.agentisco.data.repository.WorkspaceRepository
 import com.agentisco.ui.WorkspaceViewModel
 import com.agentisco.ui.theme.*
 
@@ -38,6 +39,7 @@ fun GitScreen(
   val commitMessage by viewModel.commitMessage.collectAsState()
   val commitHistory by viewModel.commitHistory.collectAsState()
   val isGitRepository by viewModel.isGitRepository.collectAsState()
+  val commitGenState by viewModel.commitGenState.collectAsState()
   val gitError by viewModel.gitError.collectAsState()
 
   // VS Code-style split: staged files are listed under "Staged Changes",
@@ -48,6 +50,7 @@ fun GitScreen(
   val unstagedDiffs = diffs.filter { !stagedFiles.contains(it.filePath) }
 
   var messageText by remember(commitMessage) { mutableStateOf(commitMessage) }
+  val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
 
   LazyColumn(
     modifier = modifier
@@ -102,6 +105,17 @@ fun GitScreen(
             fontSize = 11.sp,
             lineHeight = 14.sp,
             modifier = Modifier.weight(1f)
+          )
+          Icon(
+            Icons.Outlined.ContentCopy,
+            contentDescription = "Copy error",
+            tint = TextMuted,
+            modifier = Modifier
+              .padding(start = 4.dp)
+              .size(12.dp)
+              .clickable {
+                clipboard.setText(androidx.compose.ui.text.AnnotatedString(gitError!!))
+              }
           )
           TextButton(onClick = { viewModel.dismissGitError() }) {
             Text("Dismiss", color = TextMuted, fontSize = 10.sp)
@@ -167,20 +181,55 @@ fun GitScreen(
           ) {
             Text("Commit message", color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
 
-            // Generate with Agent Button (Section 17)
+            // Generate with Agent: uses the configured provider/model on the
+            // complete staged diff; shows generating / failed states.
+            val genBusy = commitGenState is WorkspaceRepository.CommitGenState.Generating
             Button(
-              onClick = {
-                viewModel.generateCommitMessageWithAgent()
-              },
+              onClick = { viewModel.generateCommitMessageWithAgent() },
+              enabled = !genBusy,
               colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue.copy(alpha = 0.2f)),
               contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
               modifier = Modifier
                 .height(26.dp)
                 .testTag("btn_generate_commit_msg")
             ) {
-              Icon(Icons.Default.AutoAwesome, contentDescription = "Agent", tint = ElectricBlueGlow, modifier = Modifier.size(12.dp))
-              Spacer(modifier = Modifier.width(4.dp))
-              Text("Generate with Agent", color = ElectricBlueGlow, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+              if (genBusy) {
+                CircularProgressIndicator(
+                  modifier = Modifier.size(11.dp),
+                  color = ElectricBlueGlow,
+                  strokeWidth = 1.5.dp
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Generating…", color = ElectricBlueGlow, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+              } else {
+                Icon(Icons.Default.AutoAwesome, contentDescription = "Agent", tint = ElectricBlueGlow, modifier = Modifier.size(12.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Generate with Agent", color = ElectricBlueGlow, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+              }
+            }
+          }
+
+          val genFailed = commitGenState as? WorkspaceRepository.CommitGenState.Failed
+          if (genFailed != null) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Row(
+              modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(6.dp))
+                .background(DangerRed.copy(alpha = 0.1f))
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              Text(
+                genFailed.error,
+                color = DangerRed,
+                fontSize = 10.sp,
+                lineHeight = 13.sp,
+                modifier = Modifier.weight(1f)
+              )
+              TextButton(onClick = { viewModel.dismissCommitGenState() }, contentPadding = PaddingValues(horizontal = 4.dp)) {
+                Text("Dismiss", color = TextMuted, fontSize = 9.sp)
+              }
             }
           }
 

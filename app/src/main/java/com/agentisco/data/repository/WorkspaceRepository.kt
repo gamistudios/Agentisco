@@ -46,9 +46,34 @@ class WorkspaceRepository(
   /** SQLite-backed persistence for agent sessions/messages/turn-blocks. */
   val chatStore = AgentChatStore(context)
 
-  val fileSystem = ProjectFileSystem(baseDir)
+  // Real Linux terminal stack (rootfs location is needed below to place
+  // projects inside the guest's home directory).
+  val nativeBinaries: NativeBinaries? = context?.let(::NativeBinaries)
+  val debianBootstrap: DebianBootstrap? = context?.let { ctx ->
+    nativeBinaries?.let { DebianBootstrap(ctx, it) }
+  }
+
+  /**
+   * Projects live INSIDE the proot rootfs home (`/root/projects`, i.e.
+   * `~/projects` for the terminal user) on the app's private ext4 storage —
+   * full Linux semantics for git/builds/locks, and the paths the terminal
+   * shows are the paths that actually work inside the shell.
+   */
+  val projectsRoot: File = debianBootstrap?.rootfsDir?.let { File(it, "root/projects") } ?: baseDir
+
+  val fileSystem = ProjectFileSystem(projectsRoot)
   val gitManager = GitRepositoryManager(fileSystem) { projectPath, args ->
     runGitCommand(projectPath, args)
+  }
+
+  /** Maps a host-side project path to the path visible inside the guest shell. */
+  fun guestPathFor(hostPath: String): String {
+    val prefix = projectsRoot.absolutePath.trimEnd('/')
+    if (hostPath.startsWith(prefix)) {
+      val rel = hostPath.removePrefix(prefix).trimStart('/')
+      return if (rel.isEmpty()) "~/projects" else "~/projects/$rel"
+    }
+    return hostPath
   }
 
   /**
@@ -70,13 +95,7 @@ class WorkspaceRepository(
     return com.agentisco.workspace.git.GitRunResult(code, out.toString())
   }
 
-  // Real Linux terminal stack: proot binaries (bundled via jniLibs) + a
-  // Debian-based rootfs downloaded and verified on first use. Null when no
-  // Android context is available (unit tests / previews).
-  val nativeBinaries: NativeBinaries? = context?.let(::NativeBinaries)
-  val debianBootstrap: DebianBootstrap? = context?.let { ctx ->
-    nativeBinaries?.let { DebianBootstrap(ctx, it) }
-  }
+  // (Terminal stack initialized above — the projects root depends on it.)
   private val prootSessionManager: ProotSessionManager? = context?.let { ctx ->
     val bootstrap = debianBootstrap ?: return@let null
     val bins = nativeBinaries ?: return@let null
@@ -119,7 +138,13 @@ class WorkspaceRepository(
 
   /** Rebuilds the project list from the registry, re-validating root folders. */
   private fun refreshProjectList() {
+    // The workspace's own .agentisco.json is the authoritative project config;
+    // the registry caches it for the project list.
+    fun configFor(entry: com.agentisco.data.local.ProjectRegistryEntry): com.agentisco.workspace.filesystem.ProjectConfig? =
+      com.agentisco.workspace.filesystem.ProjectFileSystem.readProjectConfig(File(entry.rootPath))
+
     val known = projectRegistry.all().map { entry ->
+      val cfg = configFor(entry)
       Project(
         id = entry.id,
         name = entry.name,
@@ -130,7 +155,9 @@ class WorkspaceRepository(
         description = entry.description,
         path = entry.rootPath,
         isMissing = !File(entry.rootPath).isDirectory,
-        isImported = entry.imported
+        isImported = entry.imported,
+        sourcePath = cfg?.sourcePath ?: entry.sourcePath,
+        autoSyncToSource = cfg?.autoSync ?: entry.autoSync
       )
     }
     // Legacy projects living under the base dir but not yet registered.
@@ -148,12 +175,15 @@ class WorkspaceRepository(
       }
     }
     _projects.value = projectRegistry.all().map { entry ->
+      val cfg = configFor(entry)
       Project(
         id = entry.id, name = entry.name, branch = "main",
         lastActivity = relativeActivity(entry.lastOpenedAt),
         description = entry.description, path = entry.rootPath,
         isMissing = !File(entry.rootPath).isDirectory,
-        isImported = entry.imported
+        isImported = entry.imported,
+        sourcePath = cfg?.sourcePath ?: entry.sourcePath,
+        autoSyncToSource = cfg?.autoSync ?: entry.autoSync
       )
     }
   }
@@ -318,11 +348,14 @@ class WorkspaceRepository(
   val isDevServerRunning: StateFlow<Boolean> = _isDevServerRunning.asStateFlow()
 
   init {
-    refreshProjectList()
-    _activeProject.value = _projects.value.firstOrNull { !it.isMissing }
-      ?: _projects.value.firstOrNull()
-      ?: placeholderProject
-    loadActiveProjectState(_activeProject.value)
+    repositoryScope.launch {
+      migrateLegacyProjects()
+      refreshProjectList()
+      _activeProject.value = _projects.value.firstOrNull { !it.isMissing }
+        ?: _projects.value.firstOrNull()
+        ?: placeholderProject
+      loadActiveProjectState(_activeProject.value)
+    }
     loadProviderConfiguration()
   }
 
@@ -489,7 +522,7 @@ class WorkspaceRepository(
         TerminalSession(
           id = "term-${System.currentTimeMillis()}",
           name = "main",
-          currentDir = project.path,
+          currentDir = guestPathFor(project.path),
           projectId = project.id
         )
       )
@@ -579,17 +612,34 @@ class WorkspaceRepository(
     }
   }
 
-  /** Registers an existing folder as a project. Returns null when invalid. */
+  /**
+   * Imports an existing folder by COPYING its contents into the app's Linux
+   * workspace (`~/projects/<name>`). The workspace gets a real POSIX
+   * filesystem, so git, builds, package managers and file locks all work
+   * reliably. The original folder is remembered as [Project.sourcePath] and
+   * changes can be mirrored back (manually or automatically — see
+   * [syncProjectToSource] / [setProjectAutoSync]).
+   */
   fun importProject(rootPath: String, displayName: String? = null): Project? {
     return try {
-      val imported = fileSystem.importProject(expandProjectPath(rootPath), displayName)
+      val source = expandProjectPath(rootPath)
+      if (!source.isDirectory || !source.canRead()) {
+        _agentStatusText.value = "Folder not found or not readable: ${source.absolutePath}"
+        return null
+      }
+      val name = (displayName ?: source.name).ifBlank { source.name }
+      val workspace = fileSystem.suggestDefaultRoot(name)
+      fileSystem.copyFolder(source, workspace)
+      val imported = fileSystem.importProject(workspace, name, sourcePath = source.absolutePath)
       projectRegistry.upsert(
         com.agentisco.data.local.ProjectRegistryEntry(
           id = imported.id, name = imported.name, description = imported.description,
           rootPath = imported.path,
           createdAt = System.currentTimeMillis(),
           lastOpenedAt = System.currentTimeMillis(),
-          imported = true
+          imported = true,
+          sourcePath = source.absolutePath,
+          autoSync = true
         )
       )
       refreshProjectList()
@@ -602,6 +652,132 @@ class WorkspaceRepository(
     }
   }
 
+  /**
+   * Mirrors the workspace to the project's original folder (one-way,
+   * workspace wins): copies new/updated files and removes deleted ones.
+   */
+  fun syncProjectToSource(project: Project = _activeProject.value) {
+    if (project.sourcePath.isBlank()) return
+    repositoryScope.launch {
+      try {
+        val (copied, removed) = fileSystem.mirrorFolder(File(project.path), File(project.sourcePath))
+        _agentStatusText.value = "Synced to ${project.sourcePath} — $copied file(s) updated, $removed removed"
+      } catch (e: Exception) {
+        android.util.Log.e("ScoOS-Sync", "sync failed", e)
+        _agentStatusText.value = "Sync to original folder failed: ${e.message}"
+      }
+    }
+  }
+
+  /** Mirrors automatically when the project has a source folder and it's enabled. */
+  private fun maybeAutoSync(project: Project) {
+    if (project.sourcePath.isNotBlank() && project.autoSyncToSource) {
+      syncProjectToSource(project)
+    }
+  }
+
+  fun setProjectAutoSync(projectId: String, enabled: Boolean) {
+    projectRegistry.setAutoSync(projectId, enabled)
+    // Persist in the workspace's .agentisco.json as well (it's authoritative).
+    val entry = projectRegistry.all().firstOrNull { it.id == projectId }
+    if (entry != null) {
+      val dir = File(entry.rootPath)
+      val cfg = com.agentisco.workspace.filesystem.ProjectFileSystem.readProjectConfig(dir)
+      if (cfg != null) {
+        com.agentisco.workspace.filesystem.ProjectFileSystem.writeProjectConfig(
+          dir, cfg.copy(autoSync = enabled)
+        )
+      }
+    }
+    refreshProjectList()
+    _activeProject.value = _projects.value.firstOrNull { it.id == projectId } ?: _activeProject.value
+  }
+
+  /**
+   * Imports a .zip archive as a project: extracts to a temp dir, picks the
+   * archive root (the single top-level folder if there is one, otherwise the
+   * extraction root), then copies it into the app's Linux workspace like a
+   * normal import. No sync source — the original is a zip file.
+   */
+  suspend fun importZipProject(uri: android.net.Uri, displayName: String? = null): Project? {
+    val context = appContext
+    if (context == null) {
+      _agentStatusText.value = "Zip import unavailable in this environment."
+      return null
+    }
+    var tempDir: File? = null
+    return try {
+      tempDir = File(context.cacheDir, "zip-import-" + System.currentTimeMillis())
+      tempDir.mkdirs()
+      var extracted = 0
+      val canonicalRoot = tempDir.canonicalPath + File.separator
+      context.contentResolver.openInputStream(uri)?.use { input ->
+        java.util.zip.ZipInputStream(input.buffered()).use { zis ->
+          var entry = zis.nextEntry
+          while (entry != null) {
+            val outFile = resolveSafeZipTarget(tempDir, canonicalRoot, entry.name)
+            if (outFile != null) {
+              if (entry.isDirectory) {
+                outFile.mkdirs()
+              } else {
+                outFile.parentFile?.mkdirs()
+                zis.copyTo(outFile.outputStream())
+                extracted++
+              }
+            }
+            zis.closeEntry()
+            entry = zis.nextEntry
+          }
+        }
+      } ?: run {
+        _agentStatusText.value = "Could not read the selected zip file."
+        return null
+      }
+      if (extracted == 0) {
+        _agentStatusText.value = "The archive is empty or could not be read."
+        return null
+      }
+
+      // Root selection: a single top-level directory becomes the project root,
+      // otherwise use the extraction root directly (no 2-level nesting).
+      val tops = tempDir.listFiles().orEmpty()
+      val root = if (tops.size == 1 && tops[0].isDirectory) tops[0] else tempDir
+      val name = (displayName ?: root.name).ifBlank { "zip-project" }
+
+      val workspace = fileSystem.suggestDefaultRoot(name)
+      fileSystem.copyFolder(root, workspace)
+      val imported = fileSystem.importProject(workspace, name, sourcePath = "")
+      projectRegistry.upsert(
+        com.agentisco.data.local.ProjectRegistryEntry(
+          id = imported.id, name = imported.name, description = imported.description,
+          rootPath = imported.path,
+          createdAt = System.currentTimeMillis(),
+          lastOpenedAt = System.currentTimeMillis(),
+          imported = true,
+          sourcePath = ""
+        )
+      )
+      refreshProjectList()
+      selectProject(imported)
+      imported
+    } catch (e: Exception) {
+      android.util.Log.e("ScoOS-Projects", "Failed to import zip", e)
+      _agentStatusText.value = "Could not import zip: ${e.message}"
+      null
+    } finally {
+      tempDir?.deleteRecursively()
+    }
+  }
+
+  /** Zip-slip protection: refuses paths escaping the extraction directory. */
+  private fun resolveSafeZipTarget(extractDir: File, canonicalRoot: String, entryName: String): File? {
+    val cleaned = entryName.replace("\\", "/")
+    if (cleaned.startsWith("/") || cleaned.contains("..")) return null
+    val target = File(extractDir, cleaned)
+    val canonical = target.canonicalPath
+    return if (canonical.startsWith(canonicalRoot) || canonical == canonicalRoot.trimEnd('/')) target else null
+  }
+
   /** Forgets a project (folder and its sessions are kept on disk). */
   fun removeProject(project: Project) {
     projectRegistry.remove(project.id)
@@ -612,6 +788,31 @@ class WorkspaceRepository(
         ?: placeholderProject
       loadActiveProjectState(_activeProject.value)
     }
+  }
+
+  /**
+   * One-time migration: projects stored under the old app-private directory
+   * (filesDir/sco_projects) are MOVED into the rootfs home (/root/projects),
+   * so terminal paths like ~/projects/<name> work. Chat sessions are re-keyed
+   * to the new location.
+   */
+  private suspend fun migrateLegacyProjects() {
+    val legacyRoot = appContext?.filesDir?.let { File(it, "sco_projects") } ?: return
+    if (!legacyRoot.isDirectory) return
+    val legacyPrefix = legacyRoot.absolutePath.trimEnd('/')
+    projectRegistry.all()
+      .filter { it.rootPath.trimEnd('/').startsWith(legacyPrefix) }
+      .forEach { entry ->
+        try {
+          val target = fileSystem.suggestDefaultRoot(entry.name)
+          fileSystem.copyFolder(File(entry.rootPath), target)
+          val oldPath = entry.rootPath
+          projectRegistry.upsert(entry.copy(rootPath = target.absolutePath))
+          chatStore.remapProjectSessionsBlocking(oldPath, target.absolutePath)
+        } catch (e: Exception) {
+          android.util.Log.e("ScoOS-Projects", "Failed to migrate project ${entry.name}", e)
+        }
+      }
   }
 
   /** Re-validates root folders (moved/deleted projects) and refreshes recency. */
@@ -654,6 +855,7 @@ class WorkspaceRepository(
     _activeFile.value = file.copy(content = text, sizeBytes = text.length.toLong())
     _isEditorDirty.value = false
     refreshFiles()
+    maybeAutoSync(_activeProject.value)
   }
 
   fun createFile(relativePath: String, content: String = ""): Boolean {
@@ -746,44 +948,72 @@ class WorkspaceRepository(
     _commitMessage.value = msg
   }
 
+  /** State of the AI commit-message generation, surfaced in the Git tab. */
+  sealed class CommitGenState {
+    data object Idle : CommitGenState()
+    data object Generating : CommitGenState()
+    data class Done(val message: String) : CommitGenState()
+    data class Failed(val error: String) : CommitGenState()
+  }
+
+  private val _commitGenState = MutableStateFlow<CommitGenState>(CommitGenState.Idle)
+  val commitGenState: StateFlow<CommitGenState> = _commitGenState.asStateFlow()
+
   /**
-   * Generates a conventional-commit message from the real staged diff
-   * (`git diff --cached`). Uses the selected LLM; falls back to a simple
-   * summary when no model is configured.
+   * Generates a concise conventional-commit message from the complete staged
+   * diff (`git diff --cached` — staged changes only, unstaged excluded) using
+   * the currently configured provider/model.
    */
   fun generateCommitMessageWithAgent() {
     repositoryScope.launch {
       val project = _activeProject.value
       _commitMessage.value = ""
+      _commitGenState.value = CommitGenState.Generating
       try {
         if (!gitManager.isGitRepository(project)) {
-          _commitMessage.value = "Not a git repository"
+          _commitGenState.value = CommitGenState.Failed("Not a git repository — initialize it first.")
           return@launch
         }
-        val staged = gitManager.stagedDiff(project).take(12000)
+        val staged = gitManager.stagedDiff(project)
         if (staged.isBlank()) {
-          _commitMessage.value = "Nothing staged - stage changes first"
+          _commitGenState.value = CommitGenState.Failed("Nothing staged — stage changes first, then generate.")
+          return@launch
+        }
+        val model = _selectedModel.value
+        if (model == null) {
+          _commitGenState.value = CommitGenState.Failed("No model configured — add a provider/model in Settings first.")
           return@launch
         }
         val generated = requestLlmText(
           system = "You are a git commit message generator. Follow Conventional Commits strictly.",
           user = buildString {
-            appendLine("Generate a git commit message for this staged diff.")
+            appendLine("Generate a concise git commit message for this staged diff.")
             appendLine("Rules:")
             appendLine("- First line: type prefix (feat|fix|chore|docs|refactor|test|perf|build|ci|style), optional scope in parentheses, colon, then an imperative summary (max 72 chars).")
             appendLine("- If the change is non-trivial, add one blank line, then a short bullet list of the key changes.")
             appendLine("- Reply with ONLY the commit message text, no code fences, no explanations.")
             appendLine()
-            append("Staged diff:\n" + staged)
+            append("Staged diff:\n" + staged.take(12000))
           },
           maxTokens = 300
         )
-        _commitMessage.value = generated ?: simpleCommitFallback(staged)
+        if (generated.isNullOrBlank()) {
+          _commitGenState.value = CommitGenState.Failed(
+            "The model returned an empty response. Try again or pick a different default model in Settings."
+          )
+        } else {
+          _commitMessage.value = generated
+          _commitGenState.value = CommitGenState.Done(generated)
+        }
       } catch (e: Exception) {
         android.util.Log.e("ScoOS-Git", "commit message generation failed", e)
-        _commitMessage.value = "chore: update project files"
+        _commitGenState.value = CommitGenState.Failed("Generation failed: ${e.message ?: e.javaClass.simpleName}")
       }
     }
+  }
+
+  fun dismissCommitGenState() {
+    _commitGenState.value = CommitGenState.Idle
   }
 
   private fun simpleCommitFallback(diff: String): String {
@@ -792,39 +1022,60 @@ class WorkspaceRepository(
     return "chore(" + scope + "): update " + files.size + " file" + if (files.size == 1) "" else "s"
   }
 
-  /** Minimal non-streaming LLM helper for one-shot text generation. */
-  private suspend fun requestLlmText(system: String, user: String, maxTokens: Int): String? {
-    val model = _selectedModel.value ?: return null
-    val connection = resolveProviderForModel(model) ?: return null
-    val (provider, apiKey) = connection
-    return try {
-      val collected = StringBuilder()
-      llmService.streamChat(
-        provider = provider, model = model, apiKey = apiKey,
-        request = com.agentisco.agent.llm.LlmRequest(
-          messages = listOf(
-            com.agentisco.agent.llm.LlmMessage(com.agentisco.agent.llm.LlmRole.SYSTEM, system),
-            com.agentisco.agent.llm.LlmMessage(com.agentisco.agent.llm.LlmRole.USER, user)
-          ),
-          maxOutputTokens = maxTokens
-        )
-      ) { event ->
-        if (event is com.agentisco.agent.llm.LlmStreamEvent.Token) collected.append(event.text)
-      }
-      collected.toString().trim().ifBlank { null }
-    } catch (e: Exception) {
-      android.util.Log.w("ScoOS-Git", "LLM text request failed: " + e.message)
-      null
+  /** Model used for background tasks: the user's default, else the selected one. */
+  private val _defaultTaskModelId = MutableStateFlow(providerStore?.getDefaultTaskModelId())
+  val defaultTaskModelId: StateFlow<String?> = _defaultTaskModelId.asStateFlow()
+
+  fun setDefaultTaskModel(modelId: String?) {
+    providerStore?.setDefaultTaskModelId(modelId)
+    _defaultTaskModelId.value = modelId
+  }
+
+  private fun resolveTaskModel(): AIModel? {
+    _defaultTaskModelId.value?.let { id ->
+      _aiModels.value.firstOrNull { it.id == id }?.let { return it }
     }
+    return _selectedModel.value
+  }
+
+  /**
+   * One-shot LLM text generation. Returns null only when no model is
+   * configured; otherwise throws the real provider/network error so callers
+   * can surface exactly what went wrong.
+   */
+  private suspend fun requestLlmText(system: String, user: String, maxTokens: Int): String? {
+    val model = resolveTaskModel() ?: return null
+    val connection = resolveProviderForModel(model)
+      ?: throw IllegalStateException("Provider for model \"${model.displayName}\" has no API key configured.")
+    val (provider, apiKey) = connection
+    val collected = StringBuilder()
+    llmService.streamChat(
+      provider = provider, model = model, apiKey = apiKey,
+      request = com.agentisco.agent.llm.LlmRequest(
+        messages = listOf(
+          com.agentisco.agent.llm.LlmMessage(com.agentisco.agent.llm.LlmRole.SYSTEM, system),
+          com.agentisco.agent.llm.LlmMessage(com.agentisco.agent.llm.LlmRole.USER, user)
+        ),
+        maxOutputTokens = maxTokens
+      )
+    ) { event ->
+      if (event is com.agentisco.agent.llm.LlmStreamEvent.Token) collected.append(event.text)
+    }
+    return collected.toString().trim().ifBlank { null }
   }
 
   /** AI-generated short session title (max 6 words) for a new conversation. */
   suspend fun requestSessionTitle(prompt: String): String? {
-    val title = requestLlmText(
-      system = "You generate very short chat session titles. Reply with only the title text.",
-      user = "Create a title of at most 6 words (no quotes, no ending punctuation) for a coding-agent conversation that starts with this request: \"" + prompt.take(400) + "\"",
-      maxTokens = 32
-    ) ?: return null
+    val title = try {
+      requestLlmText(
+        system = "You generate very short chat session titles. Reply with only the title text.",
+        user = "Create a title of at most 6 words (no quotes, no ending punctuation) for a coding-agent conversation that starts with this request: \"" + prompt.take(400) + "\"",
+        maxTokens = 32
+      )
+    } catch (e: Exception) {
+      android.util.Log.w("ScoOS-Sessions", "title generation failed: ${e.message}")
+      null
+    } ?: return null
     return title.split(Regex("\\s+")).take(6).joinToString(" ").take(60).ifBlank { null }
   }
 
@@ -847,6 +1098,7 @@ class WorkspaceRepository(
           _gitError.value = null
           _stagedFiles.value = emptySet()
           refreshDiffsAndGit()
+          maybeAutoSync(_activeProject.value)
         } else {
           _gitError.value = "Commit failed. Is the folder a git repository (initialize it above) and is the commit message non-empty?"
         }
@@ -905,7 +1157,7 @@ class WorkspaceRepository(
     val newSession = TerminalSession(
       id = newId,
       name = name,
-      currentDir = project.path,
+      currentDir = guestPathFor(project.path),
       projectId = project.id
     )
     terminalTabsByProject.getOrPut(project.id) { mutableListOf() }.add(newSession)
@@ -944,7 +1196,7 @@ class WorkspaceRepository(
       val resetSession = TerminalSession(
         id = "term-${System.currentTimeMillis()}",
         name = "main",
-        currentDir = project.path,
+        currentDir = guestPathFor(project.path),
         projectId = project.id
       )
       terminalTabsByProject[project.id] = mutableListOf(resetSession)
@@ -1139,6 +1391,8 @@ class WorkspaceRepository(
     }
 
     _agentStatusText.value = if (result.success) result.summary else "Task failed — ${result.summary}"
+    // Mirror the agent's changes to the original folder (if enabled).
+    maybeAutoSync(_activeProject.value)
   }
 
   fun toggleDevServer() {

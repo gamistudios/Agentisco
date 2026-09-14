@@ -33,7 +33,8 @@ class ExampleRobolectricTest {
   @Test
   fun `workspace view model initial state`() {
     val viewModel = WorkspaceViewModel()
-    assertEquals("Agentisco", viewModel.activeProject.value.name)
+    // Fresh installs start with no projects (static demo data was removed)
+    assertEquals("No project", viewModel.activeProject.value.name)
     assertEquals(com.agentisco.core.model.AppDestination.AGENT, viewModel.currentDestination.value)
     // Fresh installs start with an empty provider catalog and no selected model
     assertNull(viewModel.selectedModel.value)

@@ -18,6 +18,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -251,6 +254,7 @@ fun TerminalScreen(
 
 @Composable
 private fun TerminalHeader(currentDirLabel: String, onNewSession: () -> Unit) {
+  val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
   Surface(
     modifier = Modifier.fillMaxWidth(),
     color = DarkSurface,
@@ -273,20 +277,32 @@ private fun TerminalHeader(currentDirLabel: String, onNewSession: () -> Unit) {
           )
           Spacer(modifier = Modifier.width(6.dp))
           Text(
-            text = "Debian Linux Terminal (proot)",
+            text = "Ubuntu Linux",
             color = TextPrimary,
             fontSize = 13.sp,
             fontWeight = FontWeight.Bold
           )
         }
-        Text(
-          text = currentDirLabel,
-          color = TextMuted,
-          fontSize = 10.sp,
-          fontFamily = FontFamily.Monospace,
-          maxLines = 1,
-          overflow = TextOverflow.Ellipsis
-        )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          Text(
+            text = currentDirLabel,
+            color = TextMuted,
+            fontSize = 10.sp,
+            fontFamily = FontFamily.Monospace,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false)
+          )
+          Icon(
+            Icons.Outlined.ContentCopy,
+            contentDescription = "Copy path",
+            tint = TextMuted,
+            modifier = Modifier
+              .padding(start = 4.dp)
+              .size(11.dp)
+              .clickable { clipboard.setText(AnnotatedString(currentDirLabel)) }
+          )
+        }
       }
 
       IconButton(

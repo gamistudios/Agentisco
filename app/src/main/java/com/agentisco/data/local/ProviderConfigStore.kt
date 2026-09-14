@@ -31,6 +31,7 @@ class ProviderConfigStore(private val context: Context? = null) {
   private var providersCache: List<AIProvider> = emptyList()
   private var modelsCache: List<AIModel> = emptyList()
   private var selectedIdCache: String? = null
+  private var defaultTaskModelIdCache: String? = null
   private val credentialsCache = mutableMapOf<String, String>()
 
   val hasPersistence: Boolean get() = context != null
@@ -52,6 +53,7 @@ class ProviderConfigStore(private val context: Context? = null) {
       runCatching {
         val obj = JSONObject(cfg)
         selectedIdCache = obj.optString("selectedModelId").takeIf { it.isNotEmpty() }
+        defaultTaskModelIdCache = obj.optString("defaultTaskModelId").takeIf { it.isNotEmpty() }
         providersCache = obj.getJSONArray("providers").toProviderList()
         modelsCache = obj.getJSONArray("models").toModelList()
       }
@@ -70,6 +72,7 @@ class ProviderConfigStore(private val context: Context? = null) {
     val file = configFile ?: return
     val obj = JSONObject()
     obj.put("selectedModelId", selectedIdCache ?: "")
+    obj.put("defaultTaskModelId", defaultTaskModelIdCache ?: "")
     obj.put("providers", JSONArray().apply { providersCache.forEach { put(it.toJson()) } })
     obj.put("models", JSONArray().apply { modelsCache.forEach { put(it.toJson()) } })
     runCatching {
@@ -140,6 +143,16 @@ class ProviderConfigStore(private val context: Context? = null) {
       selectedIdCache = modelId
       persistConfig()
     }
+  }
+
+  /** Model used for background tasks (commit messages, session titles, ...). */
+  @Synchronized
+  fun getDefaultTaskModelId(): String? = defaultTaskModelIdCache
+
+  @Synchronized
+  fun setDefaultTaskModelId(modelId: String?) {
+    defaultTaskModelIdCache = modelId
+    persistConfig()
   }
 
   /** Drops a stale selected model; picks the first available one when [autoSelectFallback] is set. */

@@ -42,6 +42,7 @@ fun ProjectsScreen(
   val activeProject by viewModel.activeProject.collectAsState()
   val recentActivity by viewModel.recentActivity.collectAsState()
   val previewSessions by viewModel.projectSessionsPreview.collectAsState()
+  val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
 
   var showNewProjectDialog by remember { mutableStateOf(false) }
   var selectedProjectForOverview by remember { mutableStateOf<Project?>(null) }
@@ -211,14 +212,26 @@ fun ProjectsScreen(
           Spacer(modifier = Modifier.height(4.dp))
 
           // The real folder this project lives in — the project IS the folder.
-          Text(
-            text = if (project.isMissing) "Folder missing: ${project.path}" else project.path,
-            color = if (project.isMissing) DangerRed else TextMuted,
-            fontSize = 10.sp,
-            fontFamily = FontFamily.Monospace,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-          )
+          Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+              text = if (project.isMissing) "Folder missing: ${project.path}" else project.path,
+              color = if (project.isMissing) DangerRed else TextMuted,
+              fontSize = 10.sp,
+              fontFamily = FontFamily.Monospace,
+              maxLines = 1,
+              overflow = TextOverflow.Ellipsis,
+              modifier = Modifier.weight(1f, fill = false)
+            )
+            Icon(
+              Icons.Outlined.ContentCopy,
+              contentDescription = "Copy project path",
+              tint = TextMuted,
+              modifier = Modifier
+                .padding(start = 4.dp)
+                .size(11.dp)
+                .clickable { clipboard.setText(androidx.compose.ui.text.AnnotatedString(project.path)) }
+            )
+          }
 
           if (project.description.isNotBlank()) {
             Spacer(modifier = Modifier.height(4.dp))
@@ -287,14 +300,26 @@ fun ProjectsScreen(
         ) {
           Column(modifier = Modifier.weight(1f)) {
             Text(proj.name, color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-            Text(
-              proj.path,
-              color = if (proj.isMissing) DangerRed else TextMuted,
-              fontSize = 10.sp,
-              fontFamily = FontFamily.Monospace,
-              maxLines = 1,
-              overflow = TextOverflow.Ellipsis
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+              Text(
+                proj.path,
+                color = if (proj.isMissing) DangerRed else TextMuted,
+                fontSize = 10.sp,
+                fontFamily = FontFamily.Monospace,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false)
+              )
+              Icon(
+                Icons.Outlined.ContentCopy,
+                contentDescription = "Copy project path",
+                tint = TextMuted,
+                modifier = Modifier
+                  .padding(start = 4.dp)
+                  .size(11.dp)
+                  .clickable { clipboard.setText(androidx.compose.ui.text.AnnotatedString(proj.path)) }
+              )
+            }
           }
           if (proj.changedFilesCount > 0) {
             Box(
@@ -313,6 +338,67 @@ fun ProjectsScreen(
           modifier = Modifier.fillMaxWidth(),
           verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
+          if (proj.sourcePath.isNotBlank()) {
+            Column(
+              modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .background(DarkBackground)
+                .border(1.dp, DarkBorderSubtle, RoundedCornerShape(8.dp))
+                .padding(10.dp)
+            ) {
+              Text(
+                "Original folder",
+                color = TextSecondary,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.SemiBold
+              )
+              Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                  proj.sourcePath,
+                  color = TextMuted,
+                  fontSize = 10.sp,
+                  fontFamily = FontFamily.Monospace,
+                  maxLines = 1,
+                  overflow = TextOverflow.Ellipsis,
+                  modifier = Modifier.weight(1f, fill = false)
+                )
+                Icon(
+                  Icons.Outlined.ContentCopy,
+                  contentDescription = "Copy original folder path",
+                  tint = TextMuted,
+                  modifier = Modifier
+                    .padding(start = 4.dp)
+                    .size(11.dp)
+                    .clickable { clipboard.setText(androidx.compose.ui.text.AnnotatedString(proj.sourcePath)) }
+                )
+              }
+              Spacer(modifier = Modifier.height(6.dp))
+              Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+              ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                  Text(
+                    "Auto-save changes there",
+                    color = TextSecondary,
+                    fontSize = 11.sp
+                  )
+                  Spacer(modifier = Modifier.width(6.dp))
+                  Switch(
+                    checked = proj.autoSyncToSource,
+                    onCheckedChange = { viewModel.setProjectAutoSync(proj.id, it) },
+                    modifier = Modifier.testTag("switch_auto_sync")
+                  )
+                }
+                TextButton(onClick = { viewModel.syncProjectToSource(proj) }) {
+                  Text("Save to folder", color = ElectricBlueGlow, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                }
+              }
+            }
+          }
+
           if (proj.isMissing) {
             Row(
               modifier = Modifier
@@ -542,8 +628,8 @@ fun ProjectsScreen(
   if (showNewProjectDialog) {
     NewOrImportProjectDialog(
       onDismiss = { showNewProjectDialog = false },
-      onCreate = { name, desc, location ->
-        val created = viewModel.createProject(name, desc, location)
+      onCreate = { name, desc, _ ->
+        val created = viewModel.createProject(name, desc)
         showNewProjectDialog = false
         if (created != null) onNavigate(AppDestination.AGENT)
       },
@@ -551,6 +637,12 @@ fun ProjectsScreen(
         val imported = viewModel.importProject(path, name)
         showNewProjectDialog = false
         if (imported != null) onNavigate(AppDestination.AGENT)
+      },
+      onImportZip = { uri, name ->
+        viewModel.importZipProject(uri, name) { imported ->
+          showNewProjectDialog = false
+          if (imported != null) onNavigate(AppDestination.AGENT)
+        }
       }
     )
   }
@@ -617,14 +709,16 @@ private fun SessionRow(
 private fun NewOrImportProjectDialog(
   onDismiss: () -> Unit,
   onCreate: (name: String, desc: String, location: String?) -> Unit,
-  onImport: (path: String, name: String?) -> Unit
+  onImport: (path: String, name: String?) -> Unit,
+  onImportZip: (uri: android.net.Uri, name: String?) -> Unit
 ) {
-  var mode by remember { mutableStateOf("create") } // create | import
+  var mode by remember { mutableStateOf("create") } // create | import | zip
   var name by remember { mutableStateOf("") }
   var desc by remember { mutableStateOf("") }
   var location by remember { mutableStateOf("") }
   var importPath by remember { mutableStateOf("") }
   var importName by remember { mutableStateOf("") }
+  var zipUri by remember { mutableStateOf<android.net.Uri?>(null) }
   var error by remember { mutableStateOf<String?>(null) }
 
   AlertDialog(
@@ -672,7 +766,18 @@ private fun NewOrImportProjectDialog(
               .padding(vertical = 6.dp),
             contentAlignment = Alignment.Center
           ) {
-            Text("Import folder", color = if (mode == "import") ElectricBlueGlow else TextMuted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            Text("Folder", color = if (mode == "import") ElectricBlueGlow else TextMuted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+          }
+          Box(
+            modifier = Modifier
+              .weight(1f)
+              .clip(RoundedCornerShape(6.dp))
+              .background(if (mode == "zip") ElectricBlue.copy(alpha = 0.25f) else Color.Transparent)
+              .clickable { mode = "zip" }
+              .padding(vertical = 6.dp),
+            contentAlignment = Alignment.Center
+          ) {
+            Text(".zip", color = if (mode == "zip") ElectricBlueGlow else TextMuted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
           }
         }
 
@@ -693,21 +798,13 @@ private fun NewOrImportProjectDialog(
             singleLine = true,
             modifier = Modifier.fillMaxWidth()
           )
-          OutlinedTextField(
-            value = location,
-            onValueChange = { location = it },
-            label = { Text("Folder location (optional)", fontSize = 11.sp) },
-            placeholder = { Text("Leave empty for ~/projects/<name>", fontSize = 11.sp) },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-          )
           Text(
-            "The project is a real folder on this device. Default: internal app storage under ~/projects. You can point to another accessible directory (e.g. /sdcard/MyProjects). `~` expands to the projects root.",
+            "The project lives in the app's Linux workspace (~/projects/<name>), giving tools like git full Linux compatibility. To work on an existing folder elsewhere, use the Import tab — changes can be synced back to it.",
             color = TextMuted,
             fontSize = 9.sp,
             lineHeight = 13.sp
           )
-        } else {
+        } else if (mode == "import") {
           val context = LocalContext.current
           val folderPicker = rememberLauncherForActivityResult(
             ActivityResultContracts.OpenDocumentTree()
@@ -758,7 +855,46 @@ private fun NewOrImportProjectDialog(
             modifier = Modifier.fillMaxWidth()
           )
           Text(
-            "Browse the phone's storage and pick the project folder. Nothing is moved or modified — Agentisco opens it in place.",
+            "Browse the phone's storage and pick the project folder. Its contents are copied into the app's Linux workspace (~/projects) so git, builds and terminals work with full Linux compatibility. Changes can be saved back to the original folder — manually or automatically.",
+            color = TextMuted,
+            fontSize = 9.sp,
+            lineHeight = 13.sp
+          )
+        } else if (mode == "zip") {
+          val context = LocalContext.current
+          val zipPicker = rememberLauncherForActivityResult(
+            ActivityResultContracts.OpenDocument()
+          ) { uri ->
+            if (uri == null) return@rememberLauncherForActivityResult
+            zipUri = uri
+            error = null
+          }
+          Button(
+            onClick = { zipPicker.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream")) },
+            colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
+            modifier = Modifier.fillMaxWidth().testTag("btn_pick_zip")
+          ) {
+            Icon(Icons.Outlined.FolderZip, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Choose .zip file…", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+          }
+          if (zipUri != null) {
+            Text(
+              "Archive selected — give it a name and import.",
+              color = TerminalGreen,
+              fontSize = 10.sp
+            )
+          }
+          OutlinedTextField(
+            value = importName,
+            onValueChange = { importName = it },
+            label = { Text("Project name (optional)", fontSize = 11.sp) },
+            placeholder = { Text("Defaults to the archive/root folder name", fontSize = 11.sp) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+          )
+          Text(
+            "The archive is extracted in the app's Linux workspace. If it contains a single top-level folder, that becomes the project root; otherwise the archive root is used.",
             color = TextMuted,
             fontSize = 9.sp,
             lineHeight = 13.sp
@@ -773,23 +909,41 @@ private fun NewOrImportProjectDialog(
     confirmButton = {
       Button(
         onClick = {
-          if (mode == "create") {
-            if (name.isBlank()) {
-              error = "Project name is required."
-            } else {
-              onCreate(name.trim(), desc.trim(), location.trim().takeIf { it.isNotBlank() })
+          when (mode) {
+            "create" -> {
+              if (name.isBlank()) {
+                error = "Project name is required."
+              } else {
+                onCreate(name.trim(), desc.trim(), null)
+              }
             }
-          } else {
-            if (importPath.isBlank()) {
-              error = "Folder path is required."
-            } else {
-              onImport(importPath.trim(), importName.trim().takeIf { it.isNotBlank() })
+            "zip" -> {
+              val uri = zipUri
+              if (uri == null) {
+                error = "Choose a .zip file first."
+              } else {
+                onImportZip(uri, importName.trim().takeIf { it.isNotBlank() })
+              }
+            }
+            else -> {
+              if (importPath.isBlank()) {
+                error = "Choose a folder first."
+              } else {
+                onImport(importPath.trim(), importName.trim().takeIf { it.isNotBlank() })
+              }
             }
           }
         },
         colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue)
       ) {
-        Text(if (mode == "create") "Create & Open" else "Open Folder", fontSize = 12.sp)
+        Text(
+          when (mode) {
+            "create" -> "Create & Open"
+            "zip" -> "Import Zip"
+            else -> "Open Folder"
+          },
+          fontSize = 12.sp
+        )
       }
     },
     dismissButton = {

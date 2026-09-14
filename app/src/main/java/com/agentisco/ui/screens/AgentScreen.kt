@@ -1038,6 +1038,7 @@ private fun ThinkingBlock(block: ReasoningBlock) {
 /** Single red error card for runtime/stream/provider failures. */
 @Composable
 private fun ErrorCard(block: ErrorBlock, showRetry: Boolean, onRetry: () -> Unit) {
+  val clipboard = LocalClipboardManager.current
   Column(
     modifier = Modifier
       .fillMaxWidth()
@@ -1051,6 +1052,15 @@ private fun ErrorCard(block: ErrorBlock, showRetry: Boolean, onRetry: () -> Unit
       Icon(Icons.Default.Close, contentDescription = null, tint = DangerRed, modifier = Modifier.size(14.dp))
       Spacer(modifier = Modifier.width(6.dp))
       Text("Error", color = DangerRed, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+      Spacer(modifier = Modifier.weight(1f))
+      Icon(
+        Icons.Outlined.ContentCopy,
+        contentDescription = "Copy error",
+        tint = TextMuted,
+        modifier = Modifier
+          .size(13.dp)
+          .clickable { clipboard.setText(AnnotatedString(block.message)) }
+      )
     }
     Spacer(modifier = Modifier.height(4.dp))
     Text(block.message, color = TextSecondary, fontSize = 12.sp, lineHeight = 16.sp)

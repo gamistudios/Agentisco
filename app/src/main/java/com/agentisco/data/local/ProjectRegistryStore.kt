@@ -13,7 +13,11 @@ data class ProjectRegistryEntry(
   val rootPath: String,
   val createdAt: Long,
   val lastOpenedAt: Long,
-  val imported: Boolean
+  val imported: Boolean,
+  /** The folder the project was imported from ("" for app-created projects). */
+  val sourcePath: String = "",
+  /** Mirror workspace changes back to [sourcePath] automatically. */
+  val autoSync: Boolean = true
 )
 
 /**
@@ -87,6 +91,24 @@ class ProjectRegistryStore(private val context: Context? = null) {
   }
 
   @Synchronized
+  fun setAutoSync(id: String, enabled: Boolean) {
+    val index = state.entries.indexOfFirst { it.id == id }
+    if (index >= 0) {
+      state.entries[index] = state.entries[index].copy(autoSync = enabled)
+      save()
+    }
+  }
+
+  @Synchronized
+  fun setSourcePath(id: String, sourcePath: String) {
+    val index = state.entries.indexOfFirst { it.id == id }
+    if (index >= 0) {
+      state.entries[index] = state.entries[index].copy(sourcePath = sourcePath)
+      save()
+    }
+  }
+
+  @Synchronized
   fun rememberLocation(location: String) {
     if (location.isBlank()) return
     state.recentLocations.removeAll { it == location }
@@ -111,7 +133,9 @@ class ProjectRegistryStore(private val context: Context? = null) {
             rootPath = e.getString("rootPath"),
             createdAt = e.optLong("createdAt"),
             lastOpenedAt = e.optLong("lastOpenedAt"),
-            imported = e.optBoolean("imported", false)
+            imported = e.optBoolean("imported", false),
+            sourcePath = e.optString("sourcePath"),
+            autoSync = e.optBoolean("autoSync", true)
           )
         )
       }
@@ -142,6 +166,8 @@ class ProjectRegistryStore(private val context: Context? = null) {
             .put("createdAt", entry.createdAt)
             .put("lastOpenedAt", entry.lastOpenedAt)
             .put("imported", entry.imported)
+            .put("sourcePath", entry.sourcePath)
+            .put("autoSync", entry.autoSync)
         )
       }
       obj.put("projects", arr)

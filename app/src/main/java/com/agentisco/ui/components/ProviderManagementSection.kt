@@ -11,6 +11,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.outlined.StarOutline
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -380,6 +382,7 @@ private fun ProviderDetailDialog(
 ) {
   val connectionTests by viewModel.connectionTests.collectAsState()
   val testState = connectionTests[provider.id]
+  val defaultTaskModelId by viewModel.defaultTaskModelId.collectAsState()
 
   AlertDialog(
     onDismissRequest = onDismiss,
@@ -406,6 +409,12 @@ private fun ProviderDetailDialog(
         }
 
         Text("${models.size} Model${if (models.size == 1) "" else "s"}", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        Text(
+          "Tap the star to set the default model used for background tasks (commit messages, session titles).",
+          color = TextMuted,
+          fontSize = 9.sp,
+          lineHeight = 12.sp
+        )
         if (models.isEmpty()) {
           Text("No models yet — the agent cannot use this provider until a model is added.", color = TextMuted, fontSize = 11.sp)
         }
@@ -425,6 +434,19 @@ private fun ProviderDetailDialog(
               Text(model.modelId, color = TextMuted, fontSize = 10.sp, fontFamily = FontFamily.Monospace, maxLines = 1)
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
+              val isDefault = model.id == defaultTaskModelId
+              Icon(
+                if (isDefault) Icons.Default.Star else Icons.Outlined.StarOutline,
+                contentDescription = if (isDefault) "Default model (tap to unset)" else "Set as default model",
+                tint = if (isDefault) WarningAmber else TextMuted,
+                modifier = Modifier
+                  .size(16.dp)
+                  .clickable {
+                    viewModel.setDefaultTaskModel(if (isDefault) null else model.id)
+                  }
+                  .testTag("btn_default_model_${model.modelId}")
+              )
+              Spacer(modifier = Modifier.width(10.dp))
               Icon(
                 Icons.Default.Edit, contentDescription = "Edit model",
                 tint = ElectricBlueGlow,

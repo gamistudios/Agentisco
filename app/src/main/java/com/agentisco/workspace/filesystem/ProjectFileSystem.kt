@@ -8,7 +8,51 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+/** Per-project configuration stored as `.agentisco.json` in the project root. */
+data class ProjectConfig(
+  val name: String,
+  val description: String = "",
+  val createdAt: Long = 0L,
+  /** Original folder the project was imported from ("" = none). */
+  val sourcePath: String = "",
+  /** Mirror workspace changes back to [sourcePath] automatically. */
+  val autoSync: Boolean = true,
+  val version: String = "1.0"
+)
+
 class ProjectFileSystem(private val baseDir: File) {
+
+  companion object {
+    const val CONFIG_FILE_NAME = ".agentisco.json"
+
+    fun readProjectConfig(dir: File): ProjectConfig? {
+      val file = File(dir, CONFIG_FILE_NAME)
+      if (!file.isFile) return null
+      return runCatching {
+        val obj = org.json.JSONObject(file.readText())
+        ProjectConfig(
+          name = obj.optString("name"),
+          description = obj.optString("description"),
+          createdAt = obj.optLong("createdAt"),
+          sourcePath = obj.optString("sourcePath"),
+          autoSync = obj.optBoolean("autoSync", true),
+          version = obj.optString("version", "1.0")
+        )
+      }.getOrNull()
+    }
+
+    fun writeProjectConfig(dir: File, config: ProjectConfig): Boolean = runCatching {
+      val obj = org.json.JSONObject()
+        .put("name", config.name)
+        .put("description", config.description)
+        .put("createdAt", config.createdAt)
+        .put("sourcePath", config.sourcePath)
+        .put("autoSync", config.autoSync)
+        .put("version", config.version)
+      File(dir, CONFIG_FILE_NAME).writeText(obj.toString(2))
+      true
+    }.getOrDefault(false)
+  }
 
   constructor(context: Context) : this(File(context.filesDir, "sco_projects"))
 
@@ -21,12 +65,13 @@ class ProjectFileSystem(private val baseDir: File) {
   fun getProjects(): List<Project> {
     val updatedDirs = baseDir.listFiles { f -> f.isDirectory } ?: emptyArray()
     return updatedDirs.map { dir ->
-      val descFile = File(dir, ".sco_meta")
-      val desc = if (descFile.exists()) descFile.readText() else "Active local project"
-      val nameFile = File(dir, ".sco_name")
-      val projName = if (nameFile.exists() && nameFile.readText().isNotBlank()) {
-        nameFile.readText().trim()
-      } else when (dir.name.lowercase()) {
+      val config = readProjectConfig(dir)
+      val legacyDesc = File(dir, ".sco_meta").takeIf { it.exists() }?.readText()
+      val legacyName = File(dir, ".sco_name").takeIf { it.exists() }?.readText()?.trim()
+      val desc = config?.description ?: legacyDesc ?: "Active local project"
+      val projName = config?.name?.ifBlank { null }
+        ?: legacyName?.ifBlank { null }
+        ?: when (dir.name.lowercase()) {
         "agentisco" -> "Agentisco"
         else -> dir.name.split("-").joinToString(" ") { it.replaceFirstChar { c -> c.uppercase() } }
       }
@@ -79,9 +124,15 @@ class ProjectFileSystem(private val baseDir: File) {
     if (!projDir.isDirectory || !projDir.canRead()) {
       throw java.io.IOException("Folder is not usable: ${projDir.absolutePath}")
     }
-    // write metadata and name
-    File(projDir, ".sco_name").writeText(cleanName)
-    File(projDir, ".sco_meta").writeText(description.ifBlank { "Created in Agentisco" })
+    // Persist project configuration inside the workspace itself.
+    writeProjectConfig(
+      projDir,
+      ProjectConfig(
+        name = cleanName,
+        description = description.ifBlank { "Created in Agentisco" },
+        createdAt = System.currentTimeMillis()
+      )
+    )
     // Scaffold starter files only when the folder has no content (never
     // overwrite whatever the user pointed us at).
     val hasContent = projDir.listFiles()?.any { !it.name.startsWith(".") } == true
@@ -125,16 +176,20 @@ class ProjectFileSystem(private val baseDir: File) {
    * Throws [IllegalArgumentException] when the folder does not exist or is
    * not readable.
    */
-  fun importProject(rootPath: File, displayName: String? = null): Project {
+  fun importProject(rootPath: File, displayName: String? = null, sourcePath: String = ""): Project {
     if (!rootPath.isDirectory || !rootPath.canRead()) {
       throw IllegalArgumentException("Folder not found or not readable: ${rootPath.absolutePath}")
     }
     val name = (displayName ?: rootPath.name).ifBlank { rootPath.name }
-    val metaFile = File(rootPath, ".sco_name")
-    if (!metaFile.exists()) {
-      runCatching { metaFile.writeText(name) }
-      runCatching { File(rootPath, ".sco_meta").writeText("Imported folder") }
-    }
+    val existing = readProjectConfig(rootPath)
+    writeProjectConfig(
+      rootPath,
+      (existing ?: ProjectConfig(name = name, createdAt = System.currentTimeMillis())).copy(
+        name = name,
+        description = existing?.description ?: "Imported folder",
+        sourcePath = sourcePath.ifBlank { existing?.sourcePath ?: "" }
+      )
+    )
     return Project(
       id = "proj-${rootPath.name}-${Integer.toHexString(rootPath.absolutePath.hashCode())}",
       name = name,
@@ -142,10 +197,71 @@ class ProjectFileSystem(private val baseDir: File) {
       lastActivity = "Just now",
       changedFilesCount = 0,
       isDirty = false,
-      description = File(rootPath, ".sco_meta").takeIf { it.exists() }?.readText().orEmpty(),
+      description = existing?.description ?: "Imported folder",
       path = rootPath.absolutePath,
       isImported = true
     )
+  }
+
+  /** Recursively copies a folder tree. Returns the number of files copied. */
+  fun copyFolder(from: File, to: File): Int {
+    if (!from.isDirectory) return 0
+    to.mkdirs()
+    var count = 0
+    from.listFiles()?.forEach { child ->
+      val target = File(to, child.name)
+      if (child.isDirectory) {
+        count += copyFolder(child, target)
+      } else {
+        runCatching {
+          child.copyTo(target, overwrite = true)
+          count++
+        }
+      }
+    }
+    return count
+  }
+
+  /**
+   * One-way mirror of the workspace to the user's original folder: copies
+   * new/updated files and removes files deleted in the workspace, so the
+   * source folder ends up exactly matching the app workspace.
+   */
+  fun mirrorFolder(from: File, to: File): Pair<Int, Int> {
+    if (!from.isDirectory) return 0 to 0
+    to.mkdirs()
+    var copied = 0
+    var removed = 0
+    from.listFiles()?.forEach { child ->
+      val target = File(to, child.name)
+      if (child.isDirectory) {
+        val (c, r) = mirrorFolder(child, target)
+        copied += c; removed += r
+      } else {
+        val needsCopy = !target.exists() || target.lastModified() < child.lastModified() ||
+          target.length() != child.length()
+        if (needsCopy) {
+          runCatching {
+            child.copyTo(target, overwrite = true)
+            copied++
+          }
+        }
+      }
+    }
+    // Remove files the workspace no longer has.
+    to.listFiles()?.forEach { target ->
+      val source = File(from, target.name)
+      if (!source.exists()) {
+        if (target.isDirectory) {
+          target.deleteRecursively()
+          removed++
+        } else {
+          runCatching { target.delete() }
+          removed++
+        }
+      }
+    }
+    return copied to removed
   }
 
   fun getFileTree(project: Project): List<ProjectFile> {
@@ -157,7 +273,7 @@ class ProjectFileSystem(private val baseDir: File) {
   private fun scanDirectory(currentDir: File, rootDir: File): List<ProjectFile> {
     val items = currentDir.listFiles() ?: return emptyList()
     // Sort directories first, then alphabetical
-    val sorted = items.filter { !it.name.startsWith(".git") && it.name != ".sco_meta" }
+    val sorted = items.filter { !it.name.startsWith(".git") && it.name != ".sco_meta" && it.name != CONFIG_FILE_NAME }
       .sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() }))
 
     return sorted.map { file ->

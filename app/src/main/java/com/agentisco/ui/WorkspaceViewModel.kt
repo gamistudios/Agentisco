@@ -456,6 +456,15 @@ class WorkspaceViewModel(
     repository.refreshProjects()
   }
 
+  /** Mirrors the workspace to the project's original folder. */
+  fun syncProjectToSource(project: Project) {
+    repository.syncProjectToSource(project)
+  }
+
+  fun setProjectAutoSync(projectId: String, enabled: Boolean) {
+    repository.setProjectAutoSync(projectId, enabled)
+  }
+
   val isGitRepository: StateFlow<Boolean?> = repository.isGitRepository
 
   fun initGitRepository() {
@@ -624,6 +633,24 @@ class WorkspaceViewModel(
   }
 
   val gitError: StateFlow<String?> = repository.gitError
+  val commitGenState: StateFlow<WorkspaceRepository.CommitGenState> = repository.commitGenState
+  val defaultTaskModelId: StateFlow<String?> = repository.defaultTaskModelId
+
+  /** Marks a model as the default for background tasks (commit msgs, titles, ...). */
+  fun setDefaultTaskModel(modelId: String?) {
+    repository.setDefaultTaskModel(modelId)
+  }
+
+  fun dismissCommitGenState() {
+    repository.dismissCommitGenState()
+  }
+
+  /** Imports a .zip archive (SAF uri) as a project in the app workspace. */
+  fun importZipProject(uri: android.net.Uri, displayName: String?, onResult: (Project?) -> Unit) {
+    viewModelScope.launch {
+      onResult(repository.importZipProject(uri, displayName))
+    }
+  }
 
   fun dismissGitError() {
     repository.clearGitError()

@@ -227,6 +227,11 @@ class AgentChatStore(context: Context?) {
     }.getOrDefault(emptyList())
   }
 
+  /** Re-keys a project's chat sessions after the project folder moved. */
+  suspend fun remapProjectSessionsBlocking(oldProjectId: String, newProjectId: String) = await {
+    it.remapProjectSessions(oldProjectId, newProjectId)
+  }
+
   /** Removes persisted error cards of a turn (e.g. before a manual retry). */
   fun clearErrorBlocks(turnUuid: String) = enqueue {
     dao!!.deleteBlocksOfKind(turnUuid, "error")
