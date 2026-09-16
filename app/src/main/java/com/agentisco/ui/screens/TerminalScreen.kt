@@ -43,15 +43,33 @@ import java.util.Locale
 // real byte sequence through the PTY, so the shell inside the rootfs sees a
 // genuine keyboard event.
 private val TermuxKeyRows = listOf(
-  listOf("ESC", "/", "HOME", "↑", "END", "PGUP"),
-  listOf("TAB", "-", "←", "↓", "→", "PGDN")
+  listOf("CTRL", "ESC", "HOME", "↑", "END", "PGUP"),
+  listOf("TAB", "/", "←", "↓", "→", "PGDN")
 )
 
-private fun keyBytes(key: String): ByteArray = when (key) {
+// ctrlKey function implements proper terminal control sequences
+private fun ctrlKey(char: Char): ByteArray {
+  return when (char) {
+    '[' -> byteArrayOf(0x1b) // Ctrl+[
+    '\\' -> byteArrayOf(0x1c) // Ctrl+\
+    ']' -> byteArrayOf(0x1d) // Ctrl+]
+    '^' -> byteArrayOf(0x1e) // Ctrl+^
+    '_' -> byteArrayOf(0x1f) // Ctrl+_
+    '?' -> byteArrayOf(0x7f) // Ctrl+? (Delete)
+    else -> {
+      // For other characters, implement standard terminal Ctrl behavior:
+      // ASCII value bitwise AND with 0x1f (31) to make it a control character
+      val ctrlCode = (char.code and 0x1f).toByte()
+      byteArrayOf(ctrlCode)
+    }
+  }
+}
+
+private fun keyBytes(key: String, ctrlActive: Boolean = false): ByteArray = when (key) {
+  "CTRL" -> byteArrayOf(0x1b) // Toggle Ctrl mode
   "ESC" -> byteArrayOf(0x1b)
   "TAB" -> byteArrayOf(0x09)
   "/" -> byteArrayOf('/'.code.toByte())
-  "-" -> byteArrayOf('-'.code.toByte())
   "↑" -> "\u001b[A".toByteArray()
   "↓" -> "\u001b[B".toByteArray()
   "→" -> "\u001b[C".toByteArray()
@@ -60,7 +78,15 @@ private fun keyBytes(key: String): ByteArray = when (key) {
   "END" -> "\u001b[F".toByteArray()
   "PGUP" -> "\u001b[5~".toByteArray()
   "PGDN" -> "\u001b[6~".toByteArray()
-  else -> key.toByteArray()
+  else -> {
+    if (ctrlActive && key.length == 1) {
+      // When Ctrl mode is active and a character key is pressed, send control character
+      val ctrlCode = (key[0].code and 0x1f).toByte()
+      byteArrayOf(ctrlCode)
+    } else {
+      key.toByteArray()
+    }
+  }
 }
 
 @Composable
@@ -166,8 +192,8 @@ fun TerminalScreen(
             .background(Color.Black)
             .testTag("terminal_console")
         )
-        TerminalExtraKeysGrid(onKey = { key -> activePty?.let { pty ->
-          val bytes = keyBytes(key)
+        TerminalExtraKeysGrid(onKey = { key, ctrlActive -> activePty?.let { pty ->
+          val bytes = keyBytes(key, ctrlActive)
           if (bytes.isNotEmpty()) pty.write(bytes, 0, bytes.size)
         } })
       }
@@ -514,7 +540,46 @@ private class ScoTerminalViewClient(private val view: TerminalView) : com.termux
   override fun readAltKey(): Boolean = false
   override fun readShiftKey(): Boolean = false
   override fun readFnKey(): Boolean = false
-  override fun onCodePoint(codePoint: Int, ctrlDown: Boolean, session: TerminalSession?): Boolean = false
+override fun onCodePoint(codePoint: Int, ctrlDown: Boolean, session: TerminalSession?): Boolean {
+  // Handle Ctrl sequences properly
+  if (ctrlDown) {
+    when (codePoint) {
+      '['.code -> {
+        session?.write(byteArrayOf(0x1b), 0, 1) // Ctrl+[
+        return true
+      }
+      '\\'.code -> {
+        session?.write(byteArrayOf(0x1c), 0, 1) // Ctrl+\
+        return true
+      }
+      ']'.code -> {
+        session?.write(byteArrayOf(0x1d), 0, 1) // Ctrl+]
+        return true
+      }
+      '^'.code -> {
+        session?.write(byteArrayOf(0x1e), 0, 1) // Ctrl+^
+        return true
+      }
+      '_'.code -> {
+        session?.write(byteArrayOf(0x1f), 0, 1) // Ctrl+_
+        return true
+      }
+      '?'.code -> {
+        session?.write(byteArrayOf(0x7f), 0, 1) // Ctrl+? (Delete)
+        return true
+      }
+      else -> {
+        // Standard Ctrl behavior: mask with 0x1f
+        val ctrlCode = codePoint and 0x1f
+        if (ctrlCode != codePoint) { // Only if it's actually a control character
+          session?.write(byteArrayOf(ctrlCode.toByte()), 0, 1)
+          return true
+        }
+      }
+    }
+  }
+  return false
+}
   override fun onEmulatorSet() {}
   override fun logError(tag: String?, message: String?) {}
   override fun logWarn(tag: String?, message: String?) {}
@@ -527,9 +592,11 @@ private class ScoTerminalViewClient(private val view: TerminalView) : com.termux
 
 @Composable
 private fun TerminalExtraKeysGrid(
-  onKey: (String) -> Unit,
+  onKey: (String, Boolean) -> Unit,
   modifier: Modifier = Modifier
 ) {
+  var ctrlActive by remember { mutableStateOf(false) }
+  
   Column(
     modifier = modifier
       .fillMaxWidth()
@@ -545,14 +612,23 @@ private fun TerminalExtraKeysGrid(
         horizontalArrangement = Arrangement.spacedBy(4.dp)
       ) {
         row.forEach { key ->
+          val isCtrlKey = key == "CTRL"
+          val isActive = isCtrlKey && ctrlActive
+          
           Box(
             modifier = Modifier
               .weight(1f)
               .fillMaxHeight()
               .clip(RoundedCornerShape(6.dp))
-              .background(DarkBackground)
-              .border(1.dp, DarkBorderSubtle, RoundedCornerShape(6.dp))
-              .clickable { onKey(key) }
+              .background(if (isActive) ElectricBlue.copy(alpha = 0.3f) else DarkBackground)
+              .border(1.dp, if (isActive) ElectricBlue else DarkBorderSubtle, RoundedCornerShape(6.dp))
+              .clickable { 
+                if (isCtrlKey) {
+                  ctrlActive = !ctrlActive
+                } else {
+                  onKey(key, ctrlActive)
+                }
+              }
               .testTag("term_key_$key"),
             contentAlignment = Alignment.Center
           ) {
