@@ -239,6 +239,16 @@ class AgentChatStore(context: Context?) {
 
   suspend fun getMessage(turnUuid: String) = dao?.let { runCatching { it.messageByUuid(turnUuid) }.getOrNull() }
 
+  /** Gets the rowId for a message uuid (used for ordering). */
+  suspend fun getMessageRowId(uuid: String): Long? = dao?.messageRowId(uuid)
+
+  /** Deletes all messages in a session after the given message's rowId. */
+  suspend fun deleteMessagesAfter(sessionId: String, afterUuid: String) = await { d ->
+    val rowId = d.messageRowId(afterUuid) ?: return@await
+    d.deleteMessagesAfter(sessionId, rowId)
+    d.deleteBlocksForMessagesAfter(sessionId, rowId)
+  }
+
   companion object {
     fun newId(): String = UUID.randomUUID().toString()
   }

@@ -235,7 +235,7 @@ fun AgentScreen(
         } else {
           items(chatItems, key = { it.id }) { item ->
             when (item) {
-              is UserMessageItem -> UserBubble(item)
+              is UserMessageItem -> UserBubble(item, onEdit = { viewModel.editUserMessage(item.id, it) })
               is AgentTurnItem -> AgentTurnCard(
                 item = item,
                 onAllow = { viewModel.resolveApproval(true) },
@@ -456,11 +456,14 @@ private fun SessionStatusDot(status: String) {
 }
 
 @Composable
-private fun UserBubble(item: UserMessageItem) {
+private fun UserBubble(item: UserMessageItem, onEdit: (String) -> Unit = {}) {
   val clipboard = LocalClipboardManager.current
-  Row(
+  var showEditDialog by remember { mutableStateOf(false) }
+  var editText by remember { mutableStateOf(item.text) }
+
+  Column(
     modifier = Modifier.fillMaxWidth(),
-    horizontalArrangement = Arrangement.End
+    horizontalAlignment = Alignment.End
   ) {
     Column(
       modifier = Modifier
@@ -493,7 +496,48 @@ private fun UserBubble(item: UserMessageItem) {
             .size(10.dp)
             .clickable { clipboard.setText(AnnotatedString(item.text)) }
         )
+        Spacer(modifier = Modifier.width(4.dp))
+        Icon(
+          Icons.Default.Edit,
+          contentDescription = "Edit message",
+          tint = TextMuted,
+          modifier = Modifier
+            .size(10.dp)
+            .clickable { showEditDialog = true }
+        )
       }
+    }
+
+    // Edit dialog
+    if (showEditDialog) {
+      AlertDialog(
+        onDismissRequest = { showEditDialog = false },
+        containerColor = DarkSurface,
+        title = { Text("Edit message", color = TextPrimary, fontSize = 14.sp) },
+        text = {
+          OutlinedTextField(
+            value = editText,
+            onValueChange = { editText = it },
+            placeholder = { Text("Enter new content", color = TextMuted) },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = false,
+            maxLines = 4
+          )
+        },
+        confirmButton = {
+          Button(
+            onClick = {
+              onEdit(editText.trim())
+              showEditDialog = false
+            },
+            enabled = editText.isNotBlank(),
+            colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue)
+          ) { Text("Save", color = Color.White, fontSize = 12.sp) }
+        },
+        dismissButton = {
+          TextButton(onClick = { showEditDialog = false }) { Text("Cancel", color = TextMuted, fontSize = 12.sp) }
+        }
+      )
     }
   }
 }

@@ -178,6 +178,15 @@ interface ChatDao {
   @Query("UPDATE agent_blocks SET status = 'failed', summary = 'Interrupted' WHERE status = 'running'")
   suspend fun failRunningBlocks()
 
+  @Query("SELECT rowId FROM agent_messages WHERE uuid = :uuid LIMIT 1")
+  suspend fun messageRowId(uuid: String): Long?
+
+  @Query("DELETE FROM agent_messages WHERE sessionId = :sessionId AND rowId > :minRowId")
+  suspend fun deleteMessagesAfter(sessionId: String, minRowId: Long)
+
+  @Query("DELETE FROM agent_blocks WHERE messageUuid IN (SELECT uuid FROM agent_messages WHERE sessionId = :sessionId AND rowId > :minRowId)")
+  suspend fun deleteBlocksForMessagesAfter(sessionId: String, minRowId: Long)
+
   // ---- cross-session activity ----
 
   @Query(

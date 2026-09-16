@@ -428,6 +428,50 @@ class WorkspaceViewModel(
       repository.resumeAgentTask(turnUuid, session)
     }
   }
+
+  /**
+   * Edits a user message and regenerates the agent response from that point.
+   * This deletes all subsequent messages/blocks in the session and re-runs the agent.
+   * If the agent is currently working, it is interrupted first.
+   */
+  fun editUserMessage(userMessageUuid: String, newContent: String) {
+    val session = _activeSessionId.value ?: return
+    val wasWorking = repository.isAgentWorking.value
+
+    // Interrupt if currently working
+    if (wasWorking) {
+      cancelAgent()
+    }
+
+    agentJob = viewModelScope.launch {
+      val now = System.currentTimeMillis()
+
+      // Update the user message content
+      chatStore.updateMessageContent(userMessageUuid, newContent)
+      chatStore.updateMessageStatus(userMessageUuid, "sent", "")
+
+      // Delete all subsequent messages and their blocks
+      chatStore.deleteMessagesAfter(session, userMessageUuid)
+
+      // Mark the session as running again
+      chatStore.setSessionStatus(session, "running")
+
+      // Reset streaming state
+      currentTurnUuid = AgentChatStore.newId()
+      turnText = StringBuilder()
+      streamingTextBlockUuid = null
+      reasoningBlockUuid = null
+      reasoningText = StringBuilder()
+      runningToolBlocks = mutableMapOf()
+      approvalBlocks = mutableMapOf()
+
+      // Update the session title based on new prompt
+      val newTitle = newContent.lineSequence().firstOrNull()?.take(48) ?: "Edited"
+      chatStore.renameSession(session, newTitle)
+
+      repository.runAgentTask(newContent, session)
+    }
+  }
   val permissions: StateFlow<AgentPermissions> = repository.permissions
   val searchQuery: StateFlow<String> = repository.searchQuery
   val isCommandPaletteOpen: StateFlow<Boolean> = repository.isCommandPaletteOpen
