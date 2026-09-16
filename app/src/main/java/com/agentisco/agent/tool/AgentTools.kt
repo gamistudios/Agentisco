@@ -68,10 +68,10 @@ class AgentToolRegistry(
   // ---- Permission gates shared by tools ----
 
   internal suspend fun checkFileWrite(ctx: ToolContext, path: String): ToolResult? {
-    if (ctx.permissions.fileEditing == PermissionMode.NEVER_ALLOW) {
+    if (ctx.permissions().fileEditing == PermissionMode.NEVER_ALLOW) {
       return ToolResult(success = false, error = "Blocked by permission policy: file editing is never allowed.")
     }
-    if (ctx.permissions.fileEditing == PermissionMode.ALWAYS_ASK) {
+    if (ctx.permissions().fileEditing == PermissionMode.ALWAYS_ASK) {
       val ok = ctx.requestApproval(
         PendingApproval(
           id = "tool-appr-${System.currentTimeMillis()}",
@@ -87,7 +87,7 @@ class AgentToolRegistry(
   }
 
   internal suspend fun checkFileDelete(ctx: ToolContext, path: String): ToolResult? {
-    if (!ctx.permissions.deleteFiles) {
+    if (!ctx.permissions().deleteFiles) {
       return ToolResult(success = false, error = "Blocked by permission policy: file deletion is disabled.")
     }
     val ok = ctx.requestApproval(
@@ -307,7 +307,7 @@ class RunCommandTool(private val tm: TerminalProcessManager) : AgentTool {
       )
       if (!ok) return ToolResult(false, error = "User rejected destructive command: $command", exitCode = -1)
     } else {
-      val needsApproval = when (ctx.permissions.terminalCommands) {
+      val needsApproval = when (ctx.permissions().terminalCommands) {
         PermissionMode.ALWAYS_ASK -> true
         PermissionMode.NEVER_ALLOW -> return ToolResult(false, error = "Blocked by permission policy: terminal commands are not allowed.", exitCode = -1)
         PermissionMode.ALLOW_ALL -> false
@@ -475,7 +475,7 @@ class GitCommitTool(private val git: GitRepositoryManager, private val stagedFil
   override suspend fun execute(args: JSONObject, ctx: ToolContext): ToolResult {
     val message = args.str("message").trim()
     if (message.isEmpty()) return ToolResult(false, error = "message must be a non-empty commit message.")
-    if (!ctx.permissions.gitCommit) return ToolResult(false, error = "Blocked by permission policy: git commits are not allowed.")
+    if (!ctx.permissions().gitCommit) return ToolResult(false, error = "Blocked by permission policy: git commits are not allowed.")
     val staged = stagedFilesProvider()
     if (staged.isEmpty()) return ToolResult(false, error = "Nothing is staged. Stage changes with git_stage first.")
     val commit = git.commit(ctx.project, staged, message)

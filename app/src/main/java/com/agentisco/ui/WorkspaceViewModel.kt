@@ -337,12 +337,14 @@ class WorkspaceViewModel(
 
   fun createChatSession(title: String = "New session") {
     if (isAgentWorking.value) return
+    val model = selectedModel.value
     viewModelScope.launch {
       val project = activeProject.value
       val now = System.currentTimeMillis()
       val session = AgentSessionEntity(
         id = AgentChatStore.newId(), projectId = project.path,
-        title = title, status = "active", createdAt = now, updatedAt = now
+        title = title, status = "active", createdAt = now, updatedAt = now,
+        modelId = model?.id, providerId = model?.providerId
       )
       chatStore.createSessionBlocking(session)
       _activeSessionId.value = session.id
@@ -437,6 +439,7 @@ class WorkspaceViewModel(
   fun editUserMessage(userMessageUuid: String, newContent: String) {
     val session = _activeSessionId.value ?: return
     val wasWorking = repository.isAgentWorking.value
+    val model = selectedModel.value
 
     // Interrupt if currently working
     if (wasWorking) {
@@ -465,9 +468,10 @@ class WorkspaceViewModel(
       runningToolBlocks = mutableMapOf()
       approvalBlocks = mutableMapOf()
 
-      // Update the session title based on new prompt
+      // Update the session title and model info based on new prompt
       val newTitle = newContent.lineSequence().firstOrNull()?.take(48) ?: "Edited"
       chatStore.renameSession(session, newTitle)
+      chatStore.updateSessionModel(session, model?.id, model?.providerId)
 
       repository.runAgentTask(newContent, session)
     }
@@ -707,6 +711,7 @@ class WorkspaceViewModel(
   fun runAgentTask(prompt: String) {
     if (repository.isAgentWorking.value) return
     _isAgentCancelled.value = false
+    val model = selectedModel.value
     agentJob = viewModelScope.launch {
       val project = activeProject.value
       // Ensure a session: reuse the active one or create one titled from the prompt.
@@ -717,7 +722,8 @@ class WorkspaceViewModel(
         val session = AgentSessionEntity(
           id = AgentChatStore.newId(), projectId = project.path,
           title = prompt.lineSequence().firstOrNull()?.take(48) ?: "New session",
-          status = "running", createdAt = now, updatedAt = now
+          status = "running", createdAt = now, updatedAt = now,
+          modelId = model?.id, providerId = model?.providerId
         )
         chatStore.createSessionBlocking(session)
         sessionId = session.id
@@ -739,13 +745,15 @@ class WorkspaceViewModel(
   fun runAgentTaskInNewSession(prompt: String) {
     if (repository.isAgentWorking.value) return
     _isAgentCancelled.value = false
+    val model = selectedModel.value
     agentJob = viewModelScope.launch {
       val project = activeProject.value
       val now = System.currentTimeMillis()
       val session = AgentSessionEntity(
         id = AgentChatStore.newId(), projectId = project.path,
         title = prompt.lineSequence().firstOrNull()?.take(48) ?: "New session",
-        status = "running", createdAt = now, updatedAt = now
+        status = "running", createdAt = now, updatedAt = now,
+        modelId = model?.id, providerId = model?.providerId
       )
       chatStore.createSessionBlocking(session)
       _activeSessionId.value = session.id

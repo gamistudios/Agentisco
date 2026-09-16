@@ -102,7 +102,7 @@ class AgentRuntime(
     provider: AIProvider,
     model: AIModel,
     apiKey: String,
-    permissions: AgentPermissions,
+    permissions: () -> AgentPermissions,
     terminalSession: TerminalSession,
     history: List<com.agentisco.data.repository.ChatHistoryMessage> = emptyList(),
     resume: Boolean = false,
@@ -142,7 +142,7 @@ class AgentRuntime(
       messages.add(LlmMessage(LlmRole.USER, prompt))
     }
     val modifiedFiles = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
-    val maxIterations = permissions.maxToolIterations.coerceAtLeast(1)
+    val maxIterations = permissions().maxToolIterations.coerceAtLeast(1)
 
     try {
       var finalText = ""
@@ -236,7 +236,7 @@ class AgentRuntime(
                   if (!currentCoroutineContext().isActive) {
                     call to ToolResult(success = false, error = "Agent task cancelled")
                   } else {
-                    call to executeToolCall(call, project, permissions, terminalSession, onRequestApproval, onEvent, modifiedFiles)
+                    call to executeToolCall(call, project, permissions(), terminalSession, onRequestApproval, onEvent, modifiedFiles)
                   }
                 }
                 outcome
@@ -392,7 +392,7 @@ class AgentRuntime(
   ): ToolContext = ToolContext(
     project = project,
     toolCallId = callId,
-    permissions = permissions,
+    permissions = { permissions }, // Dynamic: reads current permissions at tool execution time
     terminalSession = terminalSession,
     requestApproval = { approval ->
       // Concurrent tools queue here; approvals resolve strictly one at a time.

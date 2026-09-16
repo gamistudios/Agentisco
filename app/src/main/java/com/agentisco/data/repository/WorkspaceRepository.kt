@@ -1418,7 +1418,7 @@ class WorkspaceRepository(
         provider = provider,
         model = model,
         apiKey = apiKey,
-        permissions = _permissions.value,
+        permissions = { _permissions.value },
         terminalSession = currentSession,
         history = history,
         resume = resume,

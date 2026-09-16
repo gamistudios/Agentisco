@@ -40,7 +40,7 @@ class AgentChatStore(context: Context?) {
 
   private val db: ChatDatabase? = context?.let {
     Room.databaseBuilder(it.applicationContext, ChatDatabase::class.java, "agentisco_chat.db")
-      .addMigrations(ChatDatabase.MIGRATION_1_2)
+      .addMigrations(ChatDatabase.MIGRATION_1_2, ChatDatabase.MIGRATION_2_3)
       .build()
   }
   private val dao: ChatDao? = db?.chatDao()
@@ -91,6 +91,9 @@ class AgentChatStore(context: Context?) {
 
   fun renameSession(id: String, title: String) =
     enqueue { dao!!.renameSession(id, title, System.currentTimeMillis()) }
+
+  fun updateSessionModel(id: String, modelId: String?, providerId: String?) =
+    enqueue { dao!!.updateSessionModel(id, modelId, providerId, System.currentTimeMillis()) }
 
   fun setSessionStatus(id: String, status: String) =
     enqueue { dao!!.setSessionStatus(id, status, System.currentTimeMillis()) }

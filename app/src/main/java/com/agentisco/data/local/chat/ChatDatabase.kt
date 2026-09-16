@@ -30,7 +30,11 @@ data class AgentSessionEntity(
   /** running | completed | failed | cancelled | interrupted */
   val status: String,
   val createdAt: Long,
-  val updatedAt: Long
+  val updatedAt: Long,
+  /** Model record id used for this session (for display). */
+  val modelId: String? = null,
+  /** Provider id used for this session (for display). */
+  val providerId: String? = null
 )
 
 @Entity(
@@ -116,6 +120,9 @@ interface ChatDao {
 
   @Query("UPDATE agent_sessions SET title = :title, updatedAt = :updatedAt WHERE id = :id")
   suspend fun renameSession(id: String, title: String, updatedAt: Long)
+
+  @Query("UPDATE agent_sessions SET modelId = :modelId, providerId = :providerId, updatedAt = :updatedAt WHERE id = :id")
+  suspend fun updateSessionModel(id: String, modelId: String?, providerId: String?, updatedAt: Long)
 
   @Query("UPDATE agent_sessions SET status = :status, updatedAt = :updatedAt WHERE id = :id")
   suspend fun setSessionStatus(id: String, status: String, updatedAt: Long)
@@ -203,7 +210,7 @@ interface ChatDao {
 
 @Database(
   entities = [AgentSessionEntity::class, AgentMessageEntity::class, AgentBlockEntity::class],
-  version = 2,
+  version = 3,
   exportSchema = false
 )
 abstract class ChatDatabase : RoomDatabase() {
@@ -213,6 +220,13 @@ abstract class ChatDatabase : RoomDatabase() {
     val MIGRATION_1_2 = object : androidx.room.migration.Migration(1, 2) {
       override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
         db.execSQL("ALTER TABLE agent_blocks ADD COLUMN callId TEXT")
+      }
+    }
+
+    val MIGRATION_2_3 = object : androidx.room.migration.Migration(2, 3) {
+      override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE agent_sessions ADD COLUMN modelId TEXT")
+        db.execSQL("ALTER TABLE agent_sessions ADD COLUMN providerId TEXT")
       }
     }
   }

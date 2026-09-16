@@ -59,7 +59,7 @@ class ToolCallingPipelineTest {
   private val testTool = ReadFileLikeTool()
   private val ctx = ToolContext(
     project = Project(id = "p", name = "T", branch = "main", lastActivity = "now", path = "/tmp"),
-    permissions = com.agentisco.agent.model.AgentPermissions(),
+    permissions = { com.agentisco.agent.model.AgentPermissions() },
     terminalSession = TerminalSession(id = "t", name = "main", currentDir = "/tmp"),
     requestApproval = { true },
     activeSessions = { emptyList() }

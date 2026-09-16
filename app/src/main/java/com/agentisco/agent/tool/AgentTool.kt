@@ -109,7 +109,7 @@ fun toolTypeFor(name: String): ToolType = when {
  */
 class ToolContext(
   val project: Project,
-  val permissions: AgentPermissions,
+  val permissions: () -> AgentPermissions,
   val terminalSession: TerminalSession,
   val requestApproval: suspend (PendingApproval) -> Boolean,
   val activeSessions: () -> List<TerminalSession>,
