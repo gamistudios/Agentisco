@@ -31,9 +31,21 @@ enum class DevKeyMode {
 fun DevKeyboardBar(
   onInsertSymbol: (String) -> Unit,
   onAction: (String) -> Unit = {},
+  onCtrlKey: (String) -> Unit = {},
   modifier: Modifier = Modifier
 ) {
   var currentMode by remember { mutableStateOf(DevKeyMode.SYMBOLS) }
+
+  // CTRL is a modifier, not a character: like a desktop keyboard it never
+  // inserts anything on its own — it arms, modifies the NEXT key press, then
+  // releases. Sticky (tap once) because touch can't hold a key.
+  var ctrlArmed by remember { mutableStateOf(false) }
+
+  // A modifier lingering across a mode switch would be a trap: the next key in
+  // the new mode would silently consume it. Drop it on navigation instead.
+  LaunchedEffect(currentMode) {
+    if (ctrlArmed) ctrlArmed = false
+  }
 
   Surface(
     modifier = modifier.fillMaxWidth(),
@@ -49,9 +61,9 @@ fun DevKeyboardBar(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically
       ) {
-        ModeTab("Symbols", currentMode == DevKeyMode.SYMBOLS) { currentMode = DevKeyMode.SYMBOLS }
-        ModeTab("Actions", currentMode == DevKeyMode.ACTIONS) { currentMode = DevKeyMode.ACTIONS }
-        ModeTab("Navigation", currentMode == DevKeyMode.NAVIGATION) { currentMode = DevKeyMode.NAVIGATION }
+        ModeTab("Symbols", currentMode == DevKeyMode.SYMBOLS, "tab_symbols") { currentMode = DevKeyMode.SYMBOLS }
+        ModeTab("Actions", currentMode == DevKeyMode.ACTIONS, "tab_actions") { currentMode = DevKeyMode.ACTIONS }
+        ModeTab("Navigation", currentMode == DevKeyMode.NAVIGATION, "tab_navigation") { currentMode = DevKeyMode.NAVIGATION }
       }
 
       HorizontalDivider(color = DarkBorderSubtle, thickness = 0.5.dp)
@@ -67,19 +79,33 @@ fun DevKeyboardBar(
       ) {
         when (currentMode) {
           DevKeyMode.SYMBOLS -> {
+            // CTRL leads the row: it's a modifier that qualifies the next key.
+            DevKeyButton(
+              text = if (ctrlArmed) "CTRL ●" else "CTRL",
+              isModifier = true,
+              isArmed = ctrlArmed,
+              onClick = { ctrlArmed = !ctrlArmed },
+              testTag = "key_ctrl"
+            )
             val symbols = listOf(
-              "Tab", "{ }", "( )", "[ ]", "=>", ";", "/", "|", "<", ">", "_", "\"", "'", ":", "=", "+", "-", "!", "?", "&", "$", "`", "#", "@"
+              "Tab", "{ }", "( )", "[ ]", "=>", ";", "/", "|", "<", ">", "_", "\"", "'", ":", "=", "+", "!", "?", "&", "$", "`", "#", "@"
             )
             for (sym in symbols) {
               DevKeyButton(
                 text = sym,
                 onClick = {
-                  when (sym) {
-                    "Tab" -> onInsertSymbol("  ")
-                    "{ }" -> onInsertSymbol("{\n  \n}")
-                    "( )" -> onInsertSymbol("()")
-                    "[ ]" -> onInsertSymbol("[]")
-                    else -> onInsertSymbol(sym)
+                  val insert = when (sym) {
+                    "Tab" -> "  "
+                    "{ }" -> "{\n  \n}"
+                    "( )" -> "()"
+                    "[ ]" -> "[]"
+                    else -> sym
+                  }
+                  if (ctrlArmed) {
+                    ctrlArmed = false
+                    onCtrlKey(sym)
+                  } else {
+                    onInsertSymbol(insert)
                   }
                 },
                 testTag = "key_$sym"
@@ -121,6 +147,7 @@ fun DevKeyboardBar(
 private fun ModeTab(
   name: String,
   isSelected: Boolean,
+  testTag: String,
   onClick: () -> Unit
 ) {
   Box(
@@ -129,6 +156,7 @@ private fun ModeTab(
       .background(if (isSelected) DarkSurfaceHighlight else DarkSurface)
       .clickable(onClick = onClick)
       .padding(horizontal = 8.dp, vertical = 2.dp)
+      .testTag(testTag)
   ) {
     Text(
       text = name,
@@ -143,6 +171,8 @@ private fun ModeTab(
 private fun DevKeyButton(
   text: String,
   isAction: Boolean = false,
+  isModifier: Boolean = false,
+  isArmed: Boolean = false,
   onClick: () -> Unit,
   testTag: String
 ) {
@@ -151,8 +181,19 @@ private fun DevKeyButton(
       .height(36.dp)
       .widthIn(min = 36.dp)
       .clip(RoundedCornerShape(6.dp))
-      .background(if (isAction) DarkSurfaceElevated else DarkSurfaceHighlight)
-      .border(1.dp, DarkBorder, RoundedCornerShape(6.dp))
+      .background(
+        when {
+          isArmed -> ElectricBlue.copy(alpha = 0.25f)
+          isModifier -> DarkSurfaceElevated
+          isAction -> DarkSurfaceElevated
+          else -> DarkSurfaceHighlight
+        }
+      )
+      .border(
+        1.dp,
+        if (isArmed) ElectricBlue else DarkBorder,
+        RoundedCornerShape(6.dp)
+      )
       .clickable(onClick = onClick)
       .padding(horizontal = 10.dp)
       .testTag(testTag),
@@ -160,9 +201,9 @@ private fun DevKeyButton(
   ) {
     Text(
       text = text,
-      color = if (isAction) CyanAccent else TextCode,
+      color = if (isArmed) ElectricBlueGlow else if (isAction || isModifier) CyanAccent else TextCode,
       fontSize = 13.sp,
-      fontWeight = FontWeight.Medium,
+      fontWeight = if (isArmed) FontWeight.Bold else FontWeight.Medium,
       fontFamily = FontFamily.Monospace
     )
   }

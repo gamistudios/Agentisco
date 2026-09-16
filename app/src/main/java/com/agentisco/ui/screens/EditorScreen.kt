@@ -339,6 +339,23 @@ fun EditorScreen(
           }
           else -> {}
         }
+      },
+      onCtrlKey = { key ->
+        // Desktop modifier semantics: CTRL qualifies another key. Only the
+        // combinations that mean something here are bound; the rest are no-ops
+        // (and CTRL has already released, so nothing is inserted).
+        when (key) {
+          "/" -> {
+            isEditMode = true
+            // Toggle, not just prefix: repeated Ctrl+/ undoes the comment.
+            editedText = if (editedText.startsWith("// ")) {
+              editedText.removePrefix("// ")
+            } else {
+              "// $editedText"
+            }
+          }
+          else -> {}
+        }
       }
     )
   }
