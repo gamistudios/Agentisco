@@ -381,6 +381,36 @@ class ProjectFileSystem(private val baseDir: File) {
     }
   }
 
+  /**
+   * Permanently deletes a project's workspace folder from disk.
+   *
+   * Only ever touches a folder inside the app's projects root — a project
+   * registered from an arbitrary location is left alone, and the original
+   * folder an imported project came from ([Project.sourcePath]) is never
+   * touched. Returns false when the folder was outside the projects root or
+   * the delete failed, so callers can still unregister the project.
+   */
+  fun deleteProjectFolder(project: Project): Boolean {
+    return try {
+      val root = File(project.path)
+      if (!root.isDirectory) return false
+      val rootCanonical = root.canonicalPath
+      val baseCanonical = baseDir.canonicalPath
+      // Refuse anything that isn't strictly inside the projects root.
+      if (rootCanonical != baseCanonical && !rootCanonical.startsWith("$baseCanonical${File.separator}")) {
+        android.util.Log.w(
+          "ScoOS-Projects",
+          "Refusing to delete project folder outside projects root: $rootCanonical"
+        )
+        return false
+      }
+      root.deleteRecursively()
+    } catch (e: Exception) {
+      android.util.Log.e("ScoOS-Projects", "Failed to delete project folder ${project.path}", e)
+      false
+    }
+  }
+
   fun renameFile(project: Project, oldRelativePath: String, newName: String): Boolean {
     return try {
       val file = File(project.path, oldRelativePath)

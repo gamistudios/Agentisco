@@ -784,9 +784,18 @@ class WorkspaceRepository(
     return if (canonical.startsWith(canonicalRoot) || canonical == canonicalRoot.trimEnd('/')) target else null
   }
 
-  /** Forgets a project (folder and its sessions are kept on disk). */
+  /**
+   * Removes a project ENTIRELY: its workspace folder on disk, its chat
+   * sessions, and its registry entry.
+   *
+   * Deleting the folder matters — [refreshProjectList] re-registers any
+   * folder still present under the projects root, so unregistering alone
+   * would make the project reappear instantly.
+   */
   fun removeProject(project: Project) {
     projectRegistry.remove(project.id)
+    chatStore.deleteSessionsForProject(project.path)
+    fileSystem.deleteProjectFolder(project)
     refreshProjectList()
     if (_activeProject.value.id == project.id) {
       _activeProject.value = _projects.value.firstOrNull { !it.isMissing }

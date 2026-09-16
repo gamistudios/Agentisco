@@ -136,6 +136,11 @@ interface ChatDao {
   @Query("DELETE FROM agent_sessions WHERE id = :id")
   suspend fun deleteSession(id: String)
 
+  // Messages and blocks cascade off their session, so this removes a whole
+  // project's conversation history in one go.
+  @Query("DELETE FROM agent_sessions WHERE projectId = :projectId")
+  suspend fun deleteSessionsForProject(projectId: String)
+
   // ---- messages ----
 
   @Transaction

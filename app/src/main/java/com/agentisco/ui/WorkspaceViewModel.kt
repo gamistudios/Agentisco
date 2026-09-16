@@ -515,8 +515,20 @@ class WorkspaceViewModel(
   fun importProject(rootPath: String, displayName: String? = null): Project? =
     repository.importProject(rootPath, displayName)
 
+  /**
+   * Deletes a project entirely after the user confirms: folder, chat sessions
+   * and registry entry all go together (see [WorkspaceRepository.removeProject]).
+   */
   fun removeProject(project: Project) {
+    val wasActive = activeProject.value.id == project.id
     repository.removeProject(project)
+    if (wasActive) {
+      // The sessions that belonged to the deleted project are gone; point the
+      // chat at whatever the now-active project has left.
+      viewModelScope.launch {
+        _activeSessionId.value = chatStore.latestSession(activeProject.value.path)?.id
+      }
+    }
   }
 
   fun refreshProjects() {

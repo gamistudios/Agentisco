@@ -31,6 +31,7 @@ import com.agentisco.data.local.chat.AgentSessionEntity
 import com.agentisco.data.model.Project
 import com.agentisco.ui.WorkspaceViewModel
 import com.agentisco.ui.theme.*
+import java.io.File
 
 @Composable
 fun ProjectsScreen(
@@ -47,6 +48,7 @@ fun ProjectsScreen(
   var showNewProjectDialog by remember { mutableStateOf(false) }
   var selectedProjectForOverview by remember { mutableStateOf<Project?>(null) }
   var sessionsProject by remember { mutableStateOf<Project?>(null) }
+  var pendingRemoval by remember { mutableStateOf<Project?>(null) }
 
   // Re-validate root folders when the screen is shown (moved/deleted dirs).
   LaunchedEffect(Unit) { viewModel.refreshProjects() }
@@ -496,7 +498,7 @@ fun ProjectsScreen(
               modifier = Modifier.weight(1f),
               tint = DangerRed,
               onClick = {
-                viewModel.removeProject(proj)
+                pendingRemoval = proj
                 selectedProjectForOverview = null
               }
             )
@@ -620,6 +622,53 @@ fun ProjectsScreen(
           sessionsProject = null
           viewModel.previewSessionsFor(null)
         }) { Text("Close", color = TextMuted, fontSize = 12.sp) }
+      }
+    )
+  }
+
+  // Delete-project confirmation: removal is permanent, so it never happens
+  // without an explicit yes.
+  pendingRemoval?.let { proj ->
+    AlertDialog(
+      onDismissRequest = { pendingRemoval = null },
+      containerColor = DarkSurface,
+      title = {
+        Text("Remove project?", color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+      },
+      text = {
+        Column(modifier = Modifier.fillMaxWidth()) {
+          Text(
+            "\"${proj.name}\" and all of its files will be permanently deleted from " +
+              "~/projects/${File(proj.path).name}, along with this project's agent conversations.",
+            color = TextSecondary,
+            fontSize = 12.sp,
+            lineHeight = 17.sp
+          )
+          if (proj.sourcePath.isNotBlank()) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+              "The original folder you imported it from is kept: ${proj.sourcePath}",
+              color = TextMuted,
+              fontSize = 11.sp
+            )
+          }
+          Spacer(modifier = Modifier.height(8.dp))
+          Text("This cannot be undone.", color = DangerRed, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+        }
+      },
+      confirmButton = {
+        Button(
+          onClick = {
+            viewModel.removeProject(proj)
+            pendingRemoval = null
+          },
+          colors = ButtonDefaults.buttonColors(containerColor = DangerRed)
+        ) { Text("Remove", fontSize = 12.sp) }
+      },
+      dismissButton = {
+        TextButton(onClick = { pendingRemoval = null }) {
+          Text("Cancel", color = TextMuted, fontSize = 12.sp)
+        }
       }
     )
   }

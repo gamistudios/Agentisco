@@ -100,6 +100,10 @@ class AgentChatStore(context: Context?) {
 
   fun deleteSession(id: String) = enqueue { dao!!.deleteSession(id) }
 
+  /** Deletes every session (and its cascaded messages/blocks) for a project. */
+  fun deleteSessionsForProject(projectId: String) =
+    enqueue { dao!!.deleteSessionsForProject(projectId) }
+
   /** Mark any turns/sessions left running by a previous process as interrupted. */
   suspend fun recoverInterrupted() = await {
     it.interruptRunningSessions()
