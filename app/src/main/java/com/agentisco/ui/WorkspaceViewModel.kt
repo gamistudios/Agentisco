@@ -129,6 +129,22 @@ class WorkspaceViewModel(
   private var approvalBlocks = mutableMapOf<String, String>() // approvalId -> block uuid
   private var textFlushJob: Job? = null
 
+  /**
+   * Points the streaming bookkeeping at a turn row that is ALREADY persisted.
+   * Every block the run emits (text, tool, approval, error) is written with
+   * [currentTurnUuid] as its messageUuid, so a turn without a matching
+   * agent_messages row would stream into orphan blocks the UI never renders.
+   */
+  private fun pointAtTurn(turnUuid: String) {
+    currentTurnUuid = turnUuid
+    turnText = StringBuilder()
+    streamingTextBlockUuid = null
+    reasoningBlockUuid = null
+    reasoningText = StringBuilder()
+    runningToolBlocks = mutableMapOf()
+    approvalBlocks = mutableMapOf()
+  }
+
   init {
     viewModelScope.launch {
       repository.agentEvents.collect { event -> onAgentEvent(event) }
@@ -459,14 +475,17 @@ class WorkspaceViewModel(
       // Mark the session as running again
       chatStore.setSessionStatus(session, "running")
 
-      // Reset streaming state
-      currentTurnUuid = AgentChatStore.newId()
-      turnText = StringBuilder()
-      streamingTextBlockUuid = null
-      reasoningBlockUuid = null
-      reasoningText = StringBuilder()
-      runningToolBlocks = mutableMapOf()
-      approvalBlocks = mutableMapOf()
+      // Persist the assistant turn row up front, exactly as [launchTurn] does:
+      // the streaming blocks that follow attach to it by uuid, so without it
+      // the whole response would be written as orphans the UI never renders.
+      val turnUuid = AgentChatStore.newId()
+      chatStore.insertMessage(
+        AgentMessageEntity(
+          uuid = turnUuid, sessionId = session, role = "assistant_turn", content = "",
+          status = "running", statusMessage = "Starting…", createdAt = System.currentTimeMillis()
+        )
+      )
+      pointAtTurn(turnUuid)
 
       // Update the session title and model info based on new prompt
       val newTitle = newContent.lineSequence().firstOrNull()?.take(48) ?: "Edited"

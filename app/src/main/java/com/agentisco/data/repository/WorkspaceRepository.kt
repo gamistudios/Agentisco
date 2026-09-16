@@ -1098,8 +1098,13 @@ class WorkspaceRepository(
   }
 
   private fun resolveTaskModel(): AIModel? {
+    // The default task model is only usable when its provider is actually
+    // configured with a key — otherwise background generation (session titles,
+    // commit messages) would fail silently while the selected model works.
     _defaultTaskModelId.value?.let { id ->
-      _aiModels.value.firstOrNull { it.id == id }?.let { return it }
+      _aiModels.value.firstOrNull { it.id == id }?.let { model ->
+        if (resolveProviderForModel(model) != null) return model
+      }
     }
     return _selectedModel.value
   }
