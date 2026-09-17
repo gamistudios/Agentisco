@@ -94,6 +94,14 @@ jobs:
             echo "Using existing debug.keystore..."
           fi
 
+      - name: Build Debug APK
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ github.workspace }}/debug.keystore
+          ANDROID_KEYSTORE_PASSWORD: android
+          ANDROID_KEY_ALIAS: androiddebugkey
+          ANDROID_KEY_PASSWORD: android
+        run: ./gradlew assembleDebug --stacktrace
+
       - name: Run Tests
         run: ./gradlew testDebugUnitTest --stacktrace
 
@@ -297,8 +305,13 @@ jobs:
         run: chmod +x gradlew
 
       - name: Setup Debug Keystore
+        env:
+          AGENTISCO_DEBUG_KEYSTORE_BASE64: ${{ secrets.AGENTISCO_DEBUG_KEYSTORE_BASE64 }}
         run: |
-          if [ -f "debug.keystore.base64" ]; then
+          if [ -n "$AGENTISCO_DEBUG_KEYSTORE_BASE64" ]; then
+            echo "Using GitHub secret AGENTISCO_DEBUG_KEYSTORE_BASE64..."
+            echo "$AGENTISCO_DEBUG_KEYSTORE_BASE64" | base64 --decode > debug.keystore
+          elif [ -f "debug.keystore.base64" ]; then
             echo "Using pre-encoded debug.keystore.base64..."
             base64 --decode debug.keystore.base64 > debug.keystore
           elif [ ! -f "debug.keystore" ]; then
@@ -318,6 +331,11 @@ jobs:
 
       # Always built, independent of release detection.
       - name: Build Debug APK
+        env:
+          AGENTISCO_KEYSTORE_PATH: ${{ github.workspace }}/debug.keystore
+          AGENTISCO_KEYSTORE_PASSWORD: android
+          AGENTISCO_KEY_ALIAS: androiddebugkey
+          AGENTISCO_KEY_PASSWORD: android
         run: ./gradlew assembleDebug --stacktrace
 
       # Only runs for a release. Keystore is decoded to RUNNER_TEMP (outside the

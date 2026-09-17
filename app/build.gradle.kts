@@ -71,10 +71,26 @@ android {
       }
     }
     create("debugConfig") {
-      storeFile = file("${rootDir}/debug.keystore")
-      storePassword = "android"
-      keyAlias = "androiddebugkey"
-      keyPassword = "android"
+      storeFile = if (signingSecret("AGENTISCO_KEYSTORE_PATH") != null) {
+        file(signingSecret("AGENTISCO_KEYSTORE_PATH"))
+      } else {
+        file("${rootDir}/debug.keystore")
+      }
+      storePassword = if (signingSecret("AGENTISCO_KEYSTORE_PASSWORD") != null) {
+        signingSecret("AGENTISCO_KEYSTORE_PASSWORD")
+      } else {
+        "android"
+      }
+      keyAlias = if (signingSecret("AGENTISCO_KEY_ALIAS") != null) {
+        signingSecret("AGENTISCO_KEY_ALIAS")
+      } else {
+        "androiddebugkey"
+      }
+      keyPassword = if (signingSecret("AGENTISCO_KEY_PASSWORD") != null) {
+        signingSecret("AGENTISCO_KEY_PASSWORD")
+      } else {
+        "android"
+      }
     }
   }
 
