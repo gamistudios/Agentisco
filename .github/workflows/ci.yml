@@ -113,7 +113,16 @@ jobs:
           cache: 'gradle'
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
+        with:
+          packages: ''
+      
+      - name: Install Android SDK packages
+        run: |
+          sdkmanager "platform-tools"
+          sdkmanager "platforms;android-28"
+          sdkmanager "cmake;3.22.1"
+          sdkmanager "ndk;27.2.12479018"
 
       - name: Determine Next Version & Tag
         id: vars

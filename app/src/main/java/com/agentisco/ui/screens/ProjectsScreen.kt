@@ -11,6 +11,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
+import androidx.compose.material.icons.automirrored.outlined.*
 import androidx.compose.material3.*
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -440,7 +441,7 @@ fun ProjectsScreen(
             )
             ProjectActionTile(
               label = "Chats",
-              icon = Icons.Outlined.Chat,
+              icon = Icons.AutoMirrored.Outlined.Chat,
               modifier = Modifier.weight(1f),
               enabled = !proj.isMissing,
               onClick = {

@@ -105,7 +105,7 @@ private fun parseMarkdown(text: String): List<MdBlock> {
   return blocks
 }
 
-private inline fun AnnotatedString.Builder.forEachInline() = Unit
+private fun AnnotatedString.Builder.forEachInline() = Unit
 
 /**
  * Minimal markdown renderer for agent chat: fenced code blocks with copy,

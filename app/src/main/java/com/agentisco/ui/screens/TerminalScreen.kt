@@ -188,7 +188,7 @@ fun TerminalScreen(
           },
           update = { view ->
             val session = activePty
-            if (session != null && session !== attachedSession) {
+            if (session !== attachedSession) {
               // Wire redraw notifications from the session's client bridge.
               viewModel.repository.terminalClientRegistry[currentSession.id]?.let { bridge ->
                 bridge.redrawCallback = { view.post { view.onScreenUpdated() } }
