@@ -406,7 +406,7 @@ jobs:
           fi
 
       - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v2.6.2
         with:
           tag_name: ${{ steps.vars.outputs.tag }}
           name: ${{ steps.vars.outputs.title }}
@@ -414,5 +414,6 @@ jobs:
           prerelease: ${{ github.event.inputs.is_prerelease || false }}
           body_path: release-notes.md
           files: release-artifacts/*
+          fail_on_unmatched_files: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
