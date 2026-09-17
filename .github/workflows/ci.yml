@@ -307,6 +307,7 @@ jobs:
       - name: Setup Debug Keystore
         env:
           AGENTISCO_DEBUG_KEYSTORE_BASE64: ${{ secrets.AGENTISCO_DEBUG_KEYSTORE_BASE64 }}
+          GITHUB_WORKSPACE: ${{ github.workspace }}
         run: |
           if [ -n "$AGENTISCO_DEBUG_KEYSTORE_BASE64" ]; then
             echo "Using GitHub secret AGENTISCO_DEBUG_KEYSTORE_BASE64..."
@@ -326,13 +327,12 @@ jobs:
               -validity 10000 \
               -dname "CN=Android Debug,O=Android,C=US"
           fi
-          echo "$(keytool -list -keystore debug.keystore -alias androiddebugkey -storepass android 2>&1 | grep -i 'SHA256' | awk '{print $2}')" >> "$GITHUB_ENV"
-          echo "AGENTISCO_KEYSTORE_PATH=${github.workspace}/debug.keystore" >> "$GITHUB_ENV"
+          echo "AGENTISCO_KEYSTORE_PATH=$GITHUB_WORKSPACE/debug.keystore" >> "$GITHUB_ENV"
 
       # Always built, independent of release detection.
       - name: Build Debug APK
         env:
-          AGENTISCO_KEYSTORE_PATH: ${{ github.workspace }}/debug.keystore
+          AGENTISCO_KEYSTORE_PATH: /home/runner/work/Agentisco/Agentisco/debug.keystore
           AGENTISCO_KEYSTORE_PASSWORD: android
           AGENTISCO_KEY_ALIAS: androiddebugkey
           AGENTISCO_KEY_PASSWORD: android
