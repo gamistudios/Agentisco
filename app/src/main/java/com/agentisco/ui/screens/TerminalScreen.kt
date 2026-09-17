@@ -65,26 +65,38 @@ private fun ctrlKey(char: Char): ByteArray {
   }
 }
 
-private fun keyBytes(key: String, ctrlActive: Boolean = false): ByteArray = when (key) {
-  "CTRL" -> byteArrayOf(0x1b) // Toggle Ctrl mode
-  "ESC" -> byteArrayOf(0x1b)
-  "TAB" -> byteArrayOf(0x09)
-  "/" -> byteArrayOf('/'.code.toByte())
-  "↑" -> "\u001b[A".toByteArray()
-  "↓" -> "\u001b[B".toByteArray()
-  "→" -> "\u001b[C".toByteArray()
-  "←" -> "\u001b[D".toByteArray()
-  "HOME" -> "\u001b[H".toByteArray()
-  "END" -> "\u001b[F".toByteArray()
-  "PGUP" -> "\u001b[5~".toByteArray()
-  "PGDN" -> "\u001b[6~".toByteArray()
-  else -> {
-    if (ctrlActive && key.length == 1) {
-      // When Ctrl mode is active and a character key is pressed, send control character
-      val ctrlCode = (key[0].code and 0x1f).toByte()
-      byteArrayOf(ctrlCode)
-    } else {
-      key.toByteArray()
+private fun keyBytes(key: String, ctrlActive: Boolean = false): ByteArray {
+  return when (key) {
+    "CTRL" -> byteArrayOf(0x1b) // Toggle Ctrl mode
+    "ESC" -> byteArrayOf(0x1b)
+    "TAB" -> byteArrayOf(0x09)
+    "/" -> byteArrayOf('/'.code.toByte())
+    "↑" -> "\u001b[A".toByteArray()
+    "↓" -> "\u001b[B".toByteArray()
+    "→" -> "\u001b[C".toByteArray()
+    "←" -> "\u001b[D".toByteArray()
+    "HOME" -> "\u001b[H".toByteArray()
+    "END" -> "\u001b[F".toByteArray()
+    "PGUP" -> "\u001b[5~".toByteArray()
+    "PGDN" -> "\u001b[6~".toByteArray()
+    else -> {
+      if (ctrlActive && key.length == 1) {
+        // Common control sequences that need special handling
+        return when (key[0]) {
+          'c' -> byteArrayOf(0x03) // Ctrl+C = SIGINT
+          'z' -> byteArrayOf(0x1a) // Ctrl+Z = SIGTSTP
+          'd' -> byteArrayOf(0x04) // Ctrl+D = EOF
+          's' -> byteArrayOf(0x13) // Ctrl+S = XOFF
+          'q' -> byteArrayOf(0x11) // Ctrl+Q = XON
+          else -> {
+            // Standard terminal Ctrl behavior: ASCII value bitwise AND with 0x1f (31)
+            val ctrlCode = (key[0].code and 0x1f).toByte()
+            byteArrayOf(ctrlCode)
+          }
+        }
+      } else {
+        key.toByteArray()
+      }
     }
   }
 }
@@ -543,7 +555,28 @@ private class ScoTerminalViewClient(private val view: TerminalView) : com.termux
 override fun onCodePoint(codePoint: Int, ctrlDown: Boolean, session: TerminalSession?): Boolean {
   // Handle Ctrl sequences properly
   if (ctrlDown) {
+    // Handle common control sequences that need specific values
     when (codePoint) {
+      'c'.code -> {
+        session?.write(byteArrayOf(0x03), 0, 1) // Ctrl+C = SIGINT
+        return true
+      }
+      'z'.code -> {
+        session?.write(byteArrayOf(0x1a), 0, 1) // Ctrl+Z = SIGTSTP
+        return true
+      }
+      'd'.code -> {
+        session?.write(byteArrayOf(0x04), 0, 1) // Ctrl+D = EOF
+        return true
+      }
+      's'.code -> {
+        session?.write(byteArrayOf(0x13), 0, 1) // Ctrl+S = XOFF
+        return true
+      }
+      'q'.code -> {
+        session?.write(byteArrayOf(0x11), 0, 1) // Ctrl+Q = XON
+        return true
+      }
       '['.code -> {
         session?.write(byteArrayOf(0x1b), 0, 1) // Ctrl+[
         return true
@@ -627,6 +660,10 @@ private fun TerminalExtraKeysGrid(
                   ctrlActive = !ctrlActive
                 } else {
                   onKey(key, ctrlActive)
+                  // Reset CTRL state after any key press when CTRL is active
+                  if (ctrlActive) {
+                    ctrlActive = false
+                  }
                 }
               }
               .testTag("term_key_$key"),
