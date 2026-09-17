@@ -124,6 +124,8 @@ fun AgentIDEApp(
         hasNewUpdate = updateUiState.availableUpdate != null,
         onUpdateClick = {
           when {
+            // A known update (even mid-download) reopens the dialog so the
+            // user can peek at progress / install / cancel at will.
             updateUiState.availableUpdate != null -> updateViewModel.showDialog()
             updateUiState.updateState == UpdateRepository.UpdateState.CHECKING -> Unit
             else -> updateViewModel.checkForUpdates(isAuto = false)

@@ -34,9 +34,7 @@ fun UpdateDialog(
     onCancelDownload: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    Dialog(onDismissRequest = {
-        if (updateState != UpdateRepository.UpdateState.DOWNLOADING) onDismiss()
-    }) {
+    Dialog(onDismissRequest = onDismiss) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -92,13 +90,25 @@ fun UpdateDialog(
                         color = TextMuted,
                         fontSize = 11.sp
                     )
+                    Text(
+                        "You can hide this and keep working — progress shows in the header.",
+                        color = TextMuted,
+                        fontSize = 10.sp
+                    )
                     Spacer(Modifier.height(14.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.End
                     ) {
                         TextButton(onClick = onCancelDownload) {
-                            Text("Cancel", color = DangerRed)
+                            Text("Cancel download", color = DangerRed)
+                        }
+                        Spacer(Modifier.width(6.dp))
+                        Button(
+                            onClick = onDismiss,
+                            colors = ButtonDefaults.buttonColors(containerColor = DarkSurfaceElevated)
+                        ) {
+                            Text("Hide", color = TextPrimary, fontSize = 13.sp)
                         }
                     }
                 }
