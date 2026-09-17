@@ -174,6 +174,18 @@ class ExampleRobolectricTest {
   @Test
   fun `workspace view model saves active file and detects dirty state`() {
     val viewModel = WorkspaceViewModel()
+    
+    // Create a temporary project directory for testing
+    val tempDir = File(System.getProperty("java.io.tmpdir"), "test_project_${System.currentTimeMillis()}")
+    tempDir.mkdirs()
+    
+    // Create a test project
+    val testProject = viewModel.repository.createProject("TestProject", "Test project for saving files", tempDir.absolutePath)
+    assertNotNull("Failed to create test project", testProject)
+    
+    // Set the test project as active
+    viewModel.repository.selectProject(testProject!!)
+    
     val initialFile = viewModel.activeFile.value
     assertFalse(viewModel.isEditorDirty.value)
 
@@ -187,5 +199,8 @@ class ExampleRobolectricTest {
       viewModel.repository.activeProject.value, initialFile.path
     )
     assertTrue(saved.contains("// modified"))
+    
+    // Cleanup
+    tempDir.deleteRecursively()
   }
 }
