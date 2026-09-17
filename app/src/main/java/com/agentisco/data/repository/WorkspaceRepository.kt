@@ -515,8 +515,8 @@ class WorkspaceRepository(
     }
 
     val firstFile = findFirstFile(files) ?: ProjectFile("README.md", "README.md", false)
-    _activeFile.value = firstFile
     val content = fileSystem.readFile(project, firstFile.path)
+    _activeFile.value = firstFile.copy(content = content)
     _editorContent.value = content
     _isEditorDirty.value = false
 
@@ -850,8 +850,8 @@ class WorkspaceRepository(
 
   fun openFile(file: ProjectFile) {
     if (!file.isDirectory) {
-      _activeFile.value = file
       val diskContent = fileSystem.readFile(_activeProject.value, file.path)
+      _activeFile.value = file.copy(content = diskContent)
       _editorContent.value = diskContent
       _isEditorDirty.value = false
       _currentDestination.value = AppDestination.EDITOR
