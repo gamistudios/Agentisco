@@ -17,7 +17,9 @@ local.properties
 .env
 debug.keystore
 
-# Release signing material — never commit keystores
+# Debug keystore base64 (for CI consistency)
+# Kept committed to ensure same signing key between local and CI builds
+# Release keystores should still never be committed
 *.jks
 *.keystore
 keystore/

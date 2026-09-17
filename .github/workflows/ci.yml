@@ -70,9 +70,14 @@ jobs:
         run: chmod +x gradlew
 
       - name: Setup Debug Keystore
+        env:
+          AGENTISCO_DEBUG_KEYSTORE_BASE64: ${{ secrets.AGENTISCO_DEBUG_KEYSTORE_BASE64 }}
         run: |
-          if [ -f "debug.keystore.base64" ]; then
-            echo "Decoding debug.keystore.base64..."
+          if [ -n "$AGENTISCO_DEBUG_KEYSTORE_BASE64" ]; then
+            echo "Using GitHub secret AGENTISCO_DEBUG_KEYSTORE_BASE64..."
+            echo "$AGENTISCO_DEBUG_KEYSTORE_BASE64" | base64 --decode > debug.keystore
+          elif [ -f "debug.keystore.base64" ]; then
+            echo "Using pre-encoded debug.keystore.base64..."
             base64 --decode debug.keystore.base64 > debug.keystore
           elif [ ! -f "debug.keystore" ]; then
             echo "Generating debug.keystore..."
@@ -85,6 +90,8 @@ jobs:
               -keysize 2048 \
               -validity 10000 \
               -dname "CN=Android Debug,O=Android,C=US"
+          else
+            echo "Using existing debug.keystore..."
           fi
 
       - name: Run Tests
@@ -292,7 +299,7 @@ jobs:
       - name: Setup Debug Keystore
         run: |
           if [ -f "debug.keystore.base64" ]; then
-            echo "Decoding debug.keystore.base64..."
+            echo "Using pre-encoded debug.keystore.base64..."
             base64 --decode debug.keystore.base64 > debug.keystore
           elif [ ! -f "debug.keystore" ]; then
             echo "Generating debug.keystore..."
@@ -305,6 +312,8 @@ jobs:
               -keysize 2048 \
               -validity 10000 \
               -dname "CN=Android Debug,O=Android,C=US"
+          else
+            echo "Using existing debug.keystore..."
           fi
 
       # Always built, independent of release detection.
