@@ -298,6 +298,37 @@ class WorkspaceRepository(
   private val _activeTerminalSessionId = MutableStateFlow("term-1")
   val activeTerminalSessionId: StateFlow<String> = _activeTerminalSessionId.asStateFlow()
 
+  /** Last opened project ID (persisted separately to handle app restart) */
+  private val _rememberedLastProjectId = MutableStateFlow<String?>(null)
+  private val rememberedProjectId: String?
+    get() = _rememberedLastProjectId.value
+
+  /** Load last opened project ID from disk on init */
+  @Synchronized
+  fun loadRememberedLastProjectId(): String? {
+    val dir = rememberedProjectConfigDir
+    val config = dir?.takeIf { it.exists() }?.let { File(it, "last_project.json") }
+      ?.takeIf { it.exists() }?.let { it.readText() }
+      ?.let { JSONObject(it) }
+      ?: return null
+    return config.optString("lastProjectId", null)
+  }
+
+  @Synchronized
+  fun saveRememberedLastProjectId(projectId: String) {
+    val dir = rememberedProjectConfigDir
+      ?: run { _rememberedLastProjectId.value = projectId; return }
+    dir.mkdirs()
+    val file = File(dir, "last_project.json")
+    JSONObject().put("lastProjectId", projectId).let { config ->
+      file.writeText(config.toString(2))
+    }
+    _rememberedLastProjectId.value = projectId
+  }
+
+  private val rememberedProjectConfigDir: File?
+    get() = projectRegistry.dir
+
   // Real PTY-backed terminal sessions keyed by tab id.
   private val _ptySessions = MutableStateFlow<Map<String, com.termux.terminal.TerminalSession>>(emptyMap())
   val ptySessions: StateFlow<Map<String, com.termux.terminal.TerminalSession>> = _ptySessions.asStateFlow()
@@ -356,10 +387,22 @@ class WorkspaceRepository(
     repositoryScope.launch {
       migrateLegacyProjects()
       refreshProjectList()
-      _activeProject.value = _projects.value.firstOrNull { !it.isMissing }
-        ?: _projects.value.firstOrNull()
-        ?: placeholderProject
-      loadActiveProjectState(_activeProject.value)
+      // Prioritize the last opened project if it exists and is still valid
+      val rememberedProjectId = loadRememberedLastProjectId()
+      val lastProject = rememberedProjectId?.let {
+        _projects.value.firstOrNull { p -> p.id == rememberedProjectId }
+      }
+      val activeProjectToLoad = when {
+        // Use remembered project if it's valid (exists and not missing)
+        lastProject != null && !lastProject.isMissing -> lastProject
+        // Otherwise use the first available project
+        else -> _projects.value.firstOrNull { !it.isMissing }
+          ?: _projects.value.firstOrNull()
+          ?: placeholderProject
+      }
+      _activeProject.value = activeProjectToLoad
+      saveRememberedLastProjectId(activeProjectToLoad.id)
+      loadActiveProjectState(activeProjectToLoad)
     }
     loadProviderConfiguration()
   }
@@ -501,6 +544,11 @@ class WorkspaceRepository(
       _fileDiffs.value = emptyList()
       return
     }
+
+    // Fetch most recent AI chat session for this project (if any)
+    val latestSession = chatStore.latestSession(project.path)
+    val rememberedSessionId = latestSession?.id
+
     val files = fileSystem.getFileTree(project)
     _projectFiles.value = files
 
@@ -537,6 +585,9 @@ class WorkspaceRepository(
     if (_terminalSessions.value.none { it.id == _activeTerminalSessionId.value }) {
       _activeTerminalSessionId.value = tabs.first().id
     }
+
+    // Return the latest AI session ID back to the ViewModel for restoration
+    rememberedSessionId
 
     refreshDiffsAndGit()
   }
@@ -588,6 +639,9 @@ class WorkspaceRepository(
   fun selectProject(project: Project) {
     projectRegistry.byPath(project.path)?.let { projectRegistry.touch(it.id) }
     _activeProject.value = project
+    // Persist the last opened project
+    _rememberedLastProjectId.value = project.id
+    saveRememberedLastProjectId(project.id)
     loadActiveProjectState(project)
   }
 
