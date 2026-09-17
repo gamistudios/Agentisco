@@ -314,7 +314,7 @@ jobs:
           elif [ -f "debug.keystore.base64" ]; then
             echo "Using pre-encoded debug.keystore.base64..."
             base64 --decode debug.keystore.base64 > debug.keystore
-          elif [ ! -f "debug.keystore" ]; then
+          else
             echo "Generating debug.keystore..."
             keytool -genkey -v \
               -keystore debug.keystore \
@@ -325,9 +325,9 @@ jobs:
               -keysize 2048 \
               -validity 10000 \
               -dname "CN=Android Debug,O=Android,C=US"
-          else
-            echo "Using existing debug.keystore..."
           fi
+          echo "$(keytool -list -keystore debug.keystore -alias androiddebugkey -storepass android 2>&1 | grep -i 'SHA256' | awk '{print $2}')" >> "$GITHUB_ENV"
+          echo "AGENTISCO_KEYSTORE_PATH=${github.workspace}/debug.keystore" >> "$GITHUB_ENV"
 
       # Always built, independent of release detection.
       - name: Build Debug APK

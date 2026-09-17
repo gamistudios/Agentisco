@@ -71,26 +71,22 @@ android {
       }
     }
     create("debugConfig") {
-      storeFile = if (signingSecret("AGENTISCO_KEYSTORE_PATH") != null) {
-        file(signingSecret("AGENTISCO_KEYSTORE_PATH"))
-      } else {
-        file("${rootDir}/debug.keystore")
-      }
-      storePassword = if (signingSecret("AGENTISCO_KEYSTORE_PASSWORD") != null) {
-        signingSecret("AGENTISCO_KEYSTORE_PASSWORD")
-      } else {
-        "android"
-      }
-      keyAlias = if (signingSecret("AGENTISCO_KEY_ALIAS") != null) {
-        signingSecret("AGENTISCO_KEY_ALIAS")
-      } else {
-        "androiddebugkey"
-      }
-      keyPassword = if (signingSecret("AGENTISCO_KEY_PASSWORD") != null) {
-        signingSecret("AGENTISCO_KEY_PASSWORD")
-      } else {
-        "android"
-      }
+      val debugPath = signingSecret("AGENTISCO_KEYSTORE_PATH")
+        ?: "${rootDir}/debug.keystore"
+
+      val debugStorePass = signingSecret("AGENTISCO_KEYSTORE_PASSWORD")
+        ?: "android"
+
+      val debugKeyAlias = signingSecret("AGENTISCO_KEY_ALIAS")
+        ?: "androiddebugkey"
+
+      val debugKeyPass = signingSecret("AGENTISCO_KEY_PASSWORD")
+        ?: "android"
+
+      storeFile = file(debugPath as String)
+      storePassword = debugStorePass
+      keyAlias = debugKeyAlias
+      keyPassword = debugKeyPass
     }
   }
 
