@@ -2,8 +2,11 @@ name: Agentisco CI/CD
 
 # One unified pipeline:
 #   1. "validate" — CI checks and tests (always runs, including PRs).
-#   2. "release"  — versioned release build + publish, only after validation
-#                   passes and only for pushes to main / manual dispatch.
+#   2. "release"  — always builds + publishes the debug APK; additionally builds
+#                   and publishes the SIGNED release APK + AAB when the head
+#                   commit message requests a release:
+#                       "release"          -> auto-increment patch from latest tag
+#                       "release v1.2.3"   -> use exactly v1.2.3
 on:
   push:
     branches: [ "main" ]
@@ -11,8 +14,12 @@ on:
     branches: [ "main" ]
   workflow_dispatch:
     inputs:
+      build_release:
+        description: 'Build and publish the signed release APK/AAB as well'
+        type: boolean
+        default: false
       tag_name:
-        description: 'Optional custom tag (e.g. v1.0.5). Leave empty for auto-increment from 1.0.0'
+        description: 'Optional custom tag (e.g. v1.0.5). Leave empty for auto-increment. A non-empty value implies a release build.'
         required: false
         default: ''
       release_title:
@@ -51,7 +58,7 @@ jobs:
         uses: android-actions/setup-android@v4
         with:
           packages: ''
-      
+
       - name: Install Android SDK packages
         run: |
           sdkmanager "platform-tools"
@@ -86,9 +93,10 @@ jobs:
       - name: Build Debug APK
         run: ./gradlew assembleDebug --stacktrace
 
-  # ---------- Stage 2: Release build & publish ----------
-  # Runs only when stage 1 succeeded, and never on pull requests, so nothing
-  # is published when validation fails or for PR-only changes.
+  # ---------- Stage 2: Build & publish ----------
+  # Runs only when stage 1 succeeded, and never on pull requests.
+  # The debug APK is built and published on EVERY run; the signed release
+  # APK/AAB only when the head commit (or a manual dispatch) asks for it.
   release:
     name: Build & Publish Release
     needs: validate
@@ -116,7 +124,7 @@ jobs:
         uses: android-actions/setup-android@v4
         with:
           packages: ''
-      
+
       - name: Install Android SDK packages
         run: |
           sdkmanager "platform-tools"
@@ -124,95 +132,159 @@ jobs:
           sdkmanager "cmake;3.22.1"
           sdkmanager "ndk;27.2.12479018"
 
-      - name: Determine Next Version & Tag
+      # Release detection + version resolution.
+      # The commit message is read from git (never interpolated into the shell)
+      # so a crafted commit message cannot inject script.
+      - name: Determine Release Mode, Version & Tag
         id: vars
+        env:
+          DISPATCH_TAG: ${{ github.event.inputs.tag_name }}
+          DISPATCH_TITLE: ${{ github.event.inputs.release_title }}
+          DISPATCH_BUILD_RELEASE: ${{ github.event.inputs.build_release }}
         run: |
-          # Fetch existing git tags
+          set -euo pipefail
           git fetch --tags --force 2>/dev/null || true
 
-          CUSTOM_TAG="${{ github.event.inputs.tag_name }}"
-          if [ -n "$CUSTOM_TAG" ]; then
-            TAG="$CUSTOM_TAG"
-            VERSION="${TAG#v}"
-            PATCH=$(echo "$VERSION" | awk -F. '{print $3}')
-            VERSION_CODE=$((PATCH + 1))
-          else
-            # Find the highest existing v1.0.* tag
-            LATEST_TAG=$(git tag -l "v1.0.*" --sort=-v:refname | head -n 1)
+          COMMIT_MSG="$(git log -1 --pretty=%B HEAD)"
+          IS_RELEASE=false
+          TAG=""
 
-            if [ -z "$LATEST_TAG" ]; then
-              VERSION="1.0.0"
-              PATCH="0"
-            else
-              PATCH=$(echo "$LATEST_TAG" | sed 's/^v1\.0\.//')
-              if [[ "$PATCH" =~ ^[0-9]+$ ]]; then
-                PATCH=$((PATCH + 1))
-                VERSION="1.0.${PATCH}"
-              else
-                VERSION="1.0.0"
-                PATCH="0"
-              fi
-            fi
+          # 1. "release vX.Y.Z" in the commit message -> exact version.
+          EXPLICIT="$(printf '%s' "$COMMIT_MSG" \
+            | grep -ioE '(^|[[:space:]])release[[:space:]]+v[0-9]+\.[0-9]+\.[0-9]+' \
+            | head -n 1 \
+            | grep -oiE 'v[0-9]+\.[0-9]+\.[0-9]+' || true)"
 
-            TAG="v${VERSION}"
-            VERSION_CODE=$((PATCH + 1))
-
-            # Ensure tag doesn't collide with existing ref
-            while git rev-parse "$TAG" >/dev/null 2>&1; do
-              PATCH=$((PATCH + 1))
-              VERSION="1.0.${PATCH}"
-              TAG="v${VERSION}"
-              VERSION_CODE=$((PATCH + 1))
-            done
+          if [ -n "$EXPLICIT" ]; then
+            IS_RELEASE=true
+            # Normalise to the vMAJOR.MINOR.PATCH tag format used by this repo.
+            TAG="v$(printf '%s' "$EXPLICIT" | cut -c2-)"
+          elif printf '%s' "$COMMIT_MSG" | grep -qiE '(^|[[:space:]])release([[:space:]]|$)'; then
+            # 2. bare "release" -> auto-increment.
+            IS_RELEASE=true
           fi
 
-          CUSTOM_TITLE="${{ github.event.inputs.release_title }}"
-          if [ -n "$CUSTOM_TITLE" ]; then
-            TITLE="$CUSTOM_TITLE"
+          # 3. Manual dispatch overrides.
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            if [ -n "${DISPATCH_TAG:-}" ]; then
+              if ! printf '%s' "$DISPATCH_TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+                echo "::error::tag_name must be in vMAJOR.MINOR.PATCH format (got '${DISPATCH_TAG}')."
+                exit 1
+              fi
+              TAG="$DISPATCH_TAG"
+              IS_RELEASE=true
+            fi
+            if [ "${DISPATCH_BUILD_RELEASE:-false}" = "true" ]; then
+              IS_RELEASE=true
+            fi
+          fi
+
+          # Every run still needs a version for the debug artifact + tag, so the
+          # auto-increment runs regardless of release mode.
+          if [ -z "$TAG" ]; then
+            LATEST_TAG="$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n 1 || true)"
+            if [ -z "$LATEST_TAG" ]; then
+              MAJOR=1; MINOR=0; PATCH=0
+            else
+              BASE="${LATEST_TAG#v}"
+              MAJOR="$(echo "$BASE" | cut -d. -f1)"
+              MINOR="$(echo "$BASE" | cut -d. -f2)"
+              PATCH="$(echo "$BASE" | cut -d. -f3)"
+              PATCH=$((PATCH + 1))
+            fi
+            TAG="v${MAJOR}.${MINOR}.${PATCH}"
+            # Never collide with an existing tag/release.
+            while git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null 2>&1; do
+              PATCH=$((PATCH + 1))
+              TAG="v${MAJOR}.${MINOR}.${PATCH}"
+            done
+          else
+            if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null 2>&1; then
+              echo "::error::Tag ${TAG} already exists. Pick a new version."
+              exit 1
+            fi
+          fi
+
+          VERSION="${TAG#v}"
+          MAJOR="$(echo "$VERSION" | cut -d. -f1)"
+          MINOR="$(echo "$VERSION" | cut -d. -f2)"
+          PATCH="$(echo "$VERSION" | cut -d. -f3)"
+          # Monotonic across all MAJOR.MINOR.PATCH values.
+          VERSION_CODE=$((MAJOR * 10000 + MINOR * 100 + PATCH))
+
+          if [ -n "${DISPATCH_TITLE:-}" ]; then
+            TITLE="$DISPATCH_TITLE"
           else
             TITLE="Agentisco $TAG"
           fi
 
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "version_code=$VERSION_CODE" >> $GITHUB_OUTPUT
-          echo "title=$TITLE" >> $GITHUB_OUTPUT
+          # Previous tag (before this run's tag is created) for the changelog range.
+          PREV_TAG="$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n 1 || true)"
 
-          echo "Target Version: $VERSION (Code: $VERSION_CODE, Tag: $TAG, Title: $TITLE)"
+          {
+            echo "is_release=$IS_RELEASE"
+            echo "tag=$TAG"
+            echo "version=$VERSION"
+            echo "version_code=$VERSION_CODE"
+            echo "title=$TITLE"
+            echo "prev_tag=$PREV_TAG"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Release build: $IS_RELEASE"
+          echo "Target Version: $VERSION (Code: $VERSION_CODE, Tag: $TAG, Title: $TITLE, Since: ${PREV_TAG:-<start>})"
 
           # Update version dynamically in app/build.gradle.kts
           sed -i "s/versionCode = .*/versionCode = ${VERSION_CODE}/" app/build.gradle.kts
           sed -i "s/versionName = .*/versionName = \"${VERSION}\"/" app/build.gradle.kts
 
-      - name: Configure Signing Keystore
-        id: keystore
+      # Release notes are the real commit messages, verbatim, one entry each.
+      - name: Generate Release Notes from Commits
+        id: notes
         env:
-          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-          STORE_PASS: ${{ secrets.STORE_PASSWORD }}
-          KEY_PASS: ${{ secrets.KEY_PASSWORD }}
+          PREV_TAG: ${{ steps.vars.outputs.prev_tag }}
         run: |
-          mkdir -p keystore
-          if [ -n "$KEYSTORE_BASE64" ]; then
-            echo "Using provided repository secrets for release signing..."
-            echo "$KEYSTORE_BASE64" | base64 --decode > "${GITHUB_WORKSPACE}/my-upload-key.jks"
-            echo "KEYSTORE_PATH=${GITHUB_WORKSPACE}/my-upload-key.jks" >> $GITHUB_ENV
-            echo "STORE_PASSWORD=$STORE_PASS" >> $GITHUB_ENV
-            echo "KEY_PASSWORD=$KEY_PASS" >> $GITHUB_ENV
+          set -euo pipefail
+          if [ -n "${PREV_TAG:-}" ] && git rev-parse -q --verify "refs/tags/${PREV_TAG}" >/dev/null 2>&1; then
+            RANGE="${PREV_TAG}..HEAD"
           else
-            echo "No custom release secrets found; generating self-signed release keystore for build artifact..."
-            keytool -genkey -v \
-              -keystore "${GITHUB_WORKSPACE}/my-upload-key.jks" \
-              -alias "upload" \
-              -keyalg RSA \
-              -keysize 2048 \
-              -validity 10000 \
-              -storepass "agentisco-release-password" \
-              -keypass "agentisco-release-password" \
-              -dname "CN=Agentisco, OU=Android, O=Agentisco, L=Global, S=Mobile, C=US"
-            echo "KEYSTORE_PATH=${GITHUB_WORKSPACE}/my-upload-key.jks" >> $GITHUB_ENV
-            echo "STORE_PASSWORD=agentisco-release-password" >> $GITHUB_ENV
-            echo "KEY_PASSWORD=agentisco-release-password" >> $GITHUB_ENV
+            RANGE="HEAD"
           fi
+
+          git log $RANGE --no-merges --reverse --pretty=format:'%x1e%s%x1f%b' \
+            | awk -v RS='\036' -v FS='\037' '
+                {
+                  subject = $1; body = $2
+                  gsub(/^[ \t\r\n]+|[ \t\r\n]+$/, "", subject)
+                  if (subject == "") next
+                  low = tolower(subject)
+                  # Skip a commit that only exists to trigger the release.
+                  if (low ~ /^release([ \t]+v[0-9]+\.[0-9]+\.[0-9]+)?[ \t]*$/) next
+                  print "- " subject
+                  n = split(body, lines, "\n")
+                  for (i = 1; i <= n; i++) {
+                    l = lines[i]
+                    gsub(/[ \t\r]+$/, "", l)
+                    if (l != "") print "  " l
+                  }
+                }
+              ' > commit-notes.md
+
+          {
+            echo "## What's Changed"
+            echo
+            if [ -s commit-notes.md ]; then
+              cat commit-notes.md
+            else
+              echo "_No commits since ${PREV_TAG:-the start of the project}._"
+            fi
+            echo
+            if [ -n "${PREV_TAG:-}" ]; then
+              echo "**Full Changelog**: https://github.com/${GITHUB_REPOSITORY}/compare/${PREV_TAG}...${{ steps.vars.outputs.tag }}"
+            fi
+          } > release-notes.md
+
+          echo "--- release-notes.md ---"
+          cat release-notes.md
 
       - name: Grant Execute Permission for Gradlew
         run: chmod +x gradlew
@@ -235,27 +307,79 @@ jobs:
               -dname "CN=Android Debug,O=Android,C=US"
           fi
 
-      - name: Build Release APK and App Bundle (AAB)
-        run: ./gradlew assembleRelease bundleRelease assembleDebug --stacktrace
+      # Always built, independent of release detection.
+      - name: Build Debug APK
+        run: ./gradlew assembleDebug --stacktrace
+
+      # Only runs for a release. Keystore is decoded to RUNNER_TEMP (outside the
+      # workspace, never committed, never uploaded) and removed afterwards.
+      - name: Configure Release Signing
+        if: steps.vars.outputs.is_release == 'true'
+        env:
+          AGENTISCO_KEYSTORE_BASE64: ${{ secrets.AGENTISCO_KEYSTORE_BASE64 }}
+          AGENTISCO_KEYSTORE_PASSWORD: ${{ secrets.AGENTISCO_KEYSTORE_PASSWORD }}
+          AGENTISCO_KEY_ALIAS: ${{ secrets.AGENTISCO_KEY_ALIAS }}
+          AGENTISCO_KEY_PASSWORD: ${{ secrets.AGENTISCO_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          MISSING=""
+          [ -n "${AGENTISCO_KEYSTORE_BASE64:-}" ]   || MISSING="$MISSING AGENTISCO_KEYSTORE_BASE64"
+          [ -n "${AGENTISCO_KEYSTORE_PASSWORD:-}" ] || MISSING="$MISSING AGENTISCO_KEYSTORE_PASSWORD"
+          [ -n "${AGENTISCO_KEY_ALIAS:-}" ]         || MISSING="$MISSING AGENTISCO_KEY_ALIAS"
+          [ -n "${AGENTISCO_KEY_PASSWORD:-}" ]      || MISSING="$MISSING AGENTISCO_KEY_PASSWORD"
+          if [ -n "$MISSING" ]; then
+            echo "::error::Release requested but these repository secrets are missing:$MISSING"
+            exit 1
+          fi
+
+          KEYSTORE_PATH="${RUNNER_TEMP}/agentisco-release.jks"
+          printf '%s' "$AGENTISCO_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
+          chmod 600 "$KEYSTORE_PATH"
+          if [ ! -s "$KEYSTORE_PATH" ]; then
+            echo "::error::Decoded keystore is empty — check AGENTISCO_KEYSTORE_BASE64."
+            exit 1
+          fi
+          # Only the path is exported; passwords stay in step-level env below.
+          echo "AGENTISCO_KEYSTORE_PATH=${KEYSTORE_PATH}" >> "$GITHUB_ENV"
+          echo "Release keystore prepared ($(wc -c < "$KEYSTORE_PATH") bytes)."
+
+      - name: Build Signed Release APK and App Bundle (AAB)
+        if: steps.vars.outputs.is_release == 'true'
+        env:
+          AGENTISCO_KEYSTORE_PASSWORD: ${{ secrets.AGENTISCO_KEYSTORE_PASSWORD }}
+          AGENTISCO_KEY_ALIAS: ${{ secrets.AGENTISCO_KEY_ALIAS }}
+          AGENTISCO_KEY_PASSWORD: ${{ secrets.AGENTISCO_KEY_PASSWORD }}
+        run: ./gradlew assembleRelease bundleRelease --stacktrace
+
+      - name: Remove Release Keystore
+        if: always()
+        run: rm -f "${RUNNER_TEMP}/agentisco-release.jks"
 
       - name: Organize Release Artifacts
         run: |
+          set -euo pipefail
           mkdir -p release-artifacts
           TAG="${{ steps.vars.outputs.tag }}"
 
-          # Copy and rename Release APK
+          # Debug APK — always published.
+          if compgen -G "app/build/outputs/apk/debug/*.apk" > /dev/null; then
+            cp app/build/outputs/apk/debug/*.apk "release-artifacts/Agentisco-${TAG}-debug.apk"
+          fi
+
+          # Release APK / AAB — only present on release runs.
           if compgen -G "app/build/outputs/apk/release/*.apk" > /dev/null; then
             cp app/build/outputs/apk/release/*.apk "release-artifacts/Agentisco-${TAG}-release.apk"
           fi
-
-          # Copy and rename Release AAB (Android App Bundle for Google Play)
           if compgen -G "app/build/outputs/bundle/release/*.aab" > /dev/null; then
             cp app/build/outputs/bundle/release/*.aab "release-artifacts/Agentisco-${TAG}-release.aab"
           fi
 
-          # Copy and rename Debug APK (for quick testing)
-          if compgen -G "app/build/outputs/apk/debug/*.apk" > /dev/null; then
-            cp app/build/outputs/apk/debug/*.apk "release-artifacts/Agentisco-${TAG}-debug.apk"
+          if [ "${{ steps.vars.outputs.is_release }}" = "true" ]; then
+            if [ ! -f "release-artifacts/Agentisco-${TAG}-release.apk" ] || \
+               [ ! -f "release-artifacts/Agentisco-${TAG}-release.aab" ]; then
+              echo "::error::Release was requested but the signed APK/AAB is missing."
+              exit 1
+            fi
           fi
 
           ls -lah release-artifacts/
@@ -269,12 +393,13 @@ jobs:
 
       - name: Create and Push Git Tag
         run: |
+          set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           TAG="${{ steps.vars.outputs.tag }}"
-          if ! git rev-parse "$TAG" >/dev/null 2>&1; then
+          if ! git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null 2>&1; then
             git tag -a "$TAG" -m "Agentisco Release $TAG"
-            git push origin "$TAG" || true
+            git push origin "$TAG"
           fi
 
       - name: Publish GitHub Release
@@ -284,7 +409,7 @@ jobs:
           name: ${{ steps.vars.outputs.title }}
           draft: ${{ github.event.inputs.is_draft || false }}
           prerelease: ${{ github.event.inputs.is_prerelease || false }}
-          generate_release_notes: true
+          body_path: release-notes.md
           files: release-artifacts/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

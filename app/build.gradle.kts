@@ -38,13 +38,37 @@ android {
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 
+  // Release signing credentials come from environment variables (set by CI from
+  // repository secrets: AGENTISCO_KEYSTORE_PATH — itself decoded at runtime from
+  // AGENTISCO_KEYSTORE_BASE64 — plus AGENTISCO_KEYSTORE_PASSWORD,
+  // AGENTISCO_KEY_ALIAS, AGENTISCO_KEY_PASSWORD), falling back to the local,
+  // git-ignored .env file so `./gradlew assembleRelease` signs on a dev machine
+  // without manual exports. The keystore itself is never committed.
+  val envFile = rootProject.file(".env")
+  val envVars: Map<String, String> = if (envFile.exists()) {
+    envFile.readLines()
+      .filter { it.contains('=') && !it.trimStart().startsWith("#") }
+      .associate { line ->
+        val idx = line.indexOf('=')
+        line.substring(0, idx).trim() to line.substring(idx + 1).trim()
+      }
+  } else {
+    emptyMap()
+  }
+
+  fun signingSecret(name: String): String? =
+    System.getenv(name)?.takeIf { it.isNotBlank() } ?: envVars[name]?.takeIf { it.isNotBlank() }
+
+  val releaseKeystorePath: String? = signingSecret("AGENTISCO_KEYSTORE_PATH")
+
   signingConfigs {
     create("release") {
-      val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
-      storeFile = file(keystorePath)
-      storePassword = System.getenv("STORE_PASSWORD")
-      keyAlias = "upload"
-      keyPassword = System.getenv("KEY_PASSWORD")
+      if (releaseKeystorePath != null) {
+        storeFile = file(releaseKeystorePath)
+        storePassword = signingSecret("AGENTISCO_KEYSTORE_PASSWORD")
+        keyAlias = signingSecret("AGENTISCO_KEY_ALIAS")
+        keyPassword = signingSecret("AGENTISCO_KEY_PASSWORD")
+      }
     }
     create("debugConfig") {
       storeFile = file("${rootDir}/debug.keystore")
@@ -59,7 +83,9 @@ android {
       isCrunchPngs = false
       isMinifyEnabled = false
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-      signingConfig = signingConfigs.getByName("release")
+      // Only wire up release signing when real credentials are present, so a
+      // debug-only build never touches (or needs) the release keystore.
+      signingConfig = if (releaseKeystorePath != null) signingConfigs.getByName("release") else null
     }
     debug { signingConfig = signingConfigs.getByName("debugConfig") }
   }

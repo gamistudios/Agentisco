@@ -16,3 +16,11 @@
 local.properties
 .env
 debug.keystore
+
+# Release signing material — never commit keystores
+*.jks
+*.keystore
+keystore/
+*.jks.b64
+KEYSTORE_SETUP.md
+GITHUB_SECRETS.txt
