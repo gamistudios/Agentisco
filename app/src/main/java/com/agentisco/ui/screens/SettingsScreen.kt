@@ -15,6 +15,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -29,10 +30,18 @@ import com.agentisco.ui.theme.*
 @Composable
 fun SettingsScreen(
   viewModel: WorkspaceViewModel,
+  updateViewModel: com.agentisco.ui.UpdateViewModel,
   onNavigate: (AppDestination) -> Unit,
   modifier: Modifier = Modifier
 ) {
   val permissions by viewModel.permissions.collectAsState()
+  val updateUiState by updateViewModel.uiState.collectAsState()
+  val updateContext = LocalContext.current
+  val currentVersionName = remember(updateContext) {
+    updateContext.packageManager
+      .getPackageInfo(updateContext.packageName, 0)
+      .versionName ?: "?"
+  }
 
   LazyColumn(
     modifier = modifier
@@ -54,6 +63,138 @@ fun SettingsScreen(
         Column {
           Text("Agent Permissions & Settings", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
           Text("Control autonomous agent tool boundaries", color = TextMuted, fontSize = 12.sp)
+        }
+      }
+    }
+
+    // App Updates Card
+    item {
+      Card(
+        modifier = Modifier
+          .fillMaxWidth()
+          .clip(RoundedCornerShape(12.dp))
+          .border(1.dp, DarkBorder, RoundedCornerShape(12.dp)),
+        colors = CardDefaults.cardColors(containerColor = DarkSurface)
+      ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+          Text("App Updates", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+          Spacer(modifier = Modifier.height(8.dp))
+
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Column {
+              Text("Auto-Update", color = TextPrimary, fontSize = 13.sp)
+              Text(
+                "Automatically check for new versions",
+                color = TextMuted,
+                fontSize = 11.sp
+              )
+            }
+            Switch(
+              checked = updateUiState.autoUpdateEnabled,
+              onCheckedChange = { updateViewModel.setAutoUpdateEnabled(it) },
+              colors = SwitchDefaults.colors(
+                checkedThumbColor = ElectricBlue,
+                checkedTrackColor = ElectricBlue.copy(alpha = 0.35f),
+                checkedBorderColor = ElectricBlue,
+                uncheckedThumbColor = TextSecondary,
+                uncheckedTrackColor = DarkSurfaceHighlight,
+                uncheckedBorderColor = DarkBorder
+              )
+            )
+          }
+
+          HorizontalDivider(
+            color = DarkBorderSubtle,
+            modifier = Modifier.padding(vertical = 10.dp)
+          )
+
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Column {
+              Text("Current Version", color = TextPrimary, fontSize = 13.sp)
+              Text(
+                "v$currentVersionName",
+                color = TextSecondary,
+                fontSize = 12.sp,
+                fontFamily = FontFamily.Monospace
+              )
+            }
+            Text(
+              "Last checked: ${updateUiState.lastCheckText}",
+              color = TextMuted,
+              fontSize = 11.sp
+            )
+          }
+
+          if (updateUiState.availableUpdate != null) {
+            HorizontalDivider(
+              color = DarkBorderSubtle,
+              modifier = Modifier.padding(vertical = 10.dp)
+            )
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.SpaceBetween,
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              Text(
+                text = "New version available: ${updateUiState.availableUpdate!!.versionName}",
+                color = ElectricBlueGlow,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold
+              )
+              Text(
+                text = "Update Now",
+                color = ElectricBlueGlow,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                  .clip(RoundedCornerShape(6.dp))
+                  .background(ElectricBlue)
+                  .border(1.dp, ElectricBlue, RoundedCornerShape(6.dp))
+                  .padding(horizontal = 8.dp, vertical = 4.dp)
+                  .clickable { updateViewModel.showDialog() }
+              )
+            }
+          }
+
+          if (updateUiState.updateState != com.agentisco.data.repository.UpdateRepository.UpdateState.IDLE) {
+            HorizontalDivider(
+              color = DarkBorderSubtle,
+              modifier = Modifier.padding(vertical = 10.dp)
+            )
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.Center,
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              Text(
+                when (updateUiState.updateState) {
+                  com.agentisco.data.repository.UpdateRepository.UpdateState.CHECKING ->
+                    "Checking for updates..."
+                  com.agentisco.data.repository.UpdateRepository.UpdateState.DOWNLOADING ->
+                    "Downloading update..."
+                  com.agentisco.data.repository.UpdateRepository.UpdateState.DOWNLOADED ->
+                    "Update ready to install"
+                  com.agentisco.data.repository.UpdateRepository.UpdateState.ERROR ->
+                    "Update failed — tap to retry"
+                  com.agentisco.data.repository.UpdateRepository.UpdateState.AVAILABLE ->
+                    "Updates found"
+                  else -> "Checking..."
+                },
+                color = if (updateUiState.updateState == com.agentisco.data.repository.UpdateRepository.UpdateState.ERROR) DangerRed else TextSecondary,
+                fontSize = 12.sp,
+                fontFamily = FontFamily.Monospace,
+                modifier = Modifier.clickable { updateViewModel.checkForUpdates() }
+              )
+            }
+          }
         }
       }
     }

@@ -23,7 +23,9 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.agentisco.core.model.AppDestination
+import com.agentisco.data.repository.UpdateRepository
 import com.agentisco.data.repository.WorkspaceRepository
+import com.agentisco.ui.UpdateViewModel
 import com.agentisco.ui.WorkspaceViewModel
 import com.agentisco.ui.components.*
 import com.agentisco.ui.screens.*
@@ -53,6 +55,16 @@ fun AgentIDEApp(
         }
       }
     )
+  },
+  updateViewModel: UpdateViewModel = run {
+    val app = LocalContext.current.applicationContext as AgentiscoApplication
+    viewModel(
+      factory = viewModelFactory {
+        initializer {
+          UpdateViewModel(app.updateRepository, app.userPreferencesStore)
+        }
+      }
+    )
   }
 ) {
   val currentDestination by viewModel.currentDestination.collectAsState()
@@ -64,6 +76,14 @@ fun AgentIDEApp(
   val pendingApproval by viewModel.pendingApproval.collectAsState()
   val isCommandPaletteOpen by viewModel.isCommandPaletteOpen.collectAsState()
   val isModelSheetOpen by viewModel.isModelSheetOpen.collectAsState()
+
+  // Auto-update state
+  val updateUiState by updateViewModel.uiState.collectAsState()
+
+  // Kick off a background update check when the auto-update toggle allows it.
+  LaunchedEffect(Unit) {
+    updateViewModel.checkForUpdates(isAuto = true)
+  }
 
   // Handle system back navigation
   androidx.activity.compose.BackHandler(
@@ -98,7 +118,17 @@ fun AgentIDEApp(
         currentDestination = currentDestination,
         onNavigate = { dest -> viewModel.navigateTo(dest) },
         onOpenModelSheet = { viewModel.toggleModelSheet(true) },
-        onOpenCommandPalette = { viewModel.toggleCommandPalette(true) }
+        onOpenCommandPalette = { viewModel.toggleCommandPalette(true) },
+        updateState = updateUiState.updateState,
+        updateProgress = updateUiState.downloadProgress,
+        hasNewUpdate = updateUiState.availableUpdate != null,
+        onUpdateClick = {
+          when {
+            updateUiState.availableUpdate != null -> updateViewModel.showDialog()
+            updateUiState.updateState == UpdateRepository.UpdateState.CHECKING -> Unit
+            else -> updateViewModel.checkForUpdates(isAuto = false)
+          }
+        }
       )
     },
     bottomBar = {
@@ -153,9 +183,36 @@ fun AgentIDEApp(
           )
           AppDestination.SETTINGS -> SettingsScreen(
             viewModel = viewModel,
+            updateViewModel = updateViewModel,
             onNavigate = { viewModel.navigateTo(it) }
           )
         }
+      }
+    }
+
+    // ——— Update overlays ———
+    if (updateUiState.updateState == UpdateRepository.UpdateState.CHECKING &&
+        updateUiState.availableUpdate == null
+    ) {
+      UpdateCheckingDialog()
+    }
+
+    updateUiState.availableUpdate?.let { update ->
+      if (
+        updateUiState.showUpdateDialog &&
+        updateUiState.updateState != UpdateRepository.UpdateState.CHECKING
+      ) {
+        UpdateDialog(
+          availableVersion = update.versionName,
+          releaseNotes = update.releaseNotes,
+          updateState = updateUiState.updateState,
+          progress = updateUiState.downloadProgress,
+          error = updateUiState.error,
+          onDownload = { updateViewModel.startDownload() },
+          onInstall = { updateViewModel.installUpdate() },
+          onCancelDownload = { updateViewModel.cancelDownload() },
+          onDismiss = { updateViewModel.dismissDialog() }
+        )
       }
     }
 

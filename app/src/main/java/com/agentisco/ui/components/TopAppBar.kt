@@ -22,6 +22,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.agentisco.core.model.AppDestination
 import com.agentisco.data.model.Project
+import com.agentisco.data.repository.UpdateRepository
 import com.agentisco.ui.theme.*
 
 @Composable
@@ -31,7 +32,11 @@ fun AgentIDETopAppBar(
   onNavigate: (AppDestination) -> Unit,
   onOpenModelSheet: () -> Unit,
   onOpenCommandPalette: () -> Unit,
-  modifier: Modifier = Modifier
+  modifier: Modifier = Modifier,
+  updateState: UpdateRepository.UpdateState? = null,
+  updateProgress: Float = 0f,
+  hasNewUpdate: Boolean = false,
+  onUpdateClick: (() -> Unit)? = null
 ) {
   Surface(
     modifier = modifier
@@ -40,142 +45,190 @@ fun AgentIDETopAppBar(
     color = DarkBackground,
     border = androidx.compose.foundation.BorderStroke(0.dp, DarkBorderSubtle)
   ) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-      Row(
-        modifier = Modifier
-          .fillMaxWidth()
-          .height(56.dp)
-          .padding(horizontal = 14.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-      ) {
-        // Project Selector Pill
+    Box(modifier = Modifier.fillMaxWidth()) {
+      Column(modifier = Modifier.fillMaxWidth()) {
         Row(
-          verticalAlignment = Alignment.CenterVertically,
           modifier = Modifier
-            .clip(RoundedCornerShape(8.dp))
-            .background(DarkSurfaceElevated)
-            .border(1.dp, DarkBorder, RoundedCornerShape(8.dp))
-            .clickable { onNavigate(AppDestination.PROJECTS) }
-            .padding(horizontal = 10.dp, vertical = 6.dp)
-            .testTag("top_project_selector")
+            .fillMaxWidth()
+            .height(56.dp)
+            .padding(horizontal = 14.dp),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically
         ) {
-          Box(
+          // Project Selector Pill
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
-              .size(8.dp)
-              .clip(CircleShape)
-              .background(if (activeProject.isDirty) WarningAmber else TerminalGreen)
-          )
-          Spacer(modifier = Modifier.width(6.dp))
-          Text(
-            text = activeProject.name,
-            color = TextPrimary,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.SemiBold,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-          )
-          Spacer(modifier = Modifier.width(4.dp))
-          Text(
-            text = "· ${activeProject.branch}",
-            color = TextMuted,
-            fontSize = 11.sp,
-            fontFamily = FontFamily.Monospace
-          )
-          Icon(
-            imageVector = Icons.Default.ArrowDropDown,
-            contentDescription = "Switch project",
-            tint = TextMuted,
-            modifier = Modifier.size(16.dp)
-          )
-        }
-
-        // Action controls
-        Row(
-          verticalAlignment = Alignment.CenterVertically,
-          horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-          // Command Palette Shortcut Button (>)
-          IconButton(
-            onClick = onOpenCommandPalette,
-            modifier = Modifier
-              .size(34.dp)
               .clip(RoundedCornerShape(8.dp))
               .background(DarkSurfaceElevated)
               .border(1.dp, DarkBorder, RoundedCornerShape(8.dp))
-              .testTag("top_cmd_palette")
+              .clickable { onNavigate(AppDestination.PROJECTS) }
+              .padding(horizontal = 10.dp, vertical = 6.dp)
+              .testTag("top_project_selector")
           ) {
+            Box(
+              modifier = Modifier
+                .size(8.dp)
+                .clip(CircleShape)
+                .background(if (activeProject.isDirty) WarningAmber else TerminalGreen)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
             Text(
-              text = ">",
-              color = CyanAccent,
-              fontSize = 14.sp,
-              fontWeight = FontWeight.Bold,
+              text = activeProject.name,
+              color = TextPrimary,
+              fontSize = 13.sp,
+              fontWeight = FontWeight.SemiBold,
+              maxLines = 1,
+              overflow = TextOverflow.Ellipsis
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(
+              text = "· ${activeProject.branch}",
+              color = TextMuted,
+              fontSize = 11.sp,
               fontFamily = FontFamily.Monospace
             )
-          }
-
-          // Settings Button
-          IconButton(
-            onClick = { onNavigate(AppDestination.SETTINGS) },
-            modifier = Modifier
-              .size(34.dp)
-              .clip(RoundedCornerShape(8.dp))
-              .background(DarkSurfaceElevated)
-              .border(1.dp, DarkBorder, RoundedCornerShape(8.dp))
-              .testTag("top_settings")
-          ) {
             Icon(
-              imageVector = Icons.Outlined.Settings,
-              contentDescription = "Settings",
-              tint = TextSecondary,
+              imageVector = Icons.Default.ArrowDropDown,
+              contentDescription = "Switch project",
+              tint = TextMuted,
               modifier = Modifier.size(16.dp)
             )
           }
+
+          // Action controls
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+          ) {
+            // Update Button (with subtle badge when a new version exists)
+            if (onUpdateClick != null) {
+              Box(
+                modifier = Modifier
+                  .size(34.dp)
+                  .clip(RoundedCornerShape(8.dp))
+                  .background(DarkSurfaceElevated)
+                  .border(
+                    1.dp,
+                    if (hasNewUpdate) WarningAmber.copy(alpha = 0.7f) else DarkBorder,
+                    RoundedCornerShape(8.dp)
+                  )
+                  .clickable(onClick = onUpdateClick)
+                  .testTag("top_update")
+              ) {
+                Icon(
+                  imageVector = Icons.Outlined.SystemUpdateAlt,
+                  contentDescription = "Check for updates",
+                  tint = if (hasNewUpdate) WarningAmber else TextSecondary,
+                  modifier = Modifier
+                    .size(16.dp)
+                    .align(Alignment.Center)
+                )
+
+                if (hasNewUpdate) {
+                  Box(
+                    modifier = Modifier
+                      .size(7.dp)
+                      .align(Alignment.TopEnd)
+                      .offset(x = (-2).dp, y = 2.dp)
+                      .clip(CircleShape)
+                      .background(WarningAmber)
+                      .border(1.dp, DarkSurface, CircleShape)
+                  )
+                }
+              }
+            }
+
+            // Command Palette Shortcut Button (>)
+            IconButton(
+              onClick = onOpenCommandPalette,
+              modifier = Modifier
+                .size(34.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(DarkSurfaceElevated)
+                .border(1.dp, DarkBorder, RoundedCornerShape(8.dp))
+                .testTag("top_cmd_palette")
+            ) {
+              Text(
+                text = ">",
+                color = CyanAccent,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                fontFamily = FontFamily.Monospace
+              )
+            }
+
+            // Settings Button
+            IconButton(
+              onClick = { onNavigate(AppDestination.SETTINGS) },
+              modifier = Modifier
+                .size(34.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(DarkSurfaceElevated)
+                .border(1.dp, DarkBorder, RoundedCornerShape(8.dp))
+                .testTag("top_settings")
+            ) {
+              Icon(
+                imageVector = Icons.Outlined.Settings,
+                contentDescription = "Settings",
+                tint = TextSecondary,
+                modifier = Modifier.size(16.dp)
+              )
+            }
+          }
         }
+
+        // Contextual Tabs Row (Agent, Files, Changes, Terminal, Build/Run, Git)
+        Row(
+          modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 2.dp),
+          horizontalArrangement = Arrangement.spacedBy(6.dp),
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          ContextChip(
+            title = "Agent",
+            selected = currentDestination == AppDestination.AGENT,
+            onClick = { onNavigate(AppDestination.AGENT) }
+          )
+          ContextChip(
+            title = "Files",
+            selected = currentDestination == AppDestination.FILES,
+            onClick = { onNavigate(AppDestination.FILES) }
+          )
+          ContextChip(
+            title = "Editor",
+            selected = currentDestination == AppDestination.EDITOR,
+            onClick = { onNavigate(AppDestination.EDITOR) }
+          )
+          ContextChip(
+            title = "Changes",
+            badge = if (activeProject.changedFilesCount > 0) "${activeProject.changedFilesCount}" else null,
+            selected = currentDestination == AppDestination.DIFF,
+            onClick = { onNavigate(AppDestination.DIFF) }
+          )
+          ContextChip(
+            title = "Git",
+            selected = currentDestination == AppDestination.GIT,
+            onClick = { onNavigate(AppDestination.GIT) }
+          )
+          ContextChip(
+            title = "Build",
+            selected = currentDestination == AppDestination.BUILD_RUN,
+            onClick = { onNavigate(AppDestination.BUILD_RUN) }
+          )
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        HorizontalDivider(color = DarkBorderSubtle, thickness = 1.dp)
       }
 
-      // Contextual Tabs Row (Agent, Files, Changes, Terminal, Build/Run, Git)
-      Row(
+      DownloadProgressIndicator(
+        progress = updateProgress,
+        visible = updateState == UpdateRepository.UpdateState.DOWNLOADING,
         modifier = Modifier
           .fillMaxWidth()
-          .padding(horizontal = 12.dp, vertical = 2.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalAlignment = Alignment.CenterVertically
-      ) {
-        ContextChip(
-          title = "Agent",
-          selected = currentDestination == AppDestination.AGENT,
-          onClick = { onNavigate(AppDestination.AGENT) }
-        )
-        ContextChip(
-          title = "Files",
-          selected = currentDestination == AppDestination.FILES,
-          onClick = { onNavigate(AppDestination.FILES) }
-        )
-        ContextChip(
-          title = "Editor",
-          selected = currentDestination == AppDestination.EDITOR,
-          onClick = { onNavigate(AppDestination.EDITOR) }
-        )
-        ContextChip(
-          title = "Changes",
-          badge = if (activeProject.changedFilesCount > 0) "${activeProject.changedFilesCount}" else null,
-          selected = currentDestination == AppDestination.DIFF,
-          onClick = { onNavigate(AppDestination.DIFF) }
-        )
-        ContextChip(
-          title = "Git",
-          selected = currentDestination == AppDestination.GIT,
-          onClick = { onNavigate(AppDestination.GIT) }
-        )
-        ContextChip(
-          title = "Build",
-          selected = currentDestination == AppDestination.BUILD_RUN,
-          onClick = { onNavigate(AppDestination.BUILD_RUN) }
-        )
-      }
-      Spacer(modifier = Modifier.height(4.dp))
-      HorizontalDivider(color = DarkBorderSubtle, thickness = 1.dp)
+          .align(Alignment.TopCenter)
+      )
     }
   }
 }

@@ -3,6 +3,8 @@ package com.agentisco
 import android.app.Application
 import android.os.Build
 import com.agentisco.data.local.ProviderConfigStore
+import com.agentisco.data.repository.UpdateRepository
+import com.agentisco.settings.store.UserPreferencesStore
 import java.io.File
 import java.io.PrintWriter
 import java.io.StringWriter
@@ -11,6 +13,12 @@ class AgentiscoApplication : Application() {
 
   /** Durable provider/model configuration + credential storage, created once per process. */
   val providerStore: ProviderConfigStore by lazy { ProviderConfigStore(this) }
+
+  /** User preferences (auto-update toggle etc.), persisted to internal storage. */
+  val userPreferencesStore: UserPreferencesStore by lazy { UserPreferencesStore(this) }
+
+  /** GitHub-release update checker/downloader (resumable, debug APK for now). */
+  val updateRepository: UpdateRepository by lazy { UpdateRepository(this) }
 
   override fun onCreate() {
     super.onCreate()
