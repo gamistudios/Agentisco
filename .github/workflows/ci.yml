@@ -45,7 +45,7 @@ jobs:
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Java 21
         uses: actions/setup-java@v5
@@ -109,7 +109,7 @@ jobs:
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -388,7 +388,7 @@ jobs:
           ls -lah release-artifacts/
 
       - name: Upload Artifacts to Workflow
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: agentisco-build-${{ steps.vars.outputs.tag }}
           path: release-artifacts/*
@@ -405,15 +405,80 @@ jobs:
             git push origin "$TAG"
           fi
 
+      # Published with the gh CLI instead of an upload action: the release is
+      # created first with the notes, then each asset is uploaded ONE AT A TIME
+      # with retries. Parallel multi-asset uploads are what produce the
+      # intermittent "Error saving asset" / "Error creating asset temp dir"
+      # failures on large APK/AAB files, and a failed parallel batch can leave
+      # the release with a partial, inconsistent asset set.
       - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v3
-        with:
-          tag_name: ${{ steps.vars.outputs.tag }}
-          name: ${{ steps.vars.outputs.title }}
-          draft: ${{ github.event.inputs.is_draft || false }}
-          prerelease: ${{ github.event.inputs.is_prerelease || false }}
-          body_path: release-notes.md
-          files: release-artifacts/*
-          fail_on_unmatched_files: false
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ steps.vars.outputs.tag }}
+          TITLE: ${{ steps.vars.outputs.title }}
+          IS_DRAFT: ${{ github.event.inputs.is_draft || 'false' }}
+          IS_PRERELEASE: ${{ github.event.inputs.is_prerelease || 'false' }}
+        run: |
+          set -euo pipefail
+
+          FLAGS=()
+          if [ "$IS_DRAFT" = "true" ]; then
+            FLAGS+=(--draft)
+          fi
+          if [ "$IS_PRERELEASE" = "true" ]; then
+            FLAGS+=(--prerelease)
+          fi
+
+          # 1. Create (or update) the release with the commit-derived notes.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists — updating notes."
+            gh release edit "$TAG" --title "$TITLE" --notes-file release-notes.md ${FLAGS[@]+"${FLAGS[@]}"}
+          else
+            gh release create "$TAG" --title "$TITLE" --notes-file release-notes.md ${FLAGS[@]+"${FLAGS[@]}"}
+          fi
+
+          # 2. Wait until the release is resolvable by tag before uploading.
+          for i in 1 2 3 4 5 6; do
+            if gh release view "$TAG" >/dev/null 2>&1; then break; fi
+            echo "Release $TAG not discoverable yet, waiting..."
+            sleep 5
+          done
+
+          # 3. Upload assets sequentially, retrying each one.
+          FAILED=""
+          for FILE in release-artifacts/*; do
+            NAME="$(basename "$FILE")"
+            UPLOADED=false
+            for ATTEMPT in 1 2 3 4; do
+              echo "⬆️  Uploading ${NAME} (attempt ${ATTEMPT})..."
+              if gh release upload "$TAG" "$FILE" --clobber; then
+                UPLOADED=true
+                break
+              fi
+              echo "::warning::Upload of ${NAME} failed on attempt ${ATTEMPT}; retrying."
+              sleep $((ATTEMPT * 15))
+            done
+            if [ "$UPLOADED" != "true" ]; then
+              FAILED="$FAILED $NAME"
+            fi
+          done
+
+          # 4. Verify every expected asset is actually attached.
+          echo "Assets currently on $TAG:"
+          gh release view "$TAG" --json assets --jq '.assets[].name' | tee uploaded-assets.txt
+
+          for FILE in release-artifacts/*; do
+            NAME="$(basename "$FILE")"
+            if ! grep -Fxq "$NAME" uploaded-assets.txt; then
+              FAILED="$FAILED $NAME"
+            fi
+          done
+
+          if [ -n "$FAILED" ]; then
+            FAILED="$(printf '%s' "$FAILED" | tr ' ' '\n' | sort -u | tr '\n' ' ')"
+            echo "::error::These assets are missing from release ${TAG}:$FAILED"
+            exit 1
+          fi
+
+          echo "🎉 Release $TAG published with all assets."
