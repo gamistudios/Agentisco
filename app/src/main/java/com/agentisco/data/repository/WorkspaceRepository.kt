@@ -298,20 +298,15 @@ class WorkspaceRepository(
   private val _activeTerminalSessionId = MutableStateFlow("term-1")
   val activeTerminalSessionId: StateFlow<String> = _activeTerminalSessionId.asStateFlow()
 
-  /** Last opened project ID (persisted separately to handle app restart) */
+  /** Last opened project ID (persisted separately to survive app restarts). */
   private val _rememberedLastProjectId = MutableStateFlow<String?>(null)
-  private val rememberedProjectId: String?
-    get() = _rememberedLastProjectId.value
 
-  /** Load last opened project ID from disk on init */
+  /** Loads the last opened project ID from disk (plain text, one line). */
   @Synchronized
   fun loadRememberedLastProjectId(): String? {
-    val dir = rememberedProjectConfigDir
-    val config = dir?.takeIf { it.exists() }?.let { File(it, "last_project.json") }
-      ?.takeIf { it.exists() }?.let { it.readText() }
-      ?.let { JSONObject(it) }
-      ?: return null
-    return config.optString("lastProjectId", null)
+    val file = rememberedProjectConfigDir?.let { File(it, "last_project.txt") }
+      ?.takeIf { it.isFile } ?: return null
+    return runCatching { file.readText().trim().ifBlank { null } }.getOrNull()
   }
 
   @Synchronized
@@ -319,15 +314,13 @@ class WorkspaceRepository(
     val dir = rememberedProjectConfigDir
       ?: run { _rememberedLastProjectId.value = projectId; return }
     dir.mkdirs()
-    val file = File(dir, "last_project.json")
-    JSONObject().put("lastProjectId", projectId).let { config ->
-      file.writeText(config.toString(2))
-    }
+    runCatching { File(dir, "last_project.txt").writeText(projectId) }
     _rememberedLastProjectId.value = projectId
   }
 
-  private val rememberedProjectConfigDir: File?
-    get() = projectRegistry.dir
+  // Same location ProjectRegistryStore uses for projects.json; the last-opened
+  // project pointer lives next to it without touching that class's internals.
+  private val rememberedProjectConfigDir: File? = context?.getDir("agentisco", Context.MODE_PRIVATE)
 
   // Real PTY-backed terminal sessions keyed by tab id.
   private val _ptySessions = MutableStateFlow<Map<String, com.termux.terminal.TerminalSession>>(emptyMap())
@@ -545,10 +538,6 @@ class WorkspaceRepository(
       return
     }
 
-    // Fetch most recent AI chat session for this project (if any)
-    val latestSession = chatStore.latestSession(project.path)
-    val rememberedSessionId = latestSession?.id
-
     val files = fileSystem.getFileTree(project)
     _projectFiles.value = files
 
@@ -585,9 +574,6 @@ class WorkspaceRepository(
     if (_terminalSessions.value.none { it.id == _activeTerminalSessionId.value }) {
       _activeTerminalSessionId.value = tabs.first().id
     }
-
-    // Return the latest AI session ID back to the ViewModel for restoration
-    rememberedSessionId
 
     refreshDiffsAndGit()
   }
