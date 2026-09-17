@@ -186,7 +186,11 @@ class UpdateRepository(private val context: Context) {
             try {
                 if (downloadCancelled) throw AbortedDownloadException()
 
-                val existingOffset = offsetFile.readText().toLongOrNull() ?: 0L
+                val existingOffset = if (offsetFile.exists()) {
+                    offsetFile.readText().toLongOrNull() ?: 0L
+                } else {
+                    0L
+                }
                 val existingBytes = if (file.exists()) file.length() else 0L
 
                 if (existingBytes != existingOffset) {

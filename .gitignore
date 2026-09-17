@@ -27,3 +27,4 @@ keystore/
 KEYSTORE_SETUP.md
 GITHUB_SECRETS.txt
 generate-keystore.sh
+debug.keystore.base64
