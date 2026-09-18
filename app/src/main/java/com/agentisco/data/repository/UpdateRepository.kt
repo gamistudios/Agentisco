@@ -81,32 +81,32 @@ class UpdateRepository(private val context: Context) {
                 val notes = json.optString("body", "")
 
                 var apkName: String? = null
-                var apkUrl: String? = null
                 var apkSize: Long? = null
 
+                // Find the -debug.apk file from assets
                 val assets = json.getJSONArray("assets")
                 for (i in 0 until assets.length()) {
                     val assetJSON = assets.getJSONObject(i)
                     val name = assetJSON.optString("name", "")
-                    val downloadUrl = assetJSON.optString("browser_download_url", "")
 
                     when {
                         name.contains("-debug.apk", ignoreCase = true) -> {
                             apkName = name
-                            apkUrl = downloadUrl
                             apkSize = assetJSON.optLong("size", 0L)
                             break
                         }
-                        name.endsWith(".apk", ignoreCase = true) -> {
-                            if (apkName == null) {
-                                apkName = name
-                                apkUrl = downloadUrl
-                                apkSize = assetJSON.optLong("size", 0L)
-                            }
+                        name.endsWith(".apk", ignoreCase = true) && apkName == null -> {
+                            apkName = name
+                            apkSize = assetJSON.optLong("size", 0L)
                         }
                     }
                 }
-                if (apkUrl == null) throw Exception("No -debug.apk asset in latest release")
+                if (apkName == null) throw Exception("No -debug.apk asset in latest release")
+
+                // Construct direct download URL: https://github.com/{owner}/{repo}/releases/download/{tag}/{file}
+                val owner = "gamistudios"
+                val repo = "Agentisco"
+                val apkUrl = "https://github.com/$owner/$repo/releases/download/$tagName/$apkName"
 
                 val remoteCode = parseVersionCode(tagName.ifBlank { versionName })
                 val localCode = currentVersionCode()
@@ -218,30 +218,37 @@ class UpdateRepository(private val context: Context) {
                     totalSize = contentLength.takeIf { it > 0 } ?: (downloadedOffset + 100 * 1024 * 1024)
                     startOffset = downloadedOffset
 
-                    body.byteStream().use { input ->
-                        val buffer = ByteArray(64 * 1024)
-                        var bytesCopied = 0
-                        while (true) {
-                            if (downloadCancelled) throw AbortedDownloadException()
-                            val read = input.read(buffer)
-                            if (read == -1) break
+                    // If server returns empty body for range request, just continue from current position
+                    if (contentLength == 0L && downloadedOffset > 0L) {
+                        // No data returned, continue downloading
+                    } else {
+                        body.byteStream().use { input ->
+                            val buffer = ByteArray(64 * 1024)
+                            var bytesCopied = 0
+                            while (true) {
+                                if (downloadCancelled) throw AbortedDownloadException()
+                                val read = input.read(buffer)
+                                if (read == -1) break
 
-                            RandomAccessFile(file, "rw").use { raf ->
-                                raf.seek(startOffset + bytesCopied)
-                                raf.write(buffer, 0, read)
-                            }
-                            bytesCopied += read
-                            downloadedOffset += read
+                                RandomAccessFile(file, "rw").use { raf ->
+                                    raf.seek(startOffset + bytesCopied)
+                                    raf.write(buffer, 0, read)
+                                }
+                                bytesCopied += read
+                                downloadedOffset += read
 
-                            if (bytesCopied % (64 * 1024) == 0 || read < 0) {
-                                offsetFile.writeText(downloadedOffset.toString())
-                            }
+                                if (bytesCopied % (64 * 1024) == 0 || read < 0) {
+                                    offsetFile.writeText(downloadedOffset.toString())
+                                }
 
-                            if (totalSize != null) {
-                                _updateProgress.value = downloadedOffset.toFloat() / totalSize.toFloat()
+                                if (totalSize != null) {
+                                    _updateProgress.value = downloadedOffset.toFloat() / totalSize.toFloat()
+                                }
                             }
                         }
                     }
+                }
+            }
                 }
 
                 if (downloadCancelled) {
