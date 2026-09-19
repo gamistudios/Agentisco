@@ -1,0 +1,375 @@
+package com.agentisco
+
+import android.content.Context
+import androidx.test.core.app.ApplicationProvider
+import com.agentisco.data.repository.UpdateRepository
+import com.agentisco.data.repository.UpdateStream
+import com.agentisco.data.repository.UpdateStreamSource
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runTest
+import org.junit.Assert.assertArrayEquals
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+import java.io.ByteArrayInputStream
+import java.io.File
+import java.util.Collections
+
+/**
+ * Regression tests for "the update looks finished after a few percent".
+ *
+ * The old download loop compared its own byte counter against the file length it had
+ * just written, so any HTTP body that ended — even one truncated by a dropped
+ * connection — counted as a complete download and enabled the Install button. The
+ * APK bytes are served from memory here so the retry/resume/verify state machine can
+ * be exercised without touching the network.
+ */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34])
+class UpdateDownloadVerificationTest {
+
+    private lateinit var context: Context
+
+    /** Mirrors UpdateRepository's private UPDATE_APK_NAME constant. */
+    private val updateFile: File
+        get() = File(context.filesDir, "agentisco-update.apk")
+
+    private val offsetSidecar: File
+        get() = File(updateFile.parentFile, "${updateFile.name}.offset")
+
+    @Before
+    fun setUp() {
+        context = ApplicationProvider.getApplicationContext()
+        updateFile.delete()
+    }
+
+    // ——— the reported bug: early completion ———
+
+    @Test
+    fun `a stream that ends early is never reported as downloaded`() = runTest {
+        val payload = apkPayload(4096)
+        val source = InMemoryStreamSource(payload, bytesAvailable = 16)
+        val repository = repository(source)
+        repository.adoptAvailableUpdate(update(assetSize = payload.size.toLong()))
+
+        assertFalse(repository.downloadUpdate())
+
+        assertEquals(UpdateRepository.UpdateState.ERROR, repository.updateState.value)
+        assertNotNull(repository.updateError.value)
+        assertTrue(
+            "size mismatch must be reported: ${repository.updateError.value}",
+            repository.updateError.value!!.contains("expected ${payload.size} bytes")
+        )
+        assertNull("no install path may be exposed", repository.downloadedApkPath.value)
+        assertFalse("the unusable partial must be removed", updateFile.exists())
+        assertTrue(repository.updateProgress.value < 1f)
+    }
+
+    @Test
+    fun `a file of the right size that is not an apk is never reported as downloaded`() = runTest {
+        val expectedSize = 4096L
+        // Right size, but no ZIP/APK signature at all.
+        val payload = ByteArray(expectedSize.toInt())
+        val repository = repository(InMemoryStreamSource(payload))
+        repository.adoptAvailableUpdate(update(assetSize = expectedSize))
+
+        assertFalse(repository.downloadUpdate())
+
+        assertEquals(UpdateRepository.UpdateState.ERROR, repository.updateState.value)
+        assertTrue(
+            "must be reported as not an APK: ${repository.updateError.value}",
+            repository.updateError.value!!.contains("not a valid APK")
+        )
+        assertNull(repository.downloadedApkPath.value)
+        assertFalse(updateFile.exists())
+    }
+
+    @Test
+    fun `a body larger than the release asset is rejected`() = runTest {
+        val payload = apkPayload(8192)
+        val repository = repository(InMemoryStreamSource(payload))
+        repository.adoptAvailableUpdate(update(assetSize = 4096L))
+
+        assertFalse(repository.downloadUpdate())
+
+        assertEquals(UpdateRepository.UpdateState.ERROR, repository.updateState.value)
+        assertFalse(updateFile.exists())
+    }
+
+    // ——— the happy path ———
+
+    @Test
+    fun `a complete apk of exactly the expected size reaches DOWNLOADED and offers install`() = runTest {
+        val payload = apkPayload(4096)
+        val repository = repository(InMemoryStreamSource(payload))
+        repository.adoptAvailableUpdate(update(assetSize = payload.size.toLong()))
+
+        assertTrue(repository.downloadUpdate())
+
+        assertEquals(UpdateRepository.UpdateState.DOWNLOADED, repository.updateState.value)
+        assertNull(repository.updateError.value)
+        assertEquals(1f, repository.updateProgress.value, 0f)
+        assertEquals(updateFile.absolutePath, repository.downloadedApkPath.value)
+        assertArrayEquals(payload, updateFile.readBytes())
+    }
+
+    @Test
+    fun `progress never exceeds one and stays below it until the file is verified`() = runTest {
+        val payload = apkPayload(64 * 1024)
+        val repository = repository(InMemoryStreamSource(payload, bytesAvailable = 4096))
+        repository.adoptAvailableUpdate(update(assetSize = payload.size.toLong()))
+
+        val progressValues = Collections.synchronizedList(mutableListOf<Float>())
+        backgroundScope.launch(Dispatchers.Unconfined) {
+            repository.updateProgress.collect { progressValues.add(it) }
+        }
+
+        assertFalse(repository.downloadUpdate())
+
+        assertTrue("expected some progress reports", progressValues.isNotEmpty())
+        assertTrue(
+            "progress must never exceed 1.0: $progressValues",
+            progressValues.all { it in 0f..1f }
+        )
+        assertTrue(
+            "a failed download must never report completion: $progressValues",
+            progressValues.none { it >= 1f }
+        )
+    }
+
+    // ——— resume safety ———
+
+    @Test
+    fun `a stale resume marker cannot push the writer past the real end of the file`() = runTest {
+        val payload = apkPayload(8192)
+        // Only 10 real bytes on disk, while the legacy sidecar claims 5000. The old
+        // code seeked to 5000 on the fresh file and produced a sparse, oversized APK.
+        updateFile.writeBytes(payload.copyOfRange(0, 10))
+        offsetSidecar.writeText("5000")
+
+        val source = InMemoryStreamSource(payload)
+        val repository = repository(source)
+        repository.adoptAvailableUpdate(update(assetSize = payload.size.toLong()))
+
+        assertTrue(repository.downloadUpdate())
+
+        assertEquals("must resume from the bytes really on disk", listOf(10L), source.requestedOffsets)
+        assertEquals("file must be exactly the asset size", payload.size.toLong(), updateFile.length())
+        assertArrayEquals(payload, updateFile.readBytes())
+        assertEquals(UpdateRepository.UpdateState.DOWNLOADED, repository.updateState.value)
+    }
+
+    @Test
+    fun `a partial file that is not an apk prefix is discarded and fetched from zero`() = runTest {
+        val payload = apkPayload(4096)
+        updateFile.writeBytes(ByteArray(10))
+        offsetSidecar.writeText("4096")
+
+        val source = InMemoryStreamSource(payload)
+        val repository = repository(source)
+        repository.adoptAvailableUpdate(update(assetSize = payload.size.toLong()))
+
+        assertTrue(repository.downloadUpdate())
+
+        assertEquals(listOf(0L), source.requestedOffsets)
+        assertArrayEquals(payload, updateFile.readBytes())
+    }
+
+    @Test
+    fun `a server that ignores the Range header restarts from zero instead of appending`() = runTest {
+        val payload = apkPayload(8192)
+        updateFile.writeBytes(payload.copyOfRange(0, 4096))
+
+        val source = InMemoryStreamSource(payload, ignoreRange = true)
+        val repository = repository(source)
+        repository.adoptAvailableUpdate(update(assetSize = payload.size.toLong()))
+
+        assertTrue(repository.downloadUpdate())
+
+        assertEquals("the first attempt may ask to resume", listOf(4096L), source.requestedOffsets)
+        assertEquals(
+            "the whole body must have replaced the partial, not been appended to it",
+            payload.size.toLong(),
+            updateFile.length()
+        )
+        assertArrayEquals(payload, updateFile.readBytes())
+    }
+
+    // ——— size fallbacks ———
+
+    @Test
+    fun `a release without an asset size falls back to the response length`() = runTest {
+        val payload = apkPayload(2048)
+        val repository = repository(InMemoryStreamSource(payload))
+        repository.adoptAvailableUpdate(update(assetSize = 0L))
+        assertEquals(UpdateRepository.UpdateState.AVAILABLE, repository.updateState.value)
+
+        assertTrue(repository.downloadUpdate())
+
+        assertEquals(UpdateRepository.UpdateState.DOWNLOADED, repository.updateState.value)
+        assertEquals(1f, repository.updateProgress.value, 0f)
+        assertEquals(payload.size.toLong(), updateFile.length())
+    }
+
+    @Test
+    fun `a retry resumes from the partial file and completes the transfer`() = runTest {
+        val payload = apkPayload(4096)
+        // Each response only ever delivers 2048 bytes from the requested offset, so
+        // the first attempt stops short and the second one has to resume it.
+        val source = InMemoryStreamSource(payload, bytesAvailable = 2048)
+        val repository = repository(source)
+        repository.adoptAvailableUpdate(update(assetSize = payload.size.toLong()))
+
+        assertTrue(repository.downloadUpdate())
+
+        assertEquals(listOf(0L, 2048L), source.requestedOffsets)
+        assertArrayEquals(payload, updateFile.readBytes())
+        assertEquals(UpdateRepository.UpdateState.DOWNLOADED, repository.updateState.value)
+    }
+
+    @Test
+    fun `a truncated stream with only a response length is rejected`() = runTest {
+        val payload = apkPayload(2048)
+        // The response advertises 4096 bytes but the payload is only 2048, so every
+        // attempt ends short of the length the server itself reported.
+        val repository = repository(InMemoryStreamSource(payload, sizeHint = 4096L))
+        repository.adoptAvailableUpdate(update(assetSize = 0L))
+
+        assertFalse(repository.downloadUpdate())
+
+        assertEquals(UpdateRepository.UpdateState.ERROR, repository.updateState.value)
+        assertNull(repository.downloadedApkPath.value)
+        assertFalse(updateFile.exists())
+    }
+
+    @Test
+    fun `with no size information a partial file is refetched from zero`() = runTest {
+        val payload = apkPayload(1024)
+        updateFile.writeBytes(payload.copyOfRange(0, 512))
+
+        val source = InMemoryStreamSource(payload, sizeHint = -1L)
+        val repository = repository(source)
+        repository.adoptAvailableUpdate(update(assetSize = 0L))
+
+        assertTrue(repository.downloadUpdate())
+
+        assertEquals("a partial file cannot be trusted without a size", listOf(0L), source.requestedOffsets)
+        assertArrayEquals(payload, updateFile.readBytes())
+    }
+
+    // ——— surviving a restart ———
+
+    @Test
+    fun `a verified apk already on disk makes the adopted release offer install`() {
+        val payload = apkPayload(4096)
+        updateFile.writeBytes(payload)
+
+        val repository = repository(InMemoryStreamSource(ByteArray(0)))
+        val state = repository.adoptAvailableUpdate(update(assetSize = payload.size.toLong()))
+
+        assertEquals(UpdateRepository.UpdateState.DOWNLOADED, state)
+        assertEquals(updateFile.absolutePath, repository.downloadedApkPath.value)
+        assertEquals(1f, repository.updateProgress.value, 0f)
+    }
+
+    @Test
+    fun `a leftover of the wrong size keeps offering download and stays resumable`() {
+        updateFile.writeBytes(apkPayload(4096).copyOfRange(0, 1024))
+
+        val repository = repository(InMemoryStreamSource(ByteArray(0)))
+        val state = repository.adoptAvailableUpdate(update(assetSize = 4096L))
+
+        assertEquals(UpdateRepository.UpdateState.AVAILABLE, state)
+        assertNull(repository.downloadedApkPath.value)
+        assertTrue("the partial must be kept for resuming", updateFile.exists())
+    }
+
+    @Test
+    fun `a leftover of the right size that is not an apk is not offered for install`() {
+        updateFile.writeBytes(ByteArray(4096))
+
+        val repository = repository(InMemoryStreamSource(ByteArray(0)))
+        val state = repository.adoptAvailableUpdate(update(assetSize = 4096L))
+
+        assertEquals(UpdateRepository.UpdateState.AVAILABLE, state)
+        assertNull(repository.downloadedApkPath.value)
+    }
+
+    // ——— the installer gate ———
+
+    @Test
+    fun `install refuses a file that was corrupted after the download`() = runTest {
+        val payload = apkPayload(4096)
+        val repository = repository(InMemoryStreamSource(payload))
+        repository.adoptAvailableUpdate(update(assetSize = payload.size.toLong()))
+        assertTrue(repository.downloadUpdate())
+
+        // Something truncated the file after it was marked ready.
+        updateFile.writeBytes(ByteArray(4096))
+
+        assertFalse(repository.installDownloadedApk())
+        assertEquals(UpdateRepository.UpdateState.AVAILABLE, repository.updateState.value)
+        assertNotNull(repository.updateError.value)
+        assertFalse(updateFile.exists())
+    }
+
+    // ——— helpers ———
+
+    private fun repository(source: UpdateStreamSource): UpdateRepository =
+        UpdateRepository(context, streamSource = source, retryDelayMs = 0L)
+
+    private fun update(assetSize: Long) = UpdateRepository.AvailableUpdate(
+        tagName = "v9.9.9",
+        versionName = "9.9.9",
+        versionCode = 9_09_09L,
+        downloadUrl = "https://example.invalid/agentisco-debug.apk",
+        releaseNotes = "",
+        assetName = "agentisco-debug.apk",
+        assetSize = assetSize
+    )
+
+    /** Bytes that pass the signature check: "PK\u0003\u0004" followed by filler. */
+    private fun apkPayload(size: Int): ByteArray {
+        val bytes = ByteArray(size)
+        bytes[0] = 0x50
+        bytes[1] = 0x4B
+        bytes[2] = 0x03
+        bytes[3] = 0x04
+        for (i in 4 until size) bytes[i] = (i % 251).toByte()
+        return bytes
+    }
+
+    /**
+     * Serves a fixed payload from memory. [bytesAvailable] cuts the stream short,
+     * which is what a dropped connection looks like to the reader; [sizeHint] is the
+     * size the "server" reports; [ignoreRange] makes a Range request answer with the
+     * whole body from zero.
+     */
+    private class InMemoryStreamSource(
+        private val payload: ByteArray,
+        private val bytesAvailable: Int = payload.size,
+        private val sizeHint: Long = payload.size.toLong(),
+        private val ignoreRange: Boolean = false
+    ) : UpdateStreamSource {
+        val requestedOffsets = mutableListOf<Long>()
+
+        override fun open(url: String, offset: Long): UpdateStream {
+            requestedOffsets.add(offset)
+            val start = if (ignoreRange) 0 else offset.coerceIn(0L, payload.size.toLong()).toInt()
+            val end = minOf(payload.size, start + bytesAvailable).coerceAtLeast(start)
+            return UpdateStream(
+                input = ByteArrayInputStream(payload, start, end - start),
+                totalSizeHint = sizeHint,
+                rangeIgnored = ignoreRange && offset > 0L
+            )
+        }
+    }
+}

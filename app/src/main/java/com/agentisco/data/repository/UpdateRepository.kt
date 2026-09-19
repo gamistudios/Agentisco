@@ -21,11 +21,20 @@ import java.util.Locale
 
 /**
  * Repository for checking app updates against the GitHub Releases API,
- * downloading the APK chunk-wise with resume via .offset side file,
- * and installing via FileProvider.
+ * downloading the APK with resume from the bytes already on disk, verifying the
+ * result against the asset size GitHub reports, and installing via FileProvider.
+ *
+ * A download is only ever marked [UpdateState.DOWNLOADED] (the state that offers
+ * Install) after [UpdateDownloadVerifier] confirms the file on disk is exactly the
+ * expected size and really is our APK.
  */
-class UpdateRepository(private val context: Context) {
-    private val client = OkHttpClient()
+class UpdateRepository(
+    private val context: Context,
+    private val client: OkHttpClient = OkHttpClient(),
+    private val streamSource: UpdateStreamSource = HttpUpdateStreamSource(client),
+    /** Backoff between download attempts; overridable so tests don't wait. */
+    private val retryDelayMs: Long = RETRY_DELAY_MS
+) {
 
     enum class UpdateState {
         IDLE, CHECKING, AVAILABLE, DOWNLOADING, DOWNLOADED, ERROR
@@ -36,7 +45,15 @@ class UpdateRepository(private val context: Context) {
         val versionName: String,
         val versionCode: Long,
         val downloadUrl: String,
-        val releaseNotes: String
+        val releaseNotes: String,
+        /** Name of the APK asset in the release, as reported by the GitHub API. */
+        val assetName: String = "",
+        /**
+         * Byte size of that asset, as reported by the GitHub API. This is the
+         * authoritative download total: progress and completion are measured
+         * against it, not against whatever the HTTP response happened to send.
+         */
+        val assetSize: Long = 0L
     )
 
     private val _updateState = MutableStateFlow(UpdateState.IDLE)
@@ -81,7 +98,7 @@ class UpdateRepository(private val context: Context) {
                 val notes = json.optString("body", "")
 
                 var apkName: String? = null
-                var apkSize: Long? = null
+                var apkSize = 0L
 
                 // Find the -debug.apk file from assets
                 val assets = json.getJSONArray("assets")
@@ -113,16 +130,20 @@ class UpdateRepository(private val context: Context) {
 
                 val isNewer = remoteCode > localCode
                 if (isNewer) {
-                    _availableUpdate.value = AvailableUpdate(
-                        tagName = tagName,
-                        versionName = versionName,
-                        versionCode = remoteCode,
-                        downloadUrl = apkUrl,
-                        releaseNotes = notes
+                    adoptAvailableUpdate(
+                        AvailableUpdate(
+                            tagName = tagName,
+                            versionName = versionName,
+                            versionCode = remoteCode,
+                            downloadUrl = apkUrl,
+                            releaseNotes = notes,
+                            assetName = apkName,
+                            assetSize = apkSize
+                        )
                     )
-                    _updateState.value = UpdateState.AVAILABLE
                 } else {
                     _availableUpdate.value = null
+                    _downloadedApkPath.value = null
                     _updateState.value = UpdateState.IDLE
                 }
                 isNewer
@@ -134,6 +155,35 @@ class UpdateRepository(private val context: Context) {
             _updateError.value = e.message ?: "Unknown error"
             _updateState.value = UpdateState.ERROR
             false
+        }
+    }
+
+    /**
+     * Records [update] as the pending release and derives the state the UI should
+     * show for it.
+     *
+     * A previous run may already have finished this very download, so the file on
+     * disk is re-validated against the freshly fetched asset size: when it is
+     * complete and really our APK the state goes straight to [UpdateState.DOWNLOADED]
+     * (Install) instead of [UpdateState.AVAILABLE] (Download). This is also the entry
+     * point tests use to point the downloader at a known asset.
+     */
+    fun adoptAvailableUpdate(update: AvailableUpdate): UpdateState {
+        _availableUpdate.value = update
+        // Without a size (or a Content-Length fallback) the leftover cannot be
+        // checked, so never claim it is ready.
+        val verifiedLeftover = update.assetSize > 0L &&
+            verifyUpdateFile(expectedSize = update.assetSize, downloadedFromZero = false).complete
+        return if (verifiedLeftover) {
+            _downloadedApkPath.value = updateFile().absolutePath
+            _updateProgress.value = 1f
+            _updateState.value = UpdateState.DOWNLOADED
+            UpdateState.DOWNLOADED
+        } else {
+            _downloadedApkPath.value = null
+            _updateProgress.value = 0f
+            _updateState.value = UpdateState.AVAILABLE
+            UpdateState.AVAILABLE
         }
     }
 
@@ -165,135 +215,197 @@ class UpdateRepository(private val context: Context) {
     }
 
     /**
-     * Chunk-wise download with .offset side file for resume. Never uses HTTP
-     * Range to avoid GitHub 416 responses.
+     * Downloads the pending release APK, resuming from the bytes really present on
+     * disk.
+     *
+     * Progress and completion are measured against [AvailableUpdate.assetSize] — the
+     * size GitHub reports for the asset — never against the response that happens to
+     * be in flight (a resumed response only describes the remaining range). Returns
+     * true, and sets [UpdateState.DOWNLOADED], only when the finished file is exactly
+     * that size and [UpdateDownloadVerifier] recognises it as our APK; anything else
+     * surfaces an error through [updateError] and removes the unusable file.
      */
     suspend fun downloadUpdate(): Boolean = withContext(Dispatchers.IO) {
         val update = _availableUpdate.value ?: return@withContext false
         val file = updateFile()
-        val offsetFile = File(file.parentFile, "${file.name}.offset")
+        // Resume markers written by older builds are no longer trusted; a stale one
+        // could point past a truncated file and make the writer seek beyond EOF.
+        val legacyOffsetFile = File(file.parentFile, "${file.name}.offset")
 
         _updateState.value = UpdateState.DOWNLOADING
         _updateError.value = null
         downloadCancelled = false
 
+        // GitHub's asset size is authoritative; Content-Length only fills in when
+        // the release omits it.
+        var expectedSize = update.assetSize.takeIf { it > 0L } ?: 0L
+        var lastError: String? = null
         var attempt = 0
-        var totalSize: Long? = null
-        var downloadedOffset: Long = 0L
-        var startOffset: Long = 0L
 
         while (attempt < MAX_ATTEMPTS) {
+            attempt++
             try {
                 if (downloadCancelled) throw AbortedDownloadException()
+                legacyOffsetFile.delete()
 
-                val existingOffset = if (offsetFile.exists()) {
-                    offsetFile.readText().toLongOrNull() ?: 0L
-                } else {
-                    0L
+                var offset = 0L
+                if (file.length() > 0L) {
+                    // Without a known size a partial file cannot be validated, so it is
+                    // re-fetched from zero (a full, non-range download) instead of trusted.
+                    offset = if (expectedSize <= 0L) {
+                        0L
+                    } else {
+                        UpdateDownloadVerifier.resumeOffset(
+                            existingBytes = file.length(),
+                            expectedSize = expectedSize,
+                            existingPrefixIsApk = UpdateDownloadVerifier.hasApkMagic(file)
+                        )
+                    }
+                    // Nothing usable to resume from: start from a clean file rather
+                    // than writing on top of a truncated or foreign one.
+                    if (offset == 0L) file.delete()
                 }
-                val existingBytes = if (file.exists()) file.length() else 0L
 
-                if (existingBytes != existingOffset) {
-                    if (existingOffset > existingBytes || existingOffset == 0L) {
+                streamSource.open(update.downloadUrl, offset).use { stream ->
+                    if (stream.rangeIgnored && offset > 0L) {
+                        // The server answered our Range request with the whole file;
+                        // appending it would duplicate bytes, so restart at zero.
                         file.delete()
-                        if (existingOffset > 0) offsetFile.delete()
-                    } else {
-                        RandomAccessFile(file, "rw").use { raf -> raf.seek(existingOffset) }
+                        offset = 0L
                     }
-                }
-
-                downloadedOffset = existingBytes
-                val request = Request.Builder()
-                    .url(update.downloadUrl)
-                    .apply { if (downloadedOffset > 0) header("Range", "bytes=$downloadedOffset-") }
-                    .build()
-
-                client.newCall(request).execute().use { response ->
-                    if (!response.isSuccessful) {
-                        throw Exception("Download failed (HTTP ${response.code})")
+                    if (expectedSize <= 0L && stream.totalSizeHint > 0L) {
+                        expectedSize = stream.totalSizeHint
                     }
 
-                    val body = response.body ?: throw Exception("Empty response body")
-                    val contentLength = body.contentLength()
-                    totalSize = contentLength.takeIf { it > 0 } ?: (downloadedOffset + 100 * 1024 * 1024)
-                    startOffset = downloadedOffset
+                    val startOffset = offset
+                    val startedAtZero = startOffset == 0L
+                    _updateProgress.value =
+                        UpdateDownloadVerifier.progress(startOffset, expectedSize)
 
-                    // If server returns empty body for range request, just continue from current position
-                    if (contentLength == 0L && downloadedOffset > 0L) {
-                        // No data returned, continue downloading
-                    } else {
-                        body.byteStream().use { input ->
-                            val buffer = ByteArray(64 * 1024)
-                            var bytesCopied = 0
-                            while (true) {
-                                if (downloadCancelled) throw AbortedDownloadException()
-                                val read = input.read(buffer)
-                                if (read == -1) break
-
-                                RandomAccessFile(file, "rw").use { raf ->
-                                    raf.seek(startOffset + bytesCopied)
-                                    raf.write(buffer, 0, read)
-                                }
-                                bytesCopied += read
-                                downloadedOffset += read
-
-                                if (bytesCopied % (64 * 1024) == 0 || read < 0) {
-                                    offsetFile.writeText(downloadedOffset.toString())
-                                }
-
-                                _updateProgress.value = downloadedOffset.toFloat() / totalSize.toFloat()
-                            }
+                    RandomAccessFile(file, "rw").use { raf ->
+                        raf.seek(startOffset)
+                        // Drop anything past the resume point so the file can only
+                        // ever grow into exactly the bytes we are writing now.
+                        raf.setLength(startOffset)
+                        val buffer = ByteArray(BUFFER_SIZE)
+                        var bytesCopied = 0L
+                        while (true) {
+                            if (downloadCancelled) throw AbortedDownloadException()
+                            val read = stream.input.read(buffer)
+                            if (read == -1) break
+                            raf.write(buffer, 0, read)
+                            bytesCopied += read
+                            _updateProgress.value = UpdateDownloadVerifier.progress(
+                                bytesOnDisk = startOffset + bytesCopied,
+                                expectedSize = expectedSize
+                            )
                         }
                     }
-                }
 
-                if (downloadCancelled) {
-                    _updateProgress.value = downloadedOffset.toFloat() / (totalSize?.toFloat() ?: 1f)
-                    _downloadedApkPath.value = file.absolutePath
-                    return@withContext false
-                }
+                    val bytesOnDisk = file.length()
+                    val decision = verifyUpdateFile(
+                        expectedSize = expectedSize,
+                        downloadedFromZero = startedAtZero
+                    )
+                    if (!decision.complete) {
+                        throw Exception(decision.reason ?: "Download verification failed")
+                    }
 
-                // Verify download completed successfully
-                if (downloadedOffset == file.length()) {
-                    offsetFile.delete()
-                    _updateProgress.value = 1f
+                    _updateProgress.value = UpdateDownloadVerifier.progress(
+                        bytesOnDisk = bytesOnDisk,
+                        expectedSize = expectedSize,
+                        verified = true
+                    )
                     _downloadedApkPath.value = file.absolutePath
                     _updateState.value = UpdateState.DOWNLOADED
                     return@withContext true
-                } else {
-                    throw Exception("Truncated download: $downloadedOffset bytes downloaded, but ${file.length()} bytes expected")
                 }
             } catch (e: AbortedDownloadException) {
+                // Cancelling keeps the partial file so the next run resumes it.
                 _downloadedApkPath.value = file.absolutePath
-                _updateProgress.value = if (file.exists()) {
-                    if (totalSize != null) file.length().toFloat() / totalSize else 0f
-                } else 0f
+                _updateProgress.value = UpdateDownloadVerifier.progress(file.length(), expectedSize)
                 return@withContext false
             } catch (e: CancellationException) {
                 _downloadedApkPath.value = file.absolutePath
-                _updateProgress.value = if (file.exists()) {
-                    if (totalSize != null) file.length().toFloat() / totalSize else 0f
-                } else 0f
+                _updateProgress.value = UpdateDownloadVerifier.progress(file.length(), expectedSize)
                 throw e
             } catch (e: Exception) {
-                attempt++
-                if (attempt >= MAX_ATTEMPTS) {
-                    _updateError.value = e.message ?: "Download failed"
-                    _downloadedApkPath.value = file.absolutePath
-                    _updateProgress.value = if (file.exists()) {
-                        if (totalSize != null) file.length().toFloat() / totalSize else 0f
-                    } else 0f
-                    _updateState.value = UpdateState.ERROR
-                    return@withContext false
-                }
-                kotlinx.coroutines.delay(attempt * RETRY_DELAY_MS)
+                lastError = e.message ?: "Download failed"
+            }
+
+            if (attempt < MAX_ATTEMPTS) {
+                kotlinx.coroutines.delay(attempt * retryDelayMs)
             }
         }
+
+        // Every attempt failed: drop the partial so a truncated or foreign file can
+        // never be installed later, and let the retry start from scratch.
+        file.delete()
+        legacyOffsetFile.delete()
+        _downloadedApkPath.value = null
+        _updateProgress.value = 0f
+        _updateError.value = lastError ?: "Download failed"
+        _updateState.value = UpdateState.ERROR
         return@withContext false
     }
 
+    /**
+     * Reads the update file from disk and validates it against [expectedSize].
+     *
+     * @param downloadedFromZero whether the transfer that produced the file started at
+     *        offset 0 — the fallback proof of completeness when no size is known.
+     */
+    private fun verifyUpdateFile(
+        expectedSize: Long,
+        downloadedFromZero: Boolean
+    ): UpdateDownloadVerifier.Decision {
+        val file = updateFile()
+        return UpdateDownloadVerifier.decide(
+            expectedSize = expectedSize,
+            actualSize = if (file.exists()) file.length() else 0L,
+            hasApkMagic = UpdateDownloadVerifier.hasApkMagic(file),
+            actualPackage = readApkPackageName(file),
+            downloadedFromZero = downloadedFromZero
+        )
+    }
+
+    /**
+     * Package name declared by the APK at [file], or null when the platform cannot
+     * parse it. Robolectric (and any environment whose PackageManager has no APK
+     * parsing) reports "unknown" instead of failing, so the verifier rejects only a
+     * file that positively belongs to someone else.
+     */
+    private fun readApkPackageName(file: File): String? {
+        if (file.length() < UpdateDownloadVerifier.MAGIC_LENGTH) return null
+        if (!platformCanParseApks()) return null
+        return try {
+            // flags = 0 is what targetSdk 28 needs to read the manifest; the newer
+            // PackageInfoFlags overload only exists from API 33.
+            @Suppress("DEPRECATION")
+            val info = context.packageManager.getPackageArchiveInfo(file.absolutePath, 0)
+            info?.packageName
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /** False on Robolectric/JVM, where PackageManager cannot parse a real APK. */
+    private fun platformCanParseApks(): Boolean = try {
+        !android.os.Build.FINGERPRINT.contains("robolectric", ignoreCase = true)
+    } catch (t: Throwable) {
+        false
+    }
+
+    /**
+     * Aborts the in-flight download. The partial file is kept so the next
+     * [downloadUpdate] resumes it, and the state returns to [UpdateState.AVAILABLE]
+     * so the UI offers Download again instead of staying stuck on "Downloading".
+     */
     fun cancelDownload() {
         downloadCancelled = true
+        if (_availableUpdate.value != null && _updateState.value == UpdateState.DOWNLOADING) {
+            _updateState.value = UpdateState.AVAILABLE
+        }
     }
 
     fun resetToIdle() {
@@ -306,6 +418,20 @@ class UpdateRepository(private val context: Context) {
         val path = _downloadedApkPath.value ?: return false
         val realPath = File(path)
         if (!realPath.exists()) return false
+
+        // Final gate in front of the package installer: the file must still be the
+        // expected size and be a real Agentisco APK, whatever marked it ready.
+        val expectedSize = _availableUpdate.value?.assetSize?.takeIf { it > 0L } ?: realPath.length()
+        val decision = verifyUpdateFile(expectedSize = expectedSize, downloadedFromZero = true)
+        if (!decision.complete) {
+            realPath.delete()
+            _downloadedApkPath.value = null
+            _updateProgress.value = 0f
+            _updateError.value = decision.reason ?: UpdateDownloadVerifier.NOT_AN_APK_REASON
+            _updateState.value = UpdateState.AVAILABLE
+            return false
+        }
+
         return try {
             val uri = FileProvider.getUriForFile(
                 context,
@@ -342,5 +468,6 @@ class UpdateRepository(private val context: Context) {
         private const val UPDATE_APK_NAME = "agentisco-update.apk"
         private const val MAX_ATTEMPTS = 5
         private const val RETRY_DELAY_MS = 2_000L
+        private const val BUFFER_SIZE = 64 * 1024
     }
 }
