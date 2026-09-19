@@ -160,17 +160,8 @@ fun AgentScreen(
               overflow = TextOverflow.Ellipsis
             )
             Text(
-              text = activeSession?.let { s ->
-                val modelName = allModels.firstOrNull { it.id == s.modelId }?.displayName
-                val providerName = providers.firstOrNull { it.id == s.providerId }?.name
-                val modelInfo = when {
-                  modelName != null && providerName != null -> "$providerName · $modelName"
-                  modelName != null -> modelName
-                  providerName != null -> providerName
-                  else -> null
-                }
-                val sessionsText = "${sessions.size} session${if (sessions.size == 1) "" else "s"} · ${relativeTime(s.updatedAt)}"
-                if (modelInfo != null) "$sessionsText · $modelInfo" else sessionsText
+              text = activeSession?.let {
+                "${sessions.size} session${if (sessions.size == 1) "" else "s"} · ${relativeTime(it.updatedAt)}"
               } ?: "Start chatting to create one",
               color = TextMuted,
               fontSize = 9.sp,
@@ -336,9 +327,7 @@ fun AgentScreen(
           showSessionSheet = false
         },
         onRename = { renameTarget = it },
-        onDelete = { viewModel.deleteChatSession(it.id) },
-        models = allModels,
-        providers = providers
+        onDelete = { viewModel.deleteChatSession(it.id) }
       )
     }
   }
@@ -381,9 +370,7 @@ private fun SessionSheet(
   onSelect: (AgentSessionEntity) -> Unit,
   onNew: () -> Unit,
   onRename: (AgentSessionEntity) -> Unit,
-  onDelete: (AgentSessionEntity) -> Unit,
-  models: List<com.agentisco.settings.model.AIModel> = emptyList(),
-  providers: List<com.agentisco.settings.model.AIProvider> = emptyList()
+  onDelete: (AgentSessionEntity) -> Unit
 ) {
   Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp)) {
     Row(
@@ -443,21 +430,6 @@ private fun SessionSheet(
                 color = TextMuted,
                 fontSize = 9.sp
               )
-              val modelName = models.firstOrNull { it.id == session.modelId }?.displayName
-              val providerName = providers.firstOrNull { it.id == session.providerId }?.name
-              if (modelName != null || providerName != null) {
-                Text(
-                  text = when {
-                    modelName != null && providerName != null -> "$providerName · $modelName"
-                    modelName != null -> modelName
-                    else -> providerName!!
-                  },
-                  color = CyanAccent.copy(alpha = 0.8f),
-                  fontSize = 8.sp,
-                  maxLines = 1,
-                  overflow = TextOverflow.Ellipsis
-                )
-              }
             }
             IconButton(onClick = { onRename(session) }, modifier = Modifier.size(26.dp)) {
               Icon(Icons.Default.Edit, contentDescription = "Rename", tint = TextMuted, modifier = Modifier.size(13.dp))
@@ -745,6 +717,23 @@ private fun AgentTurnCard(
         MiniAction("Review changes") { onNavigate(AppDestination.DIFF) }
         MiniAction("Open files") { onNavigate(AppDestination.FILES) }
       }
+    }
+
+    // Which provider/model answered this turn — a session can switch models
+    // mid-conversation, so attribution belongs on the message, not the chat.
+    val attribution = listOfNotNull(item.providerName, item.modelName).joinToString(" · ")
+    if (attribution.isNotBlank()) {
+      Spacer(modifier = Modifier.height(6.dp))
+      Text(
+        text = attribution,
+        color = TextMuted,
+        fontSize = 8.sp,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier
+          .fillMaxWidth()
+          .testTag("chat_turn_attribution")
+      )
     }
   }
 }

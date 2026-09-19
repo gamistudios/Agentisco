@@ -47,12 +47,6 @@ data class LlmRequest(
   val messages: List<LlmMessage>,
   val tools: List<LlmToolSpec> = emptyList(),
   val maxOutputTokens: Int? = null,
-  val temperature: Double? = null,
-  val topP: Double? = null,
-  val topK: Int? = null,
-  val stopSequences: List<String> = emptyList(),
-  val responseMimeType: String? = null,
-  val responseJsonSchema: String? = null,
   /** Background tasks (commit msgs, titles) suppress the model's reasoning mode. */
   val disableReasoning: Boolean = false,
   /**

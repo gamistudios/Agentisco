@@ -353,14 +353,12 @@ class WorkspaceViewModel(
 
   fun createChatSession(title: String = "New session") {
     if (isAgentWorking.value) return
-    val model = selectedModel.value
     viewModelScope.launch {
       val project = activeProject.value
       val now = System.currentTimeMillis()
       val session = AgentSessionEntity(
         id = AgentChatStore.newId(), projectId = project.path,
-        title = title, status = "active", createdAt = now, updatedAt = now,
-        modelId = model?.id, providerId = model?.providerId
+        title = title, status = "active", createdAt = now, updatedAt = now
       )
       chatStore.createSessionBlocking(session)
       _activeSessionId.value = session.id
@@ -455,7 +453,6 @@ class WorkspaceViewModel(
   fun editUserMessage(userMessageUuid: String, newContent: String) {
     val session = _activeSessionId.value ?: return
     val wasWorking = repository.isAgentWorking.value
-    val model = selectedModel.value
 
     // Interrupt if currently working
     if (wasWorking) {
@@ -479,18 +476,19 @@ class WorkspaceViewModel(
       // the streaming blocks that follow attach to it by uuid, so without it
       // the whole response would be written as orphans the UI never renders.
       val turnUuid = AgentChatStore.newId()
+      val (providerName, modelName) = turnAttribution()
       chatStore.insertMessage(
         AgentMessageEntity(
           uuid = turnUuid, sessionId = session, role = "assistant_turn", content = "",
-          status = "running", statusMessage = "Starting…", createdAt = System.currentTimeMillis()
+          status = "running", statusMessage = "Starting…", createdAt = System.currentTimeMillis(),
+          providerName = providerName, modelName = modelName
         )
       )
       pointAtTurn(turnUuid)
 
-      // Update the session title and model info based on new prompt
+      // Update the session title based on the new prompt
       val newTitle = newContent.lineSequence().firstOrNull()?.take(48) ?: "Edited"
       chatStore.renameSession(session, newTitle)
-      chatStore.updateSessionModel(session, model?.id, model?.providerId)
 
       repository.runAgentTask(newContent, session)
     }
@@ -745,7 +743,6 @@ class WorkspaceViewModel(
   fun runAgentTask(prompt: String) {
     if (repository.isAgentWorking.value) return
     _isAgentCancelled.value = false
-    val model = selectedModel.value
     agentJob = viewModelScope.launch {
       val project = activeProject.value
       // Ensure a session: reuse the active one or create one titled from the prompt.
@@ -756,8 +753,7 @@ class WorkspaceViewModel(
         val session = AgentSessionEntity(
           id = AgentChatStore.newId(), projectId = project.path,
           title = prompt.lineSequence().firstOrNull()?.take(48) ?: "New session",
-          status = "running", createdAt = now, updatedAt = now,
-          modelId = model?.id, providerId = model?.providerId
+          status = "running", createdAt = now, updatedAt = now
         )
         chatStore.createSessionBlocking(session)
         sessionId = session.id
@@ -779,15 +775,13 @@ class WorkspaceViewModel(
   fun runAgentTaskInNewSession(prompt: String) {
     if (repository.isAgentWorking.value) return
     _isAgentCancelled.value = false
-    val model = selectedModel.value
     agentJob = viewModelScope.launch {
       val project = activeProject.value
       val now = System.currentTimeMillis()
       val session = AgentSessionEntity(
         id = AgentChatStore.newId(), projectId = project.path,
         title = prompt.lineSequence().firstOrNull()?.take(48) ?: "New session",
-        status = "running", createdAt = now, updatedAt = now,
-        modelId = model?.id, providerId = model?.providerId
+        status = "running", createdAt = now, updatedAt = now
       )
       chatStore.createSessionBlocking(session)
       _activeSessionId.value = session.id
@@ -796,10 +790,22 @@ class WorkspaceViewModel(
     }
   }
 
+  /**
+   * Provider/model pair to stamp on a turn row, resolved when the turn starts.
+   * Display names are stored (not record ids) so history survives a later
+   * rename or deletion of the configured model.
+   */
+  private fun turnAttribution(): Pair<String?, String?> {
+    val model = selectedModel.value ?: return null to null
+    val providerName = providers.value.firstOrNull { it.id == model.providerId }?.name
+    return providerName to model.displayName
+  }
+
   /** Persists the user prompt + agent turn rows, then drives the runtime. */
   private suspend fun launchTurn(prompt: String, sessionId: String) {
     val userUuid = AgentChatStore.newId()
     val turnUuid = AgentChatStore.newId()
+    val (providerName, modelName) = turnAttribution()
     chatStore.insertMessage(
       AgentMessageEntity(
         uuid = userUuid, sessionId = sessionId, role = "user", content = prompt,
@@ -809,7 +815,8 @@ class WorkspaceViewModel(
     chatStore.insertMessage(
       AgentMessageEntity(
         uuid = turnUuid, sessionId = sessionId, role = "assistant_turn", content = "",
-        status = "running", statusMessage = "Starting…", createdAt = System.currentTimeMillis()
+        status = "running", statusMessage = "Starting…", createdAt = System.currentTimeMillis(),
+        providerName = providerName, modelName = modelName
       )
     )
     currentTurnUuid = turnUuid

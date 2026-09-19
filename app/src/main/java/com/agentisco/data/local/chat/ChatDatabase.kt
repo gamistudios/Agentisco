@@ -30,11 +30,7 @@ data class AgentSessionEntity(
   /** running | completed | failed | cancelled | interrupted */
   val status: String,
   val createdAt: Long,
-  val updatedAt: Long,
-  /** Model record id used for this session (for display). */
-  val modelId: String? = null,
-  /** Provider id used for this session (for display). */
-  val providerId: String? = null
+  val updatedAt: Long
 )
 
 @Entity(
@@ -61,7 +57,15 @@ data class AgentMessageEntity(
   val status: String,
   /** last runtime status line, or the failure/cancel reason. */
   val statusMessage: String,
-  val createdAt: Long
+  val createdAt: Long,
+  /**
+   * Provider and model that produced this turn, kept as display names rather
+   * than ids: a session can switch models mid-conversation, and a later
+   * deletion or rename of the configured record must not erase the history of
+   * what actually answered. Null on user rows and on rows from before v4.
+   */
+  val providerName: String? = null,
+  val modelName: String? = null
 )
 
 @Entity(
@@ -120,9 +124,6 @@ interface ChatDao {
 
   @Query("UPDATE agent_sessions SET title = :title, updatedAt = :updatedAt WHERE id = :id")
   suspend fun renameSession(id: String, title: String, updatedAt: Long)
-
-  @Query("UPDATE agent_sessions SET modelId = :modelId, providerId = :providerId, updatedAt = :updatedAt WHERE id = :id")
-  suspend fun updateSessionModel(id: String, modelId: String?, providerId: String?, updatedAt: Long)
 
   @Query("UPDATE agent_sessions SET status = :status, updatedAt = :updatedAt WHERE id = :id")
   suspend fun setSessionStatus(id: String, status: String, updatedAt: Long)
@@ -215,13 +216,30 @@ interface ChatDao {
 
 @Database(
   entities = [AgentSessionEntity::class, AgentMessageEntity::class, AgentBlockEntity::class],
-  version = 3,
+  version = 5,
   exportSchema = false
 )
 abstract class ChatDatabase : RoomDatabase() {
   abstract fun chatDao(): ChatDao
 
   companion object {
+    /** True when [column] still exists on [table] (older SQLite has no DROP COLUMN). */
+    private fun hasColumn(
+      db: androidx.sqlite.db.SupportSQLiteDatabase,
+      table: String,
+      column: String
+    ): Boolean {
+      val cursor = db.query("PRAGMA table_info(`$table`)")
+      return try {
+        val nameIndex = cursor.getColumnIndex("name")
+        var found = false
+        while (cursor.moveToNext() && !found) found = cursor.getString(nameIndex) == column
+        found
+      } finally {
+        cursor.close()
+      }
+    }
+
     val MIGRATION_1_2 = object : androidx.room.migration.Migration(1, 2) {
       override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
         db.execSQL("ALTER TABLE agent_blocks ADD COLUMN callId TEXT")
@@ -232,6 +250,51 @@ abstract class ChatDatabase : RoomDatabase() {
       override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
         db.execSQL("ALTER TABLE agent_sessions ADD COLUMN modelId TEXT")
         db.execSQL("ALTER TABLE agent_sessions ADD COLUMN providerId TEXT")
+      }
+    }
+
+    val MIGRATION_3_4 = object : androidx.room.migration.Migration(3, 4) {
+      override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE agent_messages ADD COLUMN providerName TEXT")
+        db.execSQL("ALTER TABLE agent_messages ADD COLUMN modelName TEXT")
+      }
+    }
+
+    /**
+     * Drops the session-level model/provider columns, which per-message
+     * attribution replaced. Pre-drop rebuild of agent_sessions is the only way
+     * on the SQLite shipped by older APIs, and dropping a parent table deletes
+     * its children when foreign keys are enforced — which Room does not arrange
+     * for during a migration. So every descendant row is snapshotted first and
+     * restored afterwards, which is a no-op when nothing was cascaded away.
+     */
+    val MIGRATION_4_5 = object : androidx.room.migration.Migration(4, 5) {
+      override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+        if (!hasColumn(db, "agent_sessions", "modelId") &&
+          !hasColumn(db, "agent_sessions", "providerId")
+        ) return
+
+        db.execSQL(
+          "CREATE TABLE `agent_sessions_new` (`id` TEXT NOT NULL, `projectId` TEXT NOT NULL, " +
+            "`title` TEXT NOT NULL, `status` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, " +
+            "`updatedAt` INTEGER NOT NULL, PRIMARY KEY(`id`))"
+        )
+        db.execSQL(
+          "INSERT INTO `agent_sessions_new` " +
+            "SELECT `id`, `projectId`, `title`, `status`, `createdAt`, `updatedAt` FROM `agent_sessions`"
+        )
+        db.execSQL("CREATE TABLE `_sessions_v4_messages` AS SELECT * FROM `agent_messages`")
+        db.execSQL("CREATE TABLE `_sessions_v4_blocks` AS SELECT * FROM `agent_blocks`")
+        db.execSQL("DROP TABLE `agent_sessions`")
+        db.execSQL("ALTER TABLE `agent_sessions_new` RENAME TO `agent_sessions`")
+        db.execSQL(
+          "CREATE INDEX IF NOT EXISTS `index_agent_sessions_projectId_updatedAt` " +
+            "ON `agent_sessions` (`projectId`, `updatedAt`)"
+        )
+        db.execSQL("INSERT OR IGNORE INTO `agent_messages` SELECT * FROM `_sessions_v4_messages`")
+        db.execSQL("INSERT OR IGNORE INTO `agent_blocks` SELECT * FROM `_sessions_v4_blocks`")
+        db.execSQL("DROP TABLE `_sessions_v4_messages`")
+        db.execSQL("DROP TABLE `_sessions_v4_blocks`")
       }
     }
   }

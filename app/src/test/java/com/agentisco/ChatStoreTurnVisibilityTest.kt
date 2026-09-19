@@ -5,6 +5,8 @@ import com.agentisco.data.local.chat.AgentBlockEntity
 import com.agentisco.data.local.chat.AgentMessageEntity
 import com.agentisco.data.local.chat.AgentSessionEntity
 import com.agentisco.data.repository.AgentChatStore
+import com.agentisco.ui.AgentTurnItem
+import com.agentisco.ui.toChatItem
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -121,5 +123,52 @@ class ChatStoreTurnVisibilityTest {
     val remaining = store.messagesWithBlocks(sessionId).first()
     assertEquals("only the edited user message survives", 1, remaining.size)
     assertEquals(user, remaining[0].message.uuid)
+  }
+
+  /**
+   * One session can be answered by different models: the composer dropdown is
+   * live between turns, so attribution is written per message row and must
+   * never bleed across turns in the same session.
+   */
+  @Test
+  fun `each turn keeps its own provider and model within one session`() = runBlocking {
+    val sessionId = "sess-attribution"
+    val now = System.currentTimeMillis()
+    store.createSessionBlocking(
+      AgentSessionEntity(
+        id = sessionId, projectId = "/proj", title = "T", status = "running",
+        createdAt = now, updatedAt = now
+      )
+    )
+    put(
+      AgentMessageEntity(
+        uuid = AgentChatStore.newId(), sessionId = sessionId, role = "assistant_turn",
+        content = "", status = "completed", statusMessage = "", createdAt = now,
+        providerName = "Gemini", modelName = "gemini-3.1-flash-lite"
+      )
+    )
+    put(
+      AgentMessageEntity(
+        uuid = AgentChatStore.newId(), sessionId = sessionId, role = "assistant_turn",
+        content = "", status = "completed", statusMessage = "", createdAt = now,
+        providerName = "OpenRouter", modelName = "gpt-oss-120b"
+      )
+    )
+    // A turn recorded before v4 has no attribution at all.
+    put(
+      AgentMessageEntity(
+        uuid = AgentChatStore.newId(), sessionId = sessionId, role = "assistant_turn",
+        content = "", status = "completed", statusMessage = "", createdAt = now
+      )
+    )
+
+    val turns = store.messagesWithBlocks(sessionId).first().map { it.toChatItem() }
+    assertEquals(
+      listOf("Gemini · gemini-3.1-flash-lite", "OpenRouter · gpt-oss-120b", ""),
+      turns.map {
+        val t = it as AgentTurnItem
+        listOfNotNull(t.providerName, t.modelName).joinToString(" · ")
+      }
+    )
   }
 }

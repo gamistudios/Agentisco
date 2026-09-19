@@ -25,7 +25,10 @@ data class AgentTurnItem(
   override val id: String,
   val status: TurnStatus,
   val statusMessage: String,
-  val blocks: List<TurnBlock>
+  val blocks: List<TurnBlock>,
+  /** Provider/model that answered this turn; null on turns recorded before v4. */
+  val providerName: String? = null,
+  val modelName: String? = null
 ) : ChatItem()
 
 sealed class TurnBlock {
@@ -93,7 +96,9 @@ fun MessageWithBlocks.toChatItem(): ChatItem {
         else -> TurnStatus.COMPLETED
       },
       statusMessage = message.statusMessage,
-      blocks = blocks.mapNotNull { it.toTurnBlock() }
+      blocks = blocks.mapNotNull { it.toTurnBlock() },
+      providerName = message.providerName,
+      modelName = message.modelName
     )
   }
 }
