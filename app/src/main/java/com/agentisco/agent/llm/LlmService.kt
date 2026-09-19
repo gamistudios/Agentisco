@@ -26,7 +26,8 @@ import java.util.concurrent.TimeUnit
  * AgentRuntime → LlmService → protocol client → provider HTTP API
  */
 class LlmService(
-  httpClient: OkHttpClient? = null
+  httpClient: OkHttpClient? = null,
+  private val chainStore: GeminiChainStore = GeminiChainStoreImpl()
 ) {
   private val http = httpClient ?: OkHttpClient.Builder()
     .connectTimeout(30, TimeUnit.SECONDS)
@@ -52,7 +53,7 @@ class LlmService(
   ): Unit = when (provider.protocol) {
     LLMProtocol.OPENAI_CHAT_COMPLETIONS -> OpenAIChatCompletionsClient(http).streamChat(provider, model, apiKey, request, onEvent)
     LLMProtocol.ANTHROPIC_MESSAGES -> AnthropicMessagesClient(http).streamChat(provider, model, apiKey, request, onEvent)
-    LLMProtocol.GOOGLE_GEMINI -> GeminiNativeClient(http).streamChat(provider, model, apiKey, request, onEvent)
+    LLMProtocol.GOOGLE_GEMINI -> GeminiInteractionsClient(http, chainStore).streamChat(provider, model, apiKey, request, onEvent)
   }
 
   /**
@@ -67,7 +68,7 @@ class LlmService(
     val client = when (provider.protocol) {
       LLMProtocol.OPENAI_CHAT_COMPLETIONS -> OpenAIChatCompletionsClient(http)
       LLMProtocol.ANTHROPIC_MESSAGES -> AnthropicMessagesClient(http)
-      LLMProtocol.GOOGLE_GEMINI -> GeminiNativeClient(http)
+      LLMProtocol.GOOGLE_GEMINI -> GeminiInteractionsClient(http, chainStore)
     }
 
     // Stage 1: free credential/endpoint probe via the provider's model listing.
@@ -121,7 +122,10 @@ internal abstract class BaseLlmClient(protected val http: OkHttpClient) {
   /** Free credential/endpoint probe via the provider's model listing (no tokens billed). */
   internal abstract suspend fun probeModels(provider: AIProvider, apiKey: String): Pair<Boolean, String>
 
-  internal class StreamState {
+  /** Overridden by protocols that need per-stream state beyond the shared fields. */
+  protected open fun newState(): StreamState = StreamState()
+
+  internal open class StreamState {
     val content = StringBuilder()
     // Keyed by provider block index: OpenAI streams tool-call argument
     // fragments across chunks where only the first carries the id/name.
@@ -142,7 +146,7 @@ internal abstract class BaseLlmClient(protected val http: OkHttpClient) {
     return runCatching { JSONObject(text).toString() }.getOrDefault(text)
   }
 
-  suspend fun streamChat(
+  open suspend fun streamChat(
     provider: AIProvider,
     model: AIModel,
     apiKey: String,
@@ -153,7 +157,7 @@ internal abstract class BaseLlmClient(protected val http: OkHttpClient) {
     if (provider.baseUrl.isBlank()) throw LlmException("No base URL configured for provider \"${provider.name}\".", LlmErrorKind.UNSUPPORTED)
 
     val stream = model.capabilities.streaming
-    val state = StreamState()
+    val state = newState()
     var interrupted = false
     val call = http.newCall(buildRequest(provider, model, apiKey, request, stream))
     LlmStreamRegistry.activeCall = call
@@ -534,176 +538,384 @@ internal class AnthropicMessagesClient(http: OkHttpClient) : BaseLlmClient(http)
   }
 }
 
-/** Google Gemini native GenerateContent protocol. */
-internal class GeminiNativeClient(http: OkHttpClient) : BaseLlmClient(http) {
+/**
+ * Google Gemini Interactions protocol (`POST /v1beta/interactions`).
+ *
+ * Unlike generateContent this API is stateful: the provider holds the
+ * transcript, and a continuation turn sends only its own delta plus the
+ * `previous_interaction_id` of the turn before it. Function calling works only
+ * through that chain — prior calls cannot be replayed from local history — so
+ * the id is persisted per [LlmRequest.conversationKey] and an app restart
+ * resumes the same server-side conversation.
+ *
+ * Responses are step-based: `thought` (reasoning), `model_output` (the answer)
+ * and `function_call` (a tool the model asks us to run — execution always stays
+ * on-device). Unknown event types are skipped rather than treated as fatal.
+ */
+internal class GeminiInteractionsClient(
+  http: OkHttpClient,
+  private val chainStore: GeminiChainStore
+) : BaseLlmClient(http) {
+
+  private companion object {
+    const val DEFAULT_MAX_OUTPUT_TOKENS = 65536
+    /**
+     * Thinking tokens are billed against max_output_tokens, so a small cap makes
+     * the interaction end as "incomplete" with no answer at all.
+     */
+    const val MIN_MAX_OUTPUT_TOKENS = 8192
+    const val DEFAULT_THINKING_LEVEL = "medium"
+  }
+
+  private var chainKey: String? = null
+  private var chainDisabled = false
+  private var sentChainId = false
+  private var priorEnvironmentId: String? = null
+
+  internal class PendingCall(val id: String, val name: String, val args: StringBuilder)
+
+  internal class InteractionsState : StreamState() {
+    var interactionId: String? = null
+    var environmentId: String? = null
+    var status: String? = null
+    val pendingCalls = HashMap<Int, PendingCall>()
+  }
+
+  override fun newState(): StreamState = InteractionsState()
+
+  /**
+   * A rejected chain is recoverable, so it is retried once here instead of
+   * surfacing: the provider purges idle interactions, and the local transcript
+   * can always reopen the conversation.
+   */
+  override suspend fun streamChat(
+    provider: AIProvider,
+    model: AIModel,
+    apiKey: String,
+    request: LlmRequest,
+    onEvent: (LlmStreamEvent) -> Unit
+  ) {
+    var reopen = false
+    try {
+      super.streamChat(provider, model, apiKey, request) { event ->
+        if (event is LlmStreamEvent.Failed && isRejectedChain(event.error)) reopen = true else onEvent(event)
+      }
+    } catch (e: LlmException) {
+      if (!reopen) throw e
+    }
+    if (!reopen) return
+    request.conversationKey?.let { chainStore.clear(it) }
+    chainDisabled = true
+    super.streamChat(provider, model, apiKey, request, onEvent)
+  }
+
+  private fun isRejectedChain(error: LlmException): Boolean =
+    sentChainId && (error.httpCode == 400 || error.httpCode == 404)
 
   override internal fun buildRequest(provider: AIProvider, model: AIModel, apiKey: String, request: LlmRequest, stream: Boolean): Request {
+    chainKey = request.conversationKey?.takeIf { it.isNotBlank() }
+    val stored = chainKey?.takeIf { !chainDisabled }?.let { chainStore.load(it) }
+      ?.takeIf { it.interactionId.isNotBlank() }
+    priorEnvironmentId = stored?.environmentId
+
+    // A continuation carries only the turn the provider has not seen yet: the
+    // trailing tool results, or the trailing user prompt. Anything older already
+    // lives in the server-side chain and must not be replayed.
+    val continuation = stored?.let {
+      JSONArray().also { blocks -> trailingTurn(request.messages).forEach { m -> appendTurnBlock(blocks, m) } }
+    }?.takeIf { it.length() > 0 }
+    sentChainId = continuation != null
+
+    val input = continuation ?: freshChainInput(request.messages)
+    if (input.length() == 0) {
+      throw LlmException("Nothing to send to the model — the conversation has no content.", LlmErrorKind.INVALID_RESPONSE)
+    }
+
     val body = JSONObject().apply {
-      val systemText = request.messages.filter { it.role == LlmRole.SYSTEM }
-        .joinToString("\n") { it.content }
-      if (systemText.isNotBlank()) {
-        put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", systemText))))
+      put("model", model.modelId)
+      if (stream) put("stream", true)
+      if (stored != null && continuation != null) {
+        put("previous_interaction_id", stored.interactionId)
+        stored.environmentId?.let { put("environment", it) }
       }
-      put("contents", buildContents(request.messages.filter { it.role != LlmRole.SYSTEM }))
+      val systemText = request.messages.filter { it.role == LlmRole.SYSTEM }
+        .joinToString("\n") { it.content }.trim()
+      if (systemText.isNotEmpty()) put("system_instruction", systemText)
+      put("input", input)
       if (request.tools.isNotEmpty() && model.capabilities.tools) {
-        put("tools", JSONArray().put(JSONObject().put("functionDeclarations", JSONArray().apply {
+        put("tools", JSONArray().apply {
           request.tools.forEach { tool ->
             put(JSONObject().apply {
+              put("type", "function")
               put("name", tool.name)
               put("description", tool.description)
               put("parameters", runCatching { JSONObject(tool.parametersJsonSchema) }.getOrDefault(JSONObject()))
             })
           }
-        })))
+        })
       }
-      put("generationConfig", buildGenerationConfig(model, request))
+      put("generation_config", buildGenerationConfig(model, request))
     }
-    val action = if (stream) ":streamGenerateContent?alt=sse" else ":generateContent"
     return Request.Builder()
-      .url(modelUrl(provider, model, action))
+      .url(provider.baseUrl.trimEnd('/') + "/interactions")
       .header("x-goog-api-key", apiKey)
       .post(jsonBody(body))
       .build()
   }
 
-  private fun buildContents(messages: List<LlmMessage>): JSONArray {
-    val contents = JSONArray()
-    var index = 0
-    while (index < messages.size) {
-      val message = messages[index]
-      if (message.role == LlmRole.TOOL) {
-        val parts = JSONArray()
-        while (index < messages.size && messages[index].role == LlmRole.TOOL) {
-          val result = messages[index]
-          parts.put(JSONObject().put("functionResponse", JSONObject().apply {
-            put("name", result.toolName.orEmpty())
-            result.toolCallId?.takeIf { it.isNotBlank() }?.let { put("id", it) }
-            put("response", JSONObject().put("result", result.content))
-          }))
-          index++
-        }
-        contents.put(JSONObject().put("role", "user").put("parts", parts))
-        continue
-      }
-
-      val parts = JSONArray()
-      message.content.takeIf { it.isNotEmpty() }?.let { parts.put(JSONObject().put("text", it)) }
-      message.inlineData.forEach { media ->
-        parts.put(JSONObject().put("inline_data", JSONObject().apply {
-          put("mime_type", media.mimeType)
-          put("data", Base64.encodeToString(media.data, Base64.NO_WRAP))
-        }))
-      }
-      if (message.role == LlmRole.ASSISTANT) {
-        message.toolCalls.forEach { call ->
-          parts.put(JSONObject().put("functionCall", JSONObject().apply {
-            put("name", call.name)
-            put("id", call.id)
-            put("args", runCatching { JSONObject(normalizeArgs(call.argumentsJson)) }.getOrDefault(JSONObject()))
-          }))
-        }
-      }
-      if (parts.length() > 0) {
-        contents.put(JSONObject().apply {
-          put("role", if (message.role == LlmRole.ASSISTANT) "model" else "user")
-          put("parts", parts)
-        })
-      }
-      index++
+  /**
+   * The messages that make up the turn about to be sent: a batch of tool
+   * results, or a single user prompt. The agent loop only ever requests a
+   * response after appending one of those two shapes.
+   */
+  private fun trailingTurn(messages: List<LlmMessage>): List<LlmMessage> = when (messages.lastOrNull()?.role) {
+    LlmRole.TOOL -> {
+      val start = messages.indexOfLast { it.role != LlmRole.TOOL } + 1
+      messages.subList(start, messages.size)
     }
-    return contents
+    LlmRole.USER -> listOf(messages.last())
+    else -> emptyList()
   }
 
-  private fun buildGenerationConfig(model: AIModel, request: LlmRequest): JSONObject = JSONObject().apply {
-    val settings = model.generationSettings
-    (request.maxOutputTokens ?: model.maxOutputTokens)?.let { put("maxOutputTokens", it) }
-    (request.temperature ?: settings.temperature)?.let { put("temperature", it) }
-    (request.topP ?: settings.topP)?.let { put("topP", it) }
-    (request.topK ?: settings.topK)?.let { put("topK", it) }
-    val stopSequences = request.stopSequences.ifEmpty { settings.stopSequences }
-    if (stopSequences.isNotEmpty()) put("stopSequences", JSONArray(stopSequences))
-    val schema = request.responseJsonSchema ?: settings.responseJsonSchema
-    val responseMimeType = request.responseMimeType ?: settings.responseMimeType
-    (responseMimeType ?: if (!schema.isNullOrBlank()) "application/json" else null)?.let { put("responseMimeType", it) }
-    schema?.takeIf { it.isNotBlank() }?.let {
-      put("responseJsonSchema", runCatching { JSONObject(it) }.getOrElse {
-        throw LlmException("Gemini structured-output schema must be valid JSON.", LlmErrorKind.INVALID_RESPONSE)
-      })
+  /**
+   * Opening a chain has no server-side transcript to lean on, so the earlier
+   * conversation is rendered as labeled text: Interactions input blocks carry no
+   * role, and prior function calls cannot be replayed into a new chain.
+   */
+  private fun freshChainInput(messages: List<LlmMessage>): JSONArray {
+    val input = JSONArray()
+    val transcript = messages.filter { it.role != LlmRole.SYSTEM }
+    val endsWithUser = transcript.lastOrNull()?.role == LlmRole.USER
+    val rendered = renderTranscript(if (endsWithUser) transcript.dropLast(1) else transcript)
+    if (rendered.isNotBlank()) input.put(textBlock(rendered))
+    if (endsWithUser) {
+      val last = transcript.last()
+      if (last.content.isNotEmpty()) input.put(textBlock(last.content))
+      last.inlineData.forEach { input.put(imageBlock(it)) }
+    } else if (transcript.isNotEmpty()) {
+      // A resumed turn ends in tool results; they were rendered above, so state
+      // plainly what the model should do with them.
+      input.put(textBlock("Continue from the tool results above."))
     }
-    model.reasoning?.takeIf { it.enabled && !request.disableReasoning }?.let { reasoning ->
-      put("thinkingConfig", JSONObject().apply {
-        put("thinkingLevel", reasoning.effort.uppercase())
-        put("includeThoughts", model.capabilities.interleavedReasoning)
-      })
+    return input
+  }
+
+  private fun appendTurnBlock(input: JSONArray, message: LlmMessage) {
+    when (message.role) {
+      // The provider produced the assistant turns itself and already holds them.
+      LlmRole.SYSTEM, LlmRole.ASSISTANT -> Unit
+      LlmRole.TOOL -> input.put(functionResultBlock(message))
+      LlmRole.USER -> {
+        if (message.content.isNotEmpty()) input.put(textBlock(message.content))
+        message.inlineData.forEach { input.put(imageBlock(it)) }
+      }
+    }
+  }
+
+  private fun renderTranscript(messages: List<LlmMessage>): String {
+    val relevant = messages.filter { it.role != LlmRole.SYSTEM }
+    if (relevant.isEmpty()) return ""
+    val sb = StringBuilder("[Earlier conversation]\n")
+    for (m in relevant) {
+      when (m.role) {
+        LlmRole.USER -> if (m.content.isNotBlank()) sb.append("User: ").append(m.content).append('\n')
+        LlmRole.ASSISTANT -> {
+          if (m.content.isNotBlank()) sb.append("Assistant: ").append(m.content).append('\n')
+          m.toolCalls.forEach { sb.append("Assistant called ").append(it.name).append('(').append(it.argumentsJson).append(")\n") }
+        }
+        LlmRole.TOOL -> sb.append("Tool ").append(m.toolName ?: "result").append(" returned: ").append(m.content).append('\n')
+        LlmRole.SYSTEM -> Unit
+      }
+    }
+    return sb.append("[End of earlier conversation]").toString()
+  }
+
+  private fun textBlock(text: String) = JSONObject().put("type", "text").put("text", text)
+
+  private fun imageBlock(media: LlmInlineData) = JSONObject().apply {
+    put("type", "image")
+    put("mime_type", media.mimeType)
+    put("data", Base64.encodeToString(media.data, Base64.NO_WRAP))
+  }
+
+  private fun functionResultBlock(message: LlmMessage) = JSONObject().apply {
+    put("type", "function_result")
+    put("name", message.toolName.orEmpty())
+    message.toolCallId?.takeIf { it.isNotBlank() }?.let { put("call_id", it) }
+    put("result", JSONObject().put("content", JSONArray().put(textBlock(message.content))))
+  }
+
+  /**
+   * Users may leave every generation field blank: agentic work needs a large
+   * output budget (thinking is billed against it) and a real reasoning level.
+   */
+  private fun buildGenerationConfig(model: AIModel, request: LlmRequest) = JSONObject().apply {
+    val maxTokens = request.maxOutputTokens ?: model.maxOutputTokens ?: DEFAULT_MAX_OUTPUT_TOKENS
+    put("max_output_tokens", maxTokens.coerceAtLeast(MIN_MAX_OUTPUT_TOKENS))
+    put("thinking_level", thinkingLevel(model, request))
+  }
+
+  private fun thinkingLevel(model: AIModel, request: LlmRequest): String {
+    val reasoning = model.reasoning?.takeIf { it.enabled && !request.disableReasoning }
+    if (reasoning == null) return if (request.disableReasoning) "low" else DEFAULT_THINKING_LEVEL
+    return when (reasoning.effort.lowercase()) {
+      "low", "minimal", "none" -> "low"
+      "high", "max", "maximum" -> "high"
+      else -> "medium"
     }
   }
 
   override internal fun handleData(data: String, state: StreamState, onEvent: (LlmStreamEvent) -> Unit): Boolean {
     if (data == "[DONE]") return true
+    val s = state as InteractionsState
     val obj = runCatching { JSONObject(data) }.getOrElse {
       throw LlmException("Provider returned invalid JSON.", LlmErrorKind.INVALID_RESPONSE)
     }
-    obj.optJSONObject("error")?.let { error ->
-      throw LlmException(error.optString("message", "Gemini provider error"), LlmErrorKind.SERVER)
-    }
-    state.usage = obj.optJSONObject("usageMetadata")?.toUsage() ?: state.usage
-    val candidate = obj.optJSONArray("candidates")?.optJSONObject(0) ?: return false
-    val parts = candidate.optJSONObject("content")?.optJSONArray("parts")
-    if (parts != null) {
-      for (index in 0 until parts.length()) {
-        val part = parts.optJSONObject(index) ?: continue
-        part.optString("text").takeIf { it.isNotEmpty() }?.let { text ->
-          if (part.optBoolean("thought", false)) onEvent(LlmStreamEvent.ReasoningToken(text))
-          else {
-            state.content.append(text)
-            onEvent(LlmStreamEvent.Token(text))
-          }
-        }
-        part.optJSONObject("functionCall")?.let { functionCall ->
-          val name = functionCall.optString("name")
-          val arguments = normalizeArgs(functionCall.optJSONObject("args")?.toString() ?: "{}")
-          val wireId = cleanWireString(functionCall.optString("id"))
-          val existing = state.toolCalls.entries.firstOrNull { entry ->
-            (wireId.isNotEmpty() && entry.value.id == wireId) ||
-              (wireId.isEmpty() && entry.value.name == name && entry.value.argumentsJson == arguments)
-          }
-          val key = existing?.key ?: state.toolCalls.size
-          val call = LlmToolCall(
-            id = existing?.value?.id ?: wireId.ifEmpty { "gemini_call_$key" },
-            name = name,
-            argumentsJson = arguments
-          )
-          state.toolCalls[key] = call
-          if (existing == null) onEvent(LlmStreamEvent.ToolCallRequested(call))
-        }
-      }
-    }
-    val wireFinishReason = candidate.optString("finishReason").takeIf { it.isNotBlank() }
-    if (wireFinishReason != null) {
-      state.finishReason = if (state.toolCalls.isNotEmpty()) LlmFinishReason.TOOL_CALLS else normalizeFinishReason(wireFinishReason)
+    // Non-streaming responses are the interaction object itself, with no event_type.
+    val eventType = obj.optString("event_type")
+    if (eventType.isEmpty()) {
+      absorbInteraction(obj, s, onEvent)
       return true
+    }
+    when (eventType) {
+      "interaction.created" -> obj.optJSONObject("interaction")?.let { captureChain(it, s) }
+      "step.start" -> stepStart(obj, s, onEvent)
+      "step.delta" -> stepDelta(obj, s, onEvent)
+      "step.stop" -> stepStop(obj, s)
+      "interaction.completed" -> obj.optJSONObject("interaction")?.let { absorbInteraction(it, s, onEvent) }
+      "error" -> throw providerError(obj.optJSONObject("error"))
+      // interaction.status_update, done, and any future event type carry nothing
+      // the agent acts on.
     }
     return false
   }
 
+  private fun captureChain(obj: JSONObject, s: InteractionsState) {
+    cleanWireString(obj.optString("id")).takeIf { it.isNotEmpty() }?.let { s.interactionId = it }
+    cleanWireString(obj.optString("environment_id")).takeIf { it.isNotEmpty() }?.let { s.environmentId = it }
+  }
+
+  private fun absorbInteraction(obj: JSONObject, s: InteractionsState, onEvent: (LlmStreamEvent) -> Unit) {
+    captureChain(obj, s)
+    obj.optJSONObject("usage")?.let { s.usage = it.toUsage() }
+    val steps = obj.optJSONArray("steps")
+    if (steps != null) {
+      for (index in 0 until steps.length()) steps.optJSONObject(index)?.let { absorbStep(it, index, s, onEvent) }
+    }
+    val status = obj.optString("status").takeIf { it.isNotBlank() }
+    if (status != null) {
+      s.status = status
+      s.finishReason = when (status) {
+        "requires_action" -> LlmFinishReason.TOOL_CALLS
+        "completed" -> if (s.toolCalls.isNotEmpty()) LlmFinishReason.TOOL_CALLS else LlmFinishReason.STOP
+        "incomplete" -> LlmFinishReason.LENGTH
+        "failed" -> LlmFinishReason.ERROR
+        else -> s.finishReason
+      }
+    }
+    commitChain(s)
+  }
+
+  /** Only a finished interaction advances the chain, so a mid-stream failure cannot poison it. */
+  private fun commitChain(s: InteractionsState) {
+    val key = chainKey ?: return
+    val id = s.interactionId ?: return
+    when (s.status) {
+      "completed", "requires_action", "incomplete" ->
+        chainStore.save(
+          key,
+          GeminiChainState(id, s.environmentId ?: priorEnvironmentId, System.currentTimeMillis())
+        )
+    }
+  }
+
+  private fun absorbStep(step: JSONObject, index: Int, s: InteractionsState, onEvent: (LlmStreamEvent) -> Unit) {
+    when (step.optString("type")) {
+      "model_output" -> {
+        val content = step.optJSONArray("content") ?: return
+        for (i in 0 until content.length()) {
+          val text = content.optJSONObject(i)?.optString("text").orEmpty()
+          if (text.isNotEmpty()) {
+            s.content.append(text)
+            onEvent(LlmStreamEvent.Token(text))
+          }
+        }
+      }
+      "function_call" -> {
+        val call = toolCall(step, index)
+        s.toolCalls[index] = call
+        onEvent(LlmStreamEvent.ToolCallRequested(call))
+      }
+      // thought (signature only), our own function_result, and provider-executed
+      // steps such as google_search_result add no text the agent should re-emit.
+    }
+  }
+
+  private fun stepStart(obj: JSONObject, s: InteractionsState, onEvent: (LlmStreamEvent) -> Unit) {
+    val index = obj.optInt("index")
+    val step = obj.optJSONObject("step") ?: return
+    if (step.optString("type") != "function_call") return
+    // Arguments arrive as later deltas; announce the call now so the UI shows it.
+    val call = toolCall(step, index)
+    s.pendingCalls[index] = PendingCall(call.id, call.name, StringBuilder())
+    onEvent(LlmStreamEvent.ToolCallRequested(call))
+  }
+
+  private fun stepDelta(obj: JSONObject, s: InteractionsState, onEvent: (LlmStreamEvent) -> Unit) {
+    val index = obj.optInt("index")
+    val delta = obj.optJSONObject("delta") ?: return
+    when (delta.optString("type")) {
+      "text" -> {
+        val text = delta.optString("text")
+        if (text.isNotEmpty()) {
+          s.content.append(text)
+          onEvent(LlmStreamEvent.Token(text))
+        }
+      }
+      "thought_summary" -> {
+        val text = delta.optJSONObject("content")?.optString("text").orEmpty()
+        if (text.isNotEmpty()) onEvent(LlmStreamEvent.ReasoningToken(text))
+      }
+      "arguments_delta" -> s.pendingCalls[index]?.args?.append(delta.optString("arguments"))
+      // thought_signature, image and audio have no text the agent can use.
+    }
+  }
+
+  private fun stepStop(obj: JSONObject, s: InteractionsState) {
+    val index = obj.optInt("index")
+    s.pendingCalls.remove(index)?.let { pending ->
+      s.toolCalls[index] = LlmToolCall(pending.id, pending.name, normalizeArgs(pending.args.toString()))
+    }
+    obj.optJSONObject("usage")?.let { s.usage = it.toUsage() }
+  }
+
+  private fun toolCall(step: JSONObject, index: Int) = LlmToolCall(
+    id = cleanWireString(step.optString("id")).ifEmpty { "gemini_call_$index" },
+    name = step.optString("name"),
+    argumentsJson = normalizeArgs(step.opt("arguments")?.toString())
+  )
+
+  private fun providerError(error: JSONObject?): LlmException {
+    val message = error?.optString("message")?.takeIf { it.isNotBlank() } ?: "Gemini provider error"
+    when {
+      error?.optString("code").orEmpty().contains("rate_limit") -> return LlmException(message, LlmErrorKind.RATE_LIMIT)
+      error?.optString("code").orEmpty().let { it.contains("deadline") || it.contains("timeout") } ->
+        return LlmException(message, LlmErrorKind.TIMEOUT)
+      error?.optString("code") == "invalid_request" -> return LlmException(message, LlmErrorKind.INVALID_RESPONSE)
+    }
+    return LlmException(message, LlmErrorKind.SERVER)
+  }
+
   private fun JSONObject.toUsage(): LlmUsage = LlmUsage(
-    inputTokens = optIntOrNull("promptTokenCount"),
-    outputTokens = optIntOrNull("candidatesTokenCount"),
-    cachedInputTokens = optIntOrNull("cachedContentTokenCount"),
-    reasoningTokens = optIntOrNull("thoughtsTokenCount"),
-    totalTokens = optIntOrNull("totalTokenCount")
+    inputTokens = optIntOrNull("total_input_tokens"),
+    outputTokens = optIntOrNull("total_output_tokens"),
+    cachedInputTokens = optIntOrNull("total_cached_tokens"),
+    reasoningTokens = optIntOrNull("total_thought_tokens"),
+    totalTokens = optIntOrNull("total_tokens")
   )
 
   private fun JSONObject.optIntOrNull(name: String): Int? =
     if (has(name) && !isNull(name)) optInt(name) else null
-
-  private fun normalizeFinishReason(value: String): LlmFinishReason = when (value.uppercase()) {
-    "STOP" -> LlmFinishReason.STOP
-    "MAX_TOKENS" -> LlmFinishReason.LENGTH
-    "SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII", "IMAGE_SAFETY" -> LlmFinishReason.CONTENT_FILTER
-    "MALFORMED_FUNCTION_CALL" -> LlmFinishReason.ERROR
-    else -> LlmFinishReason.OTHER
-  }
 
   override suspend fun probeModels(provider: AIProvider, apiKey: String): Pair<Boolean, String> {
     return try {
@@ -725,9 +937,6 @@ internal class GeminiNativeClient(http: OkHttpClient) : BaseLlmClient(http) {
       false to "Network error: ${e.message ?: "connection failed"}"
     }
   }
-
-  private fun modelUrl(provider: AIProvider, model: AIModel, action: String): String =
-    provider.baseUrl.trimEnd('/') + "/models/" + model.modelId.removePrefix("models/") + action
 }
 
 /** Shared holder for the in-flight streaming call so Stop can abort blocked socket reads. */

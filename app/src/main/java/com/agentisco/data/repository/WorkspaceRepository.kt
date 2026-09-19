@@ -2,7 +2,6 @@ package com.agentisco.data.repository
 
 import com.agentisco.settings.model.AIProvider
 import com.agentisco.settings.model.AIModel
-import com.agentisco.settings.model.ModelGenerationSettings
 import com.agentisco.agent.model.AgentPermissions
 import com.agentisco.agent.model.PendingApproval
 import com.agentisco.agent.model.ToolExecution
@@ -110,7 +109,11 @@ class WorkspaceRepository(
 
   // LLM communication + agent tooling. Providers are configuration only; the
   // protocol adapter is chosen from the provider config, never from its name.
-  private val llmService = com.agentisco.agent.llm.LlmService()
+  // The chain store keeps Gemini Interactions' server-side conversation ids, so
+  // a session continues where it left off even after the app is restarted.
+  private val llmService = com.agentisco.agent.llm.LlmService(
+    chainStore = com.agentisco.agent.llm.GeminiChainStoreImpl(appContext)
+  )
   private val toolRegistry = com.agentisco.agent.tool.AgentToolRegistry(
     fileSystem = fileSystem,
     gitManager = gitManager,
@@ -460,7 +463,6 @@ class WorkspaceRepository(
     maxOutputTokens: Int?,
     capabilities: com.agentisco.settings.model.ModelCapabilities,
     reasoning: com.agentisco.settings.model.ReasoningConfig?,
-    generationSettings: ModelGenerationSettings = ModelGenerationSettings(),
     recordId: String? = null
   ): AIModel? {
     if (modelId.isBlank() || displayName.isBlank()) return null
@@ -473,8 +475,7 @@ class WorkspaceRepository(
       contextWindow = contextWindow,
       maxOutputTokens = maxOutputTokens,
       capabilities = capabilities,
-      reasoning = reasoning,
-      generationSettings = generationSettings
+      reasoning = reasoning
     )
     providerStore?.upsertModel(model)
     _aiModels.value = providerStore?.getModels() ?: (_aiModels.value.filterNot { it.id == model.id } + model)
@@ -1427,11 +1428,13 @@ class WorkspaceRepository(
   }
 
   // Run Real Agent Task Workflow. `sessionId` ties the run to a persisted chat
-  // session; every request is built from the complete persisted conversation.
+  // session: stateless protocols rebuild every request from the full persisted
+  // conversation, while stateful ones (Gemini Interactions) use it to resume
+  // their server-side chain and send only the new turn.
   suspend fun runAgentTask(prompt: String, sessionId: String? = null) {
     if (_isAgentWorking.value) return
     val history = sessionId?.let { chatStore.buildConversationMessages(it, excludeLastUser = true) } ?: emptyList()
-    executeAgentTask(prompt, history, resume = false)
+    executeAgentTask(prompt, history, resume = false, sessionId = sessionId)
   }
 
   /**
@@ -1442,10 +1445,15 @@ class WorkspaceRepository(
   suspend fun resumeAgentTask(turnUuid: String, sessionId: String) {
     if (_isAgentWorking.value) return
     val history = chatStore.buildConversationMessages(sessionId, excludeLastUser = false, currentTurnUuid = turnUuid)
-    executeAgentTask("", history, resume = true)
+    executeAgentTask("", history, resume = true, sessionId = sessionId)
   }
 
-  private suspend fun executeAgentTask(prompt: String, history: List<com.agentisco.data.repository.ChatHistoryMessage>, resume: Boolean) {
+  private suspend fun executeAgentTask(
+    prompt: String,
+    history: List<com.agentisco.data.repository.ChatHistoryMessage>,
+    resume: Boolean,
+    sessionId: String?
+  ) {
     val model = _selectedModel.value
     if (model == null) {
       _agentStatusText.value = "No model selected — configure a provider and select a model in Settings first."
@@ -1477,6 +1485,7 @@ class WorkspaceRepository(
         apiKey = apiKey,
         permissions = { _permissions.value },
         terminalSession = currentSession,
+        sessionId = sessionId,
         history = history,
         resume = resume,
         onRequestApproval = { approval -> _pendingApproval.value = approval },

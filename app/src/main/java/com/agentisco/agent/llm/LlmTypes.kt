@@ -54,7 +54,13 @@ data class LlmRequest(
   val responseMimeType: String? = null,
   val responseJsonSchema: String? = null,
   /** Background tasks (commit msgs, titles) suppress the model's reasoning mode. */
-  val disableReasoning: Boolean = false
+  val disableReasoning: Boolean = false,
+  /**
+   * Stable conversation identity, used only by stateful protocols (Gemini
+   * Interactions) to resume a server-side chain instead of resending history.
+   * Stateless protocols ignore it and rebuild context from [messages].
+   */
+  val conversationKey: String? = null
 )
 
 /** Errors surfaced by the LLM communication layer; user-facing, never containing secrets. */

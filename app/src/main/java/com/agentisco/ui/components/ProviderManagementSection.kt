@@ -30,7 +30,6 @@ import com.agentisco.settings.model.AIModel
 import com.agentisco.settings.model.AIProvider
 import com.agentisco.settings.model.LLMProtocol
 import com.agentisco.settings.model.ModelCapabilities
-import com.agentisco.settings.model.ModelGenerationSettings
 import com.agentisco.settings.model.ReasoningConfig
 import com.agentisco.ui.WorkspaceViewModel
 import com.agentisco.ui.theme.*
@@ -223,8 +222,8 @@ fun AIProvidersSection(viewModel: WorkspaceViewModel, modifier: Modifier = Modif
       provider = provider,
       existing = null,
       onDismiss = { addModelFor = null },
-      onSave = { providerId, modelId, name, ctxWin, maxOut, caps, reasoning, generationSettings ->
-        viewModel.saveModel(providerId, modelId, name, ctxWin, maxOut, caps, reasoning, generationSettings)
+      onSave = { providerId, modelId, name, ctxWin, maxOut, caps, reasoning ->
+        viewModel.saveModel(providerId, modelId, name, ctxWin, maxOut, caps, reasoning)
         addModelFor = null
       }
     )
@@ -236,8 +235,8 @@ fun AIProvidersSection(viewModel: WorkspaceViewModel, modifier: Modifier = Modif
       provider = provider,
       existing = model,
       onDismiss = { editModel = null },
-      onSave = { providerId, modelId, name, ctxWin, maxOut, caps, reasoning, generationSettings ->
-        viewModel.saveModel(providerId, modelId, name, ctxWin, maxOut, caps, reasoning, generationSettings, model.id)
+      onSave = { providerId, modelId, name, ctxWin, maxOut, caps, reasoning ->
+        viewModel.saveModel(providerId, modelId, name, ctxWin, maxOut, caps, reasoning, model.id)
         editModel = null
       }
     )
@@ -326,7 +325,7 @@ private fun ProviderFormDialog(
               when (protocol) {
                 LLMProtocol.OPENAI_CHAT_COMPLETIONS -> "OpenAI-compatible base, e.g. https://router.huggingface.co/v1"
                 LLMProtocol.ANTHROPIC_MESSAGES -> "Anthropic base, e.g. https://api.anthropic.com"
-                LLMProtocol.GOOGLE_GEMINI -> "Gemini native base, e.g. https://generativelanguage.googleapis.com/v1beta"
+                LLMProtocol.GOOGLE_GEMINI -> "Gemini base, e.g. https://generativelanguage.googleapis.com/v1beta"
               },
               fontSize = 9.sp, fontFamily = FontFamily.Monospace
             )
@@ -518,7 +517,7 @@ private fun ModelFormDialog(
   provider: AIProvider?,
   existing: AIModel?,
   onDismiss: () -> Unit,
-  onSave: (providerId: String, modelId: String, displayName: String, contextWindow: Int?, maxOutputTokens: Int?, ModelCapabilities, ReasoningConfig?, ModelGenerationSettings) -> Unit
+  onSave: (providerId: String, modelId: String, displayName: String, contextWindow: Int?, maxOutputTokens: Int?, ModelCapabilities, ReasoningConfig?) -> Unit
 ) {
   var modelId by remember { mutableStateOf(existing?.modelId ?: "") }
   var displayName by remember { mutableStateOf(existing?.displayName ?: "") }
@@ -532,12 +531,6 @@ private fun ModelFormDialog(
   var maxTokensParam by remember { mutableStateOf(existing?.capabilities?.maxTokensParameter ?: true) }
   var reasoningEnabled by remember { mutableStateOf(existing?.reasoning?.enabled ?: false) }
   var reasoningEffort by remember { mutableStateOf(existing?.reasoning?.effort ?: "medium") }
-  var temperature by remember { mutableStateOf(existing?.generationSettings?.temperature?.toString() ?: "") }
-  var topP by remember { mutableStateOf(existing?.generationSettings?.topP?.toString() ?: "") }
-  var topK by remember { mutableStateOf(existing?.generationSettings?.topK?.toString() ?: "") }
-  var stopSequences by remember { mutableStateOf(existing?.generationSettings?.stopSequences?.joinToString(", ") ?: "") }
-  var responseMimeType by remember { mutableStateOf(existing?.generationSettings?.responseMimeType ?: "") }
-  var responseJsonSchema by remember { mutableStateOf(existing?.generationSettings?.responseJsonSchema ?: "") }
 
   val valid = provider != null && modelId.isNotBlank() && displayName.isNotBlank()
 
@@ -608,52 +601,6 @@ private fun ModelFormDialog(
             }
           }
         }
-
-        if (provider?.protocol == LLMProtocol.GOOGLE_GEMINI) {
-          Text("Gemini generation defaults", color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Medium)
-          Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedTextField(
-              value = temperature,
-              onValueChange = { temperature = it.filter { c -> c.isDigit() || c == '.' || c == '-' } },
-              label = { Text("Temperature", fontSize = 11.sp) },
-              singleLine = true,
-              modifier = Modifier.weight(1f)
-            )
-            OutlinedTextField(
-              value = topP,
-              onValueChange = { topP = it.filter { c -> c.isDigit() || c == '.' } },
-              label = { Text("Top P", fontSize = 11.sp) },
-              singleLine = true,
-              modifier = Modifier.weight(1f)
-            )
-            OutlinedTextField(
-              value = topK,
-              onValueChange = { topK = it.filter(Char::isDigit) },
-              label = { Text("Top K", fontSize = 11.sp) },
-              singleLine = true,
-              modifier = Modifier.weight(1f)
-            )
-          }
-          OutlinedTextField(
-            value = stopSequences,
-            onValueChange = { stopSequences = it },
-            label = { Text("Stop sequences (comma-separated)", fontSize = 11.sp) },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-          )
-          CapabilityRow("JSON structured output", responseMimeType == "application/json") {
-            responseMimeType = if (it) "application/json" else ""
-          }
-          if (responseMimeType == "application/json") {
-            OutlinedTextField(
-              value = responseJsonSchema,
-              onValueChange = { responseJsonSchema = it },
-              label = { Text("Response JSON Schema", fontSize = 11.sp) },
-              minLines = 3,
-              modifier = Modifier.fillMaxWidth()
-            )
-          }
-        }
       }
     },
     confirmButton = {
@@ -670,15 +617,7 @@ private fun ModelFormDialog(
               promptCaching = promptCaching, interleavedReasoning = interleaved,
               maxTokensParameter = maxTokensParam
             ),
-            ReasoningConfig(enabled = reasoningEnabled, effort = reasoningEffort).takeIf { reasoningEnabled },
-            ModelGenerationSettings(
-              temperature = temperature.toDoubleOrNull(),
-              topP = topP.toDoubleOrNull(),
-              topK = topK.toIntOrNull(),
-              stopSequences = stopSequences.split(',').map { it.trim() }.filter { it.isNotBlank() },
-              responseMimeType = responseMimeType.takeIf { it.isNotBlank() },
-              responseJsonSchema = responseJsonSchema.takeIf { it.isNotBlank() }
-            )
+            ReasoningConfig(enabled = reasoningEnabled, effort = reasoningEffort).takeIf { reasoningEnabled }
           )
         },
         enabled = valid,

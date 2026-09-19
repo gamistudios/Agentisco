@@ -104,6 +104,12 @@ class AgentRuntime(
     apiKey: String,
     permissions: () -> AgentPermissions,
     terminalSession: TerminalSession,
+    /**
+     * Chat session identity, forwarded as the LLM conversation key. Stateful
+     * protocols (Gemini Interactions) use it to resume their server-side chain
+     * across turns and app restarts; stateless protocols ignore it.
+     */
+    sessionId: String? = null,
     history: List<com.agentisco.data.repository.ChatHistoryMessage> = emptyList(),
     resume: Boolean = false,
     onRequestApproval: (PendingApproval) -> Unit,
@@ -164,7 +170,8 @@ class AgentRuntime(
               request = LlmRequest(
                 messages = messages,
                 tools = if (useTools) toolRegistry.specs() else emptyList(),
-                maxOutputTokens = model.maxOutputTokens
+                maxOutputTokens = model.maxOutputTokens,
+                conversationKey = sessionId
               )
             ) { event ->
               when (event) {

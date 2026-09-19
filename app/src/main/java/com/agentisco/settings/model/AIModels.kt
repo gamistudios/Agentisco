@@ -34,16 +34,6 @@ data class ReasoningConfig(
   val effort: String = "medium" // provider-specific: low | medium | high
 )
 
-/** Per-model defaults forwarded only when the selected protocol supports them. */
-data class ModelGenerationSettings(
-  val temperature: Double? = null,
-  val topP: Double? = null,
-  val topK: Int? = null,
-  val stopSequences: List<String> = emptyList(),
-  val responseMimeType: String? = null,
-  val responseJsonSchema: String? = null
-)
-
 /**
  * A selectable model record. [id] is the unique record key (stable across
  * persistence); the same [modelId] identifier may exist under many providers —
@@ -58,8 +48,7 @@ data class AIModel(
   val contextWindow: Int? = null,
   val maxOutputTokens: Int? = null,
   val capabilities: ModelCapabilities = ModelCapabilities(),
-  val reasoning: ReasoningConfig? = null,
-  val generationSettings: ModelGenerationSettings = ModelGenerationSettings()
+  val reasoning: ReasoningConfig? = null
 )
 
 /**
