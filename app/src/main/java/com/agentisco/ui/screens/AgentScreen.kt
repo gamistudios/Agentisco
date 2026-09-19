@@ -72,7 +72,11 @@ import com.agentisco.ui.TurnBlock
 import com.agentisco.ui.TurnStatus
 import com.agentisco.ui.UserMessageItem
 import com.agentisco.ui.WorkspaceViewModel
+import com.agentisco.ui.components.DiffLine
+import com.agentisco.ui.components.DiffTable
 import com.agentisco.ui.components.MarkdownText
+import com.agentisco.ui.components.computeLineDiff
+import com.agentisco.ui.components.diffStats
 import com.agentisco.ui.theme.*
 import kotlinx.coroutines.launch
 import org.json.JSONObject
@@ -805,6 +809,8 @@ private fun ToolCallRow(
   val (verb, target) = friendlyToolLabel(item.name, item.argsJson)
   val icon = toolIcon(item.name)
   val iconColor = toolColor(item.name)
+  // File edits render as an inline git-style diff instead of raw JSON.
+  val diffLines = remember(item.argsJson) { editDiffForTool(item.name, item.argsJson) }
 
   Column(
     modifier = Modifier
@@ -898,6 +904,35 @@ private fun ToolCallRow(
         maxLines = if (expanded) Int.MAX_VALUE else 1,
         overflow = TextOverflow.Ellipsis
       )
+    }
+
+    // Git-style diff for file edits: -removed / +added with line numbers.
+    if (diffLines != null && diffLines.isNotEmpty()) {
+      Spacer(modifier = Modifier.height(6.dp))
+      val (added, removed) = diffStats(diffLines)
+      var showAllDiff by remember(item.id) { mutableStateOf(false) }
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("+$added", color = TerminalGreen, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, fontFamily = FontFamily.Monospace)
+        Spacer(modifier = Modifier.width(6.dp))
+        Text("\u2212$removed", color = DangerRed, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, fontFamily = FontFamily.Monospace)
+      }
+      Spacer(modifier = Modifier.height(4.dp))
+      DiffTable(
+        lines = if (showAllDiff) diffLines else diffLines.take(DIFF_PREVIEW_LINES),
+        modifier = Modifier.fillMaxWidth().testTag("chat_edit_diff")
+      )
+      if (!showAllDiff && diffLines.size > DIFF_PREVIEW_LINES) {
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+          "Show all ${diffLines.size} lines",
+          color = ElectricBlueGlow,
+          fontSize = 10.sp,
+          fontWeight = FontWeight.SemiBold,
+          modifier = Modifier
+            .clickable { showAllDiff = true }
+            .testTag("btn_show_diff_all")
+        )
+      }
     }
 
     // Cancelled calls: retry the same call, or continue and tell the model.
@@ -1480,3 +1515,27 @@ private fun toolTypeForUi(name: String): ToolType = when {
 private fun prettyJson(raw: String): String = runCatching {
   JSONObject(raw).toString(2)
 }.getOrDefault(raw)
+
+/** Collapsed diff shows a bounded preview; the user can expand the rest. */
+private const val DIFF_PREVIEW_LINES = 14
+
+/**
+ * Diff lines for file-mutation tools, or null when the tool isn't an edit.
+ * write/create have no old content persisted, so everything is an addition.
+ */
+private fun editDiffForTool(name: String, argsJson: String): List<DiffLine>? {
+  if (argsJson.isBlank() || argsJson == "{}") return null
+  val args = runCatching { JSONObject(argsJson) }.getOrNull() ?: return null
+  return when (name) {
+    "edit_file" -> {
+      val old = args.optString("old_string")
+      val new = args.optString("new_string")
+      if (old.isEmpty() && new.isEmpty()) null else computeLineDiff(old, new)
+    }
+    "write_file", "create_file" -> {
+      val content = args.optString("content")
+      if (content.isBlank()) null else computeLineDiff("", content)
+    }
+    else -> null
+  }
+}
