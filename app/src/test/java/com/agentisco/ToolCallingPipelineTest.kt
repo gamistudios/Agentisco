@@ -17,6 +17,7 @@ import com.agentisco.agent.llm.LlmStreamEvent
 import com.agentisco.agent.llm.LlmToolCall
 import com.agentisco.agent.llm.LlmToolSpec
 import com.agentisco.agent.llm.OpenAIChatCompletionsClient
+import com.agentisco.agent.llm.OpenAIResponsesClient
 import com.agentisco.agent.tool.AgentTool
 import com.agentisco.agent.tool.ToolArgumentError
 import com.agentisco.agent.tool.ToolContext
@@ -407,6 +408,299 @@ class ToolCallingPipelineTest {
       client.handleData("""{"error":{"message":"The server had an error","type":"server_error"}}""", newState()) { }
     }
     assertEquals(LlmErrorKind.SERVER, server.kind)
+  }
+
+  // ---- OpenAI Responses wire format, streaming and terminals ----
+
+  private val responsesProvider =
+    AIProvider("resp", "OpenAI Responses", "https://api.openai.com/v1", LLMProtocol.OPENAI_RESPONSES)
+
+  private fun responsesModel(
+    maxOutputTokens: Int? = null,
+    tools: Boolean = true,
+    reasoning: com.agentisco.settings.model.ReasoningConfig? = null
+  ) = AIModel(
+    id = "resp-model",
+    providerId = "resp",
+    modelId = "gpt-5.1",
+    displayName = "GPT-5.1",
+    maxOutputTokens = maxOutputTokens,
+    capabilities = com.agentisco.settings.model.ModelCapabilities(tools = tools),
+    reasoning = reasoning
+  )
+
+  @Test
+  fun `Responses request sends the system prompt as instructions and the transcript as typed items`() {
+    val client = OpenAIResponsesClient(OkHttpClient())
+    val request = client.buildRequest(
+      responsesProvider, responsesModel(maxOutputTokens = 16000), "sk-redacted",
+      LlmRequest(
+        messages = listOf(
+          LlmMessage(LlmRole.SYSTEM, "You are a coding agent."),
+          LlmMessage(LlmRole.USER, "Read src/App.tsx"),
+          LlmMessage(LlmRole.ASSISTANT, "Let me look.", toolCalls = listOf(LlmToolCall("call_1", "read_file", "{\"path\":\"src/App.tsx\"}"))),
+          LlmMessage(LlmRole.TOOL, "export default App", toolCallId = "call_1", toolName = "read_file"),
+          // An empty assistant row from persisted history contributes no item.
+          LlmMessage(LlmRole.ASSISTANT, "")
+        ),
+        tools = listOf(LlmToolSpec("read_file", testTool.description, testTool.parametersJsonSchema()))
+      ),
+      stream = true
+    )
+
+    assertEquals("https://api.openai.com/v1/responses", request.url.toString())
+    assertEquals("Bearer sk-redacted", request.header("Authorization"))
+
+    val body = bodyOf(request)
+    assertTrue(body.getBoolean("stream"))
+    assertEquals("gpt-5.1", body.getString("model"))
+    // The system prompt has its own field and never appears among the items.
+    assertEquals("You are a coding agent.", body.getString("instructions"))
+    assertFalse(body.has("messages"))
+
+    val input = body.getJSONArray("input")
+    assertEquals(4, input.length())
+    val user = input.getJSONObject(0)
+    assertEquals("message", user.getString("type"))
+    assertEquals("user", user.getString("role"))
+    assertEquals("input_text", user.getJSONArray("content").getJSONObject(0).getString("type"))
+    assertEquals("Read src/App.tsx", user.getJSONArray("content").getJSONObject(0).getString("text"))
+    // The assistant turn splits into its own text item plus one call item.
+    assertEquals("output_text", input.getJSONObject(1).getJSONArray("content").getJSONObject(0).getString("type"))
+    val call = input.getJSONObject(2)
+    assertEquals("function_call", call.getString("type"))
+    assertEquals("call_1", call.getString("call_id"))
+    assertEquals("read_file", call.getString("name"))
+    assertEquals("src/App.tsx", JSONObject(call.getString("arguments")).getString("path"))
+    // The result is a standalone item bound to the call above by call_id.
+    val result = input.getJSONObject(3)
+    assertEquals("function_call_output", result.getString("type"))
+    assertEquals("call_1", result.getString("call_id"))
+    assertEquals("export default App", result.getString("output"))
+
+    // Tool definitions are flat here, unlike Chat Completions' nested function.
+    val tool = body.getJSONArray("tools").getJSONObject(0)
+    assertEquals("function", tool.getString("type"))
+    assertEquals("read_file", tool.getString("name"))
+    assertEquals("object", tool.getJSONObject("parameters").getString("type"))
+
+    // Nothing accumulates server-side; every turn replays the whole transcript.
+    assertFalse(body.getBoolean("store"))
+  }
+
+  @Test
+  fun `Responses floors the output budget and asks for reasoning summaries only when enabled`() {
+    val client = OpenAIResponsesClient(OkHttpClient())
+    val body = bodyOf(
+      client.buildRequest(
+        responsesProvider,
+        responsesModel(
+          maxOutputTokens = 512,
+          tools = false,
+          reasoning = com.agentisco.settings.model.ReasoningConfig(enabled = true, effort = "turbo")
+        ),
+        "k",
+        LlmRequest(messages = listOf(LlmMessage(LlmRole.USER, "hi"))),
+        stream = false
+      )
+    )
+    // Thinking is billed against the cap, so a tiny one returns nothing visible.
+    assertEquals(8192, body.getInt("max_output_tokens"))
+    assertFalse(body.has("tools"))
+    // An unknown effort must not be sent verbatim; the provider rejects it.
+    assertEquals("medium", body.getJSONObject("reasoning").getString("effort"))
+    // Summaries stream only if the request asks, and they arrive as reasoning.
+    assertEquals("auto", body.getJSONObject("reasoning").getString("summary"))
+    assertFalse(body.has("instructions"))
+
+    val background = bodyOf(
+      client.buildRequest(
+        responsesProvider,
+        responsesModel(
+          maxOutputTokens = 20000,
+          tools = false,
+          reasoning = com.agentisco.settings.model.ReasoningConfig(enabled = true, effort = "high")
+        ),
+        "k",
+        LlmRequest(messages = listOf(LlmMessage(LlmRole.USER, "hi")), disableReasoning = true),
+        stream = false
+      )
+    )
+    assertFalse(background.has("reasoning"))
+    assertEquals(20000, background.getInt("max_output_tokens"))
+  }
+
+  @Test
+  fun `Responses stream binds argument deltas to their item and ends on the completed event`() {
+    val client = OpenAIResponsesClient(OkHttpClient())
+    val state = newState()
+    val events = mutableListOf<LlmStreamEvent>()
+
+    assertFalse(client.handleData("""{"type":"response.created","response":{"id":"resp_1","status":"queued"}}""", state, events::add))
+    assertFalse(client.handleData("""{"type":"response.output_item.added","output_index":0,"item":{"type":"message","id":"msg_1","role":"assistant","content":[]}}""", state, events::add))
+    assertFalse(client.handleData("""{"type":"response.reasoning_summary_text.delta","item_id":"rs_1","output_index":0,"summary_index":0,"delta":"Checking the workspace."}""", state, events::add))
+    assertFalse(client.handleData("""{"type":"response.output_text.delta","item_id":"msg_1","output_index":0,"content_index":0,"delta":"Reading "}""", state, events::add))
+    assertFalse(client.handleData("""{"type":"response.output_text.delta","item_id":"msg_1","output_index":0,"content_index":0,"delta":"now"}""", state, events::add))
+    // The call is announced before any of its arguments have arrived.
+    assertFalse(client.handleData("""{"type":"response.output_item.added","output_index":1,"item":{"type":"function_call","id":"fc_1","call_id":"call_abc","name":"read_file","arguments":""}}""", state, events::add))
+    // Argument deltas carry no name or call_id — only output_index binds them.
+    assertFalse(client.handleData("""{"type":"response.function_call_arguments.delta","item_id":"fc_1","output_index":1,"delta":"{\"pa"}""", state, events::add))
+    assertFalse(client.handleData("""{"type":"response.function_call_arguments.delta","item_id":"fc_1","output_index":1,"delta":"th\":\"src/App.tsx\"}"}""", state, events::add))
+    assertTrue(client.handleData("""{"type":"response.completed","response":{"id":"resp_1","status":"completed","output":[],"usage":{"input_tokens":120,"output_tokens":34,"total_tokens":154,"input_tokens_details":{"cached_tokens":96},"output_tokens_details":{"reasoning_tokens":8}}}}""", state, events::add))
+
+    assertEquals("Reading now", state.content.toString())
+    assertEquals(LlmFinishReason.TOOL_CALLS, state.finishReason)
+    assertEquals(120, state.usage?.inputTokens)
+    assertEquals(34, state.usage?.outputTokens)
+    assertEquals(96, state.usage?.cachedInputTokens)
+    assertEquals(8, state.usage?.reasoningTokens)
+    val call = state.toolCalls.values.single()
+    assertEquals("call_abc", call.id)
+    assertEquals("read_file", call.name)
+    assertEquals("src/App.tsx", JSONObject(call.argumentsJson).getString("path"))
+    assertTrue(events.any { it is LlmStreamEvent.ToolCallRequested && it.call.name == "read_file" })
+    assertEquals(listOf("Reading ", "now"), events.filterIsInstance<LlmStreamEvent.Token>().map { it.text })
+    // Hidden thinking is reported separately and never mixed into the answer.
+    assertTrue(events.any { it is LlmStreamEvent.ReasoningToken && it.text == "Checking the workspace." })
+  }
+
+  @Test
+  fun `Responses keeps parallel calls apart and trusts the finalized arguments`() {
+    val client = OpenAIResponsesClient(OkHttpClient())
+    val state = newState()
+    val events = mutableListOf<LlmStreamEvent>()
+
+    client.handleData("""{"type":"response.output_item.added","output_index":2,"item":{"type":"function_call","id":"fc_a","call_id":"call_a","name":"read_file","arguments":""}}""", state, events::add)
+    client.handleData("""{"type":"response.output_item.added","output_index":5,"item":{"type":"function_call","id":"fc_b","call_id":"call_b","name":"list_files","arguments":""}}""", state, events::add)
+    client.handleData("""{"type":"response.function_call_arguments.delta","output_index":5,"delta":"{}"}""", state, events::add)
+    client.handleData("""{"type":"response.function_call_arguments.delta","output_index":2,"delta":"{\"path\":\"a.tsx\"}"}""", state, events::add)
+    // The done event is authoritative, even when it differs from the fragments.
+    client.handleData("""{"type":"response.function_call_arguments.done","output_index":2,"arguments":"{\"path\":\"b.tsx\"}"}""", state, events::add)
+    assertTrue(client.handleData("""{"type":"response.completed","response":{"status":"completed","output":[]}}""", state, events::add))
+
+    assertEquals(listOf(2, 5), state.toolCalls.keys.toList())
+    assertEquals("b.tsx", JSONObject(state.toolCalls[2]!!.argumentsJson).getString("path"))
+    assertEquals("{}", state.toolCalls[5]!!.argumentsJson)
+    assertEquals(2, events.filterIsInstance<LlmStreamEvent.ToolCallRequested>().size)
+  }
+
+  @Test
+  fun `Responses incomplete output reports length and refusals reach the user as text`() {
+    val client = OpenAIResponsesClient(OkHttpClient())
+    val state = newState()
+    val events = mutableListOf<LlmStreamEvent>()
+
+    assertFalse(client.handleData("""{"type":"response.refusal.delta","item_id":"msg_1","output_index":0,"content_index":0,"delta":"I cannot help with that."}""", state, events::add))
+    assertTrue(client.handleData("""{"type":"response.incomplete","response":{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"output":[],"usage":{"output_tokens":4096}}}""", state, events::add))
+
+    assertEquals(LlmFinishReason.LENGTH, state.finishReason)
+    assertEquals("I cannot help with that.", state.content.toString())
+    // A counter the provider never sent stays absent rather than becoming zero.
+    assertNull(state.usage?.inputTokens)
+    assertEquals(4096, state.usage?.outputTokens)
+    // Gateways that still close with the Chat Completions sentinel stay legal.
+    assertTrue(client.handleData("[DONE]", state, events::add))
+  }
+
+  @Test
+  fun `Responses error events separate retryable from permanent failures`() {
+    val client = OpenAIResponsesClient(OkHttpClient())
+
+    val limited = assertThrows(LlmException::class.java) {
+      client.handleData("""{"type":"error","code":"rate_limit_exceeded","message":"High traffic, retry soon","param":null}""", newState()) { }
+    }
+    assertEquals(LlmErrorKind.RATE_LIMIT, limited.kind)
+    assertEquals("High traffic, retry soon", limited.message)
+
+    // A blocked prompt fails identically on every retry.
+    val blocked = assertThrows(LlmException::class.java) {
+      client.handleData("""{"type":"response.failed","response":{"status":"failed","error":{"code":"misalignment_policy_violation","message":"Request blocked"}}}""", newState()) { }
+    }
+    assertEquals(LlmErrorKind.INVALID_RESPONSE, blocked.kind)
+
+    val quota = assertThrows(LlmException::class.java) {
+      client.handleData("""{"type":"error","code":"insufficient_quota","message":"Set up billing to continue"}""", newState()) { }
+    }
+    assertEquals(LlmErrorKind.AUTH, quota.kind)
+
+    val transient = assertThrows(LlmException::class.java) {
+      client.handleData("""{"type":"error","code":"server_error","message":"The server had an error"}""", newState()) { }
+    }
+    assertEquals(LlmErrorKind.SERVER, transient.kind)
+  }
+
+  @Test
+  fun `Responses non streamed body absorbs output items without exposing raw reasoning`() {
+    val client = OpenAIResponsesClient(OkHttpClient())
+    val state = newState()
+    val events = mutableListOf<LlmStreamEvent>()
+
+    val response = JSONObject().apply {
+      put("object", "response")
+      put("status", "completed")
+      put("output", JSONArray().apply {
+        put(
+          JSONObject().put("type", "reasoning").put("id", "rs_1").put("summary", JSONArray().put(
+            JSONObject().put("type", "summary_text").put("text", "private deliberation")
+          ))
+        )
+        put(
+          JSONObject().put("type", "message").put("role", "assistant").put("content", JSONArray().put(
+            JSONObject().put("type", "output_text").put("text", "Done")
+          ))
+        )
+        put(
+          JSONObject().put("type", "function_call").put("call_id", "call_9")
+            .put("name", "read_file").put("arguments", "{\"path\":\"src/App.tsx\"}")
+        )
+      })
+      put("usage", JSONObject().put("input_tokens", 42).put("output_tokens", 17).put("total_tokens", 59))
+    }
+
+    assertTrue(client.handleData(response.toString(), state, events::add))
+    assertEquals("Done", state.content.toString())
+    assertEquals(LlmFinishReason.TOOL_CALLS, state.finishReason)
+    assertEquals(59, state.usage?.totalTokens)
+    val call = state.toolCalls.values.single()
+    assertEquals("call_9", call.id)
+    assertEquals("src/App.tsx", JSONObject(call.argumentsJson).getString("path"))
+    assertFalse(events.any { it is LlmStreamEvent.Token && it.text == "private deliberation" })
+  }
+
+  @Test
+  fun `Responses streaming round trip terminates on its own completion event`() {
+    val sse = buildString {
+      append("event: response.created\n")
+      append("data: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\"}}\n\n")
+      append("data: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"output_index\":0,\"content_index\":0,\"delta\":\"hello\"}\n\n")
+      append("data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[],\"usage\":{\"output_tokens\":5}}}\n\n")
+      // Nothing downstream may be parsed once the terminal event has arrived.
+      append("data: not-json-at-all\n\n")
+    }
+    val http = OkHttpClient.Builder().addInterceptor { chain ->
+      okhttp3.Response.Builder()
+        .request(chain.request())
+        .protocol(okhttp3.Protocol.HTTP_1_1)
+        .code(200)
+        .message("mock")
+        .body(sse.toResponseBody("text/event-stream".toMediaType()))
+        .build()
+    }.build()
+    val events = mutableListOf<LlmStreamEvent>()
+
+    runBlocking {
+      OpenAIResponsesClient(http).streamChat(
+        responsesProvider, responsesModel(tools = false), "k",
+        LlmRequest(messages = listOf(LlmMessage(LlmRole.USER, "hi"))),
+        events::add
+      )
+    }
+
+    assertTrue(events.first() is LlmStreamEvent.Started)
+    val completed = events.filterIsInstance<LlmStreamEvent.Completed>().single()
+    assertEquals("hello", completed.message.content)
+    assertEquals(5, completed.message.usage?.outputTokens)
+    assertFalse(events.any { it is LlmStreamEvent.Failed })
   }
 
   // ---- Anthropic Messages wire format and response normalization ----

@@ -57,6 +57,7 @@ class LlmService(
     onEvent: (LlmStreamEvent) -> Unit
   ): Unit = when (provider.protocol) {
     LLMProtocol.OPENAI_CHAT_COMPLETIONS -> OpenAIChatCompletionsClient(http).streamChat(provider, model, apiKey, request, onEvent)
+    LLMProtocol.OPENAI_RESPONSES -> OpenAIResponsesClient(http).streamChat(provider, model, apiKey, request, onEvent)
     LLMProtocol.ANTHROPIC_MESSAGES -> AnthropicMessagesClient(http).streamChat(provider, model, apiKey, request, onEvent)
     LLMProtocol.GOOGLE_GEMINI -> GeminiInteractionsClient(http, chainStore).streamChat(provider, model, apiKey, request, onEvent)
   }
@@ -72,6 +73,7 @@ class LlmService(
 
     val client = when (provider.protocol) {
       LLMProtocol.OPENAI_CHAT_COMPLETIONS -> OpenAIChatCompletionsClient(http)
+      LLMProtocol.OPENAI_RESPONSES -> OpenAIResponsesClient(http)
       LLMProtocol.ANTHROPIC_MESSAGES -> AnthropicMessagesClient(http)
       LLMProtocol.GOOGLE_GEMINI -> GeminiInteractionsClient(http, chainStore)
     }
@@ -242,6 +244,28 @@ internal abstract class BaseLlmClient(protected val http: OkHttpClient) {
     }
   }
 
+  /**
+   * Free credential/endpoint probe against the provider's model listing. The
+   * protocols differ only in the URL they list and the headers they auth with.
+   */
+  protected suspend fun modelsProbe(url: String, vararg headers: Pair<String, String>): Pair<Boolean, String> =
+    try {
+      val request = Request.Builder().url(url).apply {
+        headers.forEach { (name, value) -> header(name, value) }
+      }.get().build()
+      withContext(Dispatchers.IO) {
+        http.newCall(request).execute().use { response ->
+          if (response.isSuccessful) true to "Connected"
+          else {
+            val body = response.body?.string().orEmpty().take(2000)
+            false to (httpError(response.code, body).message ?: "Connection failed")
+          }
+        }
+      }
+    } catch (e: IOException) {
+      false to "Network error: ${e.message ?: "connection failed"}"
+    }
+
   protected fun httpError(code: Int, body: String): LlmException {
     val providerMessage = runCatching {
       JSONObject(body).optJSONObject("error")?.optString("message")?.takeIf { it.isNotBlank() }
@@ -400,28 +424,267 @@ internal class OpenAIChatCompletionsClient(http: OkHttpClient) : BaseLlmClient(h
     else -> LlmFinishReason.OTHER
   }
 
-  override suspend fun probeModels(provider: AIProvider, apiKey: String): Pair<Boolean, String> {
-    return try {
-      val request = Request.Builder()
-        .url(provider.baseUrl.trimEnd('/') + "/models")
-        .header("Authorization", "Bearer $apiKey")
-        .get()
-        .build()
-      withContext(Dispatchers.IO) {
-        http.newCall(request).execute().use { response ->
-        when {
-          response.isSuccessful -> true to "Connected"
-          else -> {
-            val body = response.body?.string().orEmpty().take(2000)
-            false to (httpError(response.code, body).message ?: "Connection failed")
-            }
+  override suspend fun probeModels(provider: AIProvider, apiKey: String): Pair<Boolean, String> =
+    modelsProbe(
+      provider.baseUrl.trimEnd('/') + "/models",
+      "Authorization" to "Bearer $apiKey"
+    )
+}
+
+/**
+ * OpenAI Responses protocol (`POST /v1/responses`) — the successor to Chat
+ * Completions. The transcript is a flat list of typed *items* rather than
+ * role-tagged messages, and the system prompt travels in its own `instructions`
+ * field instead of as a message.
+ *
+ * Deliberately stateless: every turn replays the whole item list and `store` is
+ * off, so nothing accumulates on the provider and no `previous_response_id` can
+ * go stale the way a server-held chain can. The price is that reasoning items
+ * are not carried forward, so a reasoning model re-derives its thinking per turn.
+ */
+internal class OpenAIResponsesClient(http: OkHttpClient) : BaseLlmClient(http) {
+
+  private companion object {
+    /**
+     * Reasoning tokens are billed against max_output_tokens, so a small cap can
+     * be swallowed entirely by thinking and return an incomplete response.
+     */
+    const val MIN_MAX_OUTPUT_TOKENS = 8192
+  }
+
+  override internal fun buildRequest(provider: AIProvider, model: AIModel, apiKey: String, request: LlmRequest, stream: Boolean): Request {
+    val body = JSONObject().apply {
+      put("model", model.modelId)
+      put("stream", stream)
+      val instructions = request.messages.filter { it.role == LlmRole.SYSTEM }
+        .joinToString("\n") { it.content }.trim()
+      if (instructions.isNotEmpty()) put("instructions", instructions)
+      put("input", JSONArray().apply { request.messages.forEach { appendItems(this, it) } })
+      if (request.tools.isNotEmpty() && model.capabilities.tools) {
+        put("tools", JSONArray().apply {
+          request.tools.forEach { t ->
+            put(JSONObject().apply {
+              // Flat, unlike Chat Completions' nested "function" object.
+              put("type", "function")
+              put("name", t.name)
+              put("description", t.description)
+              put("parameters", runCatching { JSONObject(t.parametersJsonSchema) }.getOrDefault(JSONObject()))
+            })
           }
+        })
+      }
+      (request.maxOutputTokens ?: model.maxOutputTokens)?.let {
+        put("max_output_tokens", it.coerceAtLeast(MIN_MAX_OUTPUT_TOKENS))
+      }
+      // Reasoning summaries only stream at all if the request asks for them.
+      model.reasoning?.takeIf { it.enabled && !request.disableReasoning }?.let {
+        put("reasoning", JSONObject().put("effort", effortFor(it.effort)).put("summary", "auto"))
+      }
+      put("store", false)
+    }
+    return Request.Builder()
+      .url(provider.baseUrl.trimEnd('/') + "/responses")
+      .header("Authorization", "Bearer $apiKey")
+      .post(jsonBody(body))
+      .build()
+  }
+
+  /** An assistant turn that called two tools expands into three separate items. */
+  private fun appendItems(input: JSONArray, message: LlmMessage) {
+    when (message.role) {
+      // The system prompt travels in `instructions`, not in the item list.
+      LlmRole.SYSTEM -> Unit
+      LlmRole.USER -> if (message.content.isNotBlank()) {
+        input.put(messageItem("user", "input_text", message.content))
+      }
+      LlmRole.ASSISTANT -> {
+        if (message.content.isNotBlank()) input.put(messageItem("assistant", "output_text", message.content))
+        message.toolCalls.forEach { call ->
+          input.put(JSONObject().apply {
+            put("type", "function_call")
+            put("call_id", call.id)
+            put("name", call.name)
+            put("arguments", normalizeArgs(call.argumentsJson))
+          })
         }
       }
-    } catch (e: IOException) {
-      false to "Network error: ${e.message ?: "connection failed"}"
+      // A tool result is its own item, paired to the call above by call_id.
+      LlmRole.TOOL -> input.put(JSONObject().apply {
+        put("type", "function_call_output")
+        put("call_id", message.toolCallId.orEmpty())
+        put("output", message.content)
+      })
     }
   }
+
+  private fun messageItem(role: String, partType: String, text: String) = JSONObject().apply {
+    put("type", "message")
+    put("role", role)
+    put("content", JSONArray().put(JSONObject().put("type", partType).put("text", text)))
+  }
+
+  private fun effortFor(raw: String): String = when (raw.lowercase()) {
+    "none", "minimal", "low", "medium", "high", "xhigh", "max" -> raw.lowercase()
+    else -> "medium"
+  }
+
+  override internal fun handleData(data: String, state: StreamState, onEvent: (LlmStreamEvent) -> Unit): Boolean {
+    if (data == "[DONE]") return true
+    val obj = runCatching { JSONObject(data) }.getOrElse {
+      throw LlmException("Provider returned invalid JSON.", LlmErrorKind.INVALID_RESPONSE)
+    }
+    // A non-streaming body is the Response object itself, with no events at all.
+    if (obj.optString("object") == "response") {
+      absorbResponse(obj, state, onEvent)
+      return true
+    }
+    when (obj.optString("type")) {
+      // The documented `error` event carries code/message flat; routers that
+      // mirror the HTTP failure body nest them under `error`.
+      "error" -> throw providerError(obj.optJSONObject("error") ?: obj)
+      "response.output_text.delta" -> emit(obj.optString("delta"), state, onEvent)
+      // A refusal is the only thing the user can be told, so it is surfaced as text.
+      "response.refusal.delta" -> emit(obj.optString("delta"), state, onEvent)
+      "response.reasoning_summary_text.delta", "response.reasoning_text.delta" ->
+        obj.optString("delta").takeIf { it.isNotEmpty() }?.let { onEvent(LlmStreamEvent.ReasoningToken(it)) }
+      "response.output_item.added" -> itemAdded(obj, state, onEvent)
+      "response.function_call_arguments.delta" -> {
+        val index = callIndex(obj, state)
+        state.toolCalls[index]?.let {
+          state.toolCalls[index] = it.copy(argumentsJson = it.argumentsJson + obj.optString("delta"))
+        }
+      }
+      // The assembled arguments string; authoritative over the accumulated deltas.
+      "response.function_call_arguments.done" -> {
+        val index = callIndex(obj, state)
+        state.toolCalls[index]?.let {
+          state.toolCalls[index] = it.copy(argumentsJson = obj.optString("arguments").ifEmpty { it.argumentsJson })
+        }
+      }
+      "response.output_item.done" -> {
+        obj.optJSONObject("item")?.takeIf { it.optString("type") == "function_call" }?.let { item ->
+          val index = callIndex(obj, state)
+          state.toolCalls[index] = toolCall(item, index)
+        }
+      }
+      "response.completed", "response.incomplete" -> {
+        obj.optJSONObject("response")?.let { finishStream(it, state) } ?: finalizeCalls(state)
+        return true
+      }
+      "response.failed" -> throw providerError(obj.optJSONObject("response")?.optJSONObject("error"))
+      // response.created / queued / in_progress, content_part.*, and the *.done
+      // mirrors of streamed text carry nothing further the agent acts on.
+    }
+    return false
+  }
+
+  private fun emit(text: String, state: StreamState, onEvent: (LlmStreamEvent) -> Unit) {
+    if (text.isEmpty()) return
+    state.content.append(text)
+    onEvent(LlmStreamEvent.Token(text))
+  }
+
+  private fun itemAdded(obj: JSONObject, state: StreamState, onEvent: (LlmStreamEvent) -> Unit) {
+    val item = obj.optJSONObject("item") ?: return
+    if (item.optString("type") != "function_call") return
+    val index = obj.opt("output_index")?.toString()?.toIntOrNull() ?: state.toolCalls.size
+    // Arguments arrive as later deltas; announce the call now so the UI shows it.
+    val call = toolCall(item, index).copy(argumentsJson = "")
+    state.toolCalls[index] = call
+    onEvent(LlmStreamEvent.ToolCallRequested(call))
+  }
+
+  /** Argument deltas identify the call only by item, so fall back to the newest one. */
+  private fun callIndex(obj: JSONObject, state: StreamState): Int =
+    obj.opt("output_index")?.toString()?.toIntOrNull()
+      ?: state.toolCalls.keys.lastOrNull()
+      ?: 0
+
+  private fun toolCall(item: JSONObject, index: Int) = LlmToolCall(
+    id = cleanWireString(item.optString("call_id")).ifEmpty { "call_$index" },
+    name = cleanWireString(item.optString("name")),
+    argumentsJson = item.optString("arguments")
+  )
+
+  /** Fragments accumulate as raw text; the wire value is only valid once complete. */
+  private fun finalizeCalls(state: StreamState) {
+    state.toolCalls.replaceAll { _, call -> call.copy(argumentsJson = normalizeArgs(call.argumentsJson)) }
+  }
+
+  private fun finishStream(response: JSONObject, state: StreamState) {
+    response.optJSONObject("usage")?.let { state.usage = it.toUsage() }
+    state.finishReason = finishFor(response, state)
+    finalizeCalls(state)
+  }
+
+  private fun absorbResponse(response: JSONObject, state: StreamState, onEvent: (LlmStreamEvent) -> Unit) {
+    val output = response.optJSONArray("output")
+    if (output != null) {
+      for (i in 0 until output.length()) {
+        val item = output.optJSONObject(i) ?: continue
+        when (item.optString("type")) {
+          "message" -> item.optJSONArray("content")?.let { parts ->
+            for (p in 0 until parts.length()) {
+              val part = parts.optJSONObject(p) ?: continue
+              val text = part.optString("text").ifEmpty { part.optString("refusal") }
+              emit(text, state, onEvent)
+            }
+          }
+          "function_call" -> state.toolCalls[i] = toolCall(item, i)
+          // reasoning items are hidden thinking: no summary is requested here, so
+          // there is nothing to show, and the answer already arrived as output_text.
+        }
+      }
+    }
+    finishStream(response, state)
+  }
+
+  private fun finishFor(response: JSONObject, state: StreamState): LlmFinishReason {
+    // A completed response that asked for tools must resume the loop, whatever
+    // the provider called the finish reason.
+    if (state.toolCalls.isNotEmpty()) return LlmFinishReason.TOOL_CALLS
+    return when (response.optString("status")) {
+      "incomplete" -> when (response.optJSONObject("incomplete_details")?.optString("reason")) {
+        "max_output_tokens", "max_messages" -> LlmFinishReason.LENGTH
+        "content_filter" -> LlmFinishReason.CONTENT_FILTER
+        else -> LlmFinishReason.OTHER
+      }
+      "failed" -> LlmFinishReason.ERROR
+      else -> LlmFinishReason.STOP
+    }
+  }
+
+  private fun providerError(error: JSONObject?): LlmException {
+    val message = error?.optString("message")?.takeIf { it.isNotBlank() } ?: "OpenAI provider error"
+    val code = error?.optString("code").orEmpty()
+    val kind = when {
+      code.contains("rate_limit") -> LlmErrorKind.RATE_LIMIT
+      // A rejected key or exhausted quota needs new credentials, not a retry.
+      code.contains("auth") || code.contains("quota") || code.contains("billing") -> LlmErrorKind.AUTH
+      // Refused prompts, blocked content and unusable image inputs fail
+      // identically on every retry, so the agent loop must not burn turns on them.
+      code.contains("policy") || code.contains("image") || code.startsWith("invalid") ||
+        code.contains("residency") -> LlmErrorKind.INVALID_RESPONSE
+      // Codes are open-ended; anything unrecognised stays retryable rather than
+      // ending a run that a provider blip would otherwise survive.
+      else -> LlmErrorKind.SERVER
+    }
+    return LlmException(message, kind)
+  }
+
+  private fun JSONObject.toUsage(): LlmUsage = LlmUsage(
+    inputTokens = optIntOrNull("input_tokens"),
+    outputTokens = optIntOrNull("output_tokens"),
+    totalTokens = optIntOrNull("total_tokens"),
+    cachedInputTokens = optJSONObject("input_tokens_details")?.optIntOrNull("cached_tokens"),
+    reasoningTokens = optJSONObject("output_tokens_details")?.optIntOrNull("reasoning_tokens")
+  )
+
+  override suspend fun probeModels(provider: AIProvider, apiKey: String): Pair<Boolean, String> =
+    modelsProbe(
+      provider.baseUrl.trimEnd('/') + "/models",
+      "Authorization" to "Bearer $apiKey"
+    )
 }
 
 /**
@@ -612,29 +875,12 @@ internal class AnthropicMessagesClient(http: OkHttpClient) : BaseLlmClient(http)
     else -> LlmFinishReason.OTHER
   }
 
-  override suspend fun probeModels(provider: AIProvider, apiKey: String): Pair<Boolean, String> {
-    return try {
-      val request = Request.Builder()
-        .url(endpoint(provider, "models"))
-        .header("x-api-key", apiKey)
-        .header("anthropic-version", "2023-06-01")
-        .get()
-        .build()
-      withContext(Dispatchers.IO) {
-        http.newCall(request).execute().use { response ->
-        when {
-          response.isSuccessful -> true to "Connected"
-          else -> {
-            val body = response.body?.string().orEmpty().take(2000)
-            false to (httpError(response.code, body).message ?: "Connection failed")
-            }
-          }
-        }
-      }
-    } catch (e: IOException) {
-      false to "Network error: ${e.message ?: "connection failed"}"
-    }
-  }
+  override suspend fun probeModels(provider: AIProvider, apiKey: String): Pair<Boolean, String> =
+    modelsProbe(
+      endpoint(provider, "models"),
+      "x-api-key" to apiKey,
+      "anthropic-version" to "2023-06-01"
+    )
 }
 
 /**
@@ -1013,26 +1259,11 @@ internal class GeminiInteractionsClient(
     totalTokens = optIntOrNull("total_tokens")
   )
 
-  override suspend fun probeModels(provider: AIProvider, apiKey: String): Pair<Boolean, String> {
-    return try {
-      val request = Request.Builder()
-        .url(provider.baseUrl.trimEnd('/') + "/models")
-        .header("x-goog-api-key", apiKey)
-        .get()
-        .build()
-      withContext(Dispatchers.IO) {
-        http.newCall(request).execute().use { response ->
-          if (response.isSuccessful) true to "Connected"
-          else {
-            val body = response.body?.string().orEmpty().take(2000)
-            false to (httpError(response.code, body).message ?: "Connection failed")
-          }
-        }
-      }
-    } catch (e: IOException) {
-      false to "Network error: ${e.message ?: "connection failed"}"
-    }
-  }
+  override suspend fun probeModels(provider: AIProvider, apiKey: String): Pair<Boolean, String> =
+    modelsProbe(
+      provider.baseUrl.trimEnd('/') + "/models",
+      "x-goog-api-key" to apiKey
+    )
 }
 
 /** Shared holder for the in-flight streaming call so Stop can abort blocked socket reads. */

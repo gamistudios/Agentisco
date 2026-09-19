@@ -324,6 +324,7 @@ private fun ProviderFormDialog(
             Text(
               when (protocol) {
                 LLMProtocol.OPENAI_CHAT_COMPLETIONS -> "OpenAI-compatible base, e.g. https://router.huggingface.co/v1"
+                LLMProtocol.OPENAI_RESPONSES -> "Responses base, e.g. https://api.openai.com/v1"
                 LLMProtocol.ANTHROPIC_MESSAGES -> "Anthropic base, e.g. https://api.anthropic.com"
                 LLMProtocol.GOOGLE_GEMINI -> "Gemini base, e.g. https://generativelanguage.googleapis.com/v1beta"
               },

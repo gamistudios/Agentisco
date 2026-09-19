@@ -6,6 +6,7 @@ package com.agentisco.settings.model
  */
 enum class LLMProtocol(val displayName: String) {
   OPENAI_CHAT_COMPLETIONS("OpenAI Chat Completions"),
+  OPENAI_RESPONSES("OpenAI Responses"),
   ANTHROPIC_MESSAGES("Anthropic Messages"),
   GOOGLE_GEMINI("Google Gemini");
 
