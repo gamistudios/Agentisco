@@ -684,9 +684,12 @@ fun ProjectsScreen(
         if (created != null) onNavigate(AppDestination.AGENT)
       },
       onImport = { path, name ->
-        val imported = viewModel.importProject(path, name)
+        // Copying runs in the background; navigate once the import finishes so
+        // a huge folder can never block the dialog closing.
         showNewProjectDialog = false
-        if (imported != null) onNavigate(AppDestination.AGENT)
+        viewModel.importProject(path, name) { imported ->
+          if (imported != null) onNavigate(AppDestination.AGENT)
+        }
       },
       onImportZip = { uri, name ->
         viewModel.importZipProject(uri, name) { imported ->

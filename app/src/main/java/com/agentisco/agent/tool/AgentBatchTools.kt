@@ -67,6 +67,7 @@ class GlobFilesTool(private val fs: ProjectFileSystem) : AgentTool {
     val root = File(ctx.project.path)
     if (!root.isDirectory) return ToolResult(false, error = "Workspace folder is not available.")
     val matches = root.walkTopDown()
+      .onEnter { !ProjectFileSystem.isIgnoredDir(it) }
       .filter { it.isFile }
       .mapNotNull { file ->
         val rel = file.toRelativeString(root).replace('\\', '/')
@@ -160,6 +161,7 @@ class DirectoryTreeTool(private val fs: ProjectFileSystem) : AgentTool {
       val children = dir.listFiles()?.sortedWith(compareByDescending<File> { it.isDirectory }.thenBy { it.name }) ?: return
       for (child in children) {
         if (child.name.startsWith(".")) continue
+        if (ProjectFileSystem.isIgnoredDir(child)) continue
         if (entries >= 400) {
           sb.appendLine("…")
           return
@@ -228,6 +230,7 @@ class RegexSearchTool(private val fs: ProjectFileSystem) : AgentTool {
     val sb = StringBuilder()
     var matchCount = 0
     root.walkTopDown()
+      .onEnter { !ProjectFileSystem.isIgnoredDir(it) }
       .filter { it.isFile && !it.name.startsWith(".") && it.length() < 200_000 }
       .forEach { file ->
         if (matchCount >= 100) return@forEach

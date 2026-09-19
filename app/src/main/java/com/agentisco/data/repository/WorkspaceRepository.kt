@@ -31,6 +31,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
 class WorkspaceRepository(
@@ -62,6 +63,57 @@ class WorkspaceRepository(
   val projectsRoot: File = debianBootstrap?.rootfsDir?.let { File(it, "root/projects") } ?: baseDir
 
   val fileSystem = ProjectFileSystem(projectsRoot)
+
+  // ---- Scan exclusions (Settings → Codebase scanning) ----
+  // Persisted user-tunable folder list skipped by tree scans, searches and
+  // imports. Applied globally to ProjectFileSystem at startup.
+  val scanIgnoreStore = com.agentisco.data.local.ScanIgnoreStore(context)
+  private val _scanIgnoreSettings = MutableStateFlow(scanIgnoreStore.get())
+  val scanIgnoreSettings: StateFlow<com.agentisco.data.local.ScanIgnoreSettings> =
+    _scanIgnoreSettings.asStateFlow()
+
+  init {
+    ProjectFileSystem.ignoredDirs =
+      com.agentisco.data.local.ScanIgnoreStore.effectiveDirs(_scanIgnoreSettings.value)
+  }
+
+  fun addIgnoredDir(raw: String) {
+    val name = com.agentisco.data.local.ScanIgnoreStore.sanitizeName(raw)
+    if (name.isBlank()) return
+    _scanIgnoreSettings.value = scanIgnoreStore.update { s ->
+      when {
+        s.extraDirs.contains(name) -> s
+        !s.useCustomListOnly && name in ProjectFileSystem.DEFAULT_IGNORED_DIRS ->
+          s.copy(removedDefaults = s.removedDefaults - name)
+        else -> s.copy(extraDirs = s.extraDirs + name)
+      }
+    }
+  }
+
+  fun removeIgnoredDir(raw: String) {
+    val name = com.agentisco.data.local.ScanIgnoreStore.sanitizeName(raw)
+    if (name.isBlank()) return
+    _scanIgnoreSettings.value = scanIgnoreStore.update { s ->
+      when {
+        s.extraDirs.contains(name) -> s.copy(extraDirs = s.extraDirs - name)
+        s.useCustomListOnly -> s
+        name in ProjectFileSystem.DEFAULT_IGNORED_DIRS ->
+          s.copy(removedDefaults = s.removedDefaults + name)
+        else -> s
+      }
+    }
+  }
+
+  /** true = ignore the built-in defaults entirely; only the custom list applies. */
+  fun setIgnoredDirsOverride(enabled: Boolean) {
+    _scanIgnoreSettings.value = scanIgnoreStore.update { it.copy(useCustomListOnly = enabled) }
+  }
+
+  fun restoreDefaultIgnoredDirs() {
+    scanIgnoreStore.reset()
+    _scanIgnoreSettings.value = scanIgnoreStore.get()
+  }
+
   val gitManager = GitRepositoryManager(fileSystem) { projectPath, args ->
     runGitCommand(projectPath, args)
   }
@@ -207,9 +259,61 @@ class WorkspaceRepository(
   private val _currentDestination = MutableStateFlow(AppDestination.AGENT)
   val currentDestination: StateFlow<AppDestination> = _currentDestination.asStateFlow()
 
-  // Files in Active Project
+  // Files in Active Project. Only the root listing is materialized upfront;
+  // subfolders are loaded lazily on expand ([loadChildren]) and scans run on
+  // the IO dispatcher so huge repos can never freeze or OOM the UI.
   private val _projectFiles = MutableStateFlow<List<ProjectFile>>(emptyList())
   val projectFiles: StateFlow<List<ProjectFile>> = _projectFiles.asStateFlow()
+
+  /** Children of already-loaded folders, keyed by project-relative path. */
+  private val _dirChildren = MutableStateFlow<Map<String, List<ProjectFile>>>(emptyMap())
+  val dirChildren: StateFlow<Map<String, List<ProjectFile>>> = _dirChildren.asStateFlow()
+
+  private val _isFilesLoading = MutableStateFlow(false)
+  val isFilesLoading: StateFlow<Boolean> = _isFilesLoading.asStateFlow()
+
+  private val _nameSearchResults = MutableStateFlow<List<ProjectFile>>(emptyList())
+  val nameSearchResults: StateFlow<List<ProjectFile>> = _nameSearchResults.asStateFlow()
+
+  private val loadingDirs = mutableSetOf<String>()
+  private var nameSearchJob: kotlinx.coroutines.Job? = null
+
+  /** Loads one folder's children in the background (no-op when already cached). */
+  fun loadChildren(relativePath: String) {
+    val project = _activeProject.value
+    if (project.path.isBlank()) return
+    if (_dirChildren.value.containsKey(relativePath) || !loadingDirs.add(relativePath)) return
+    repositoryScope.launch {
+      try {
+        val kids = withContext(Dispatchers.IO) {
+          runCatching { fileSystem.listChildren(project, relativePath) }.getOrNull()
+        }
+        if (kids != null && _activeProject.value.id == project.id) {
+          _dirChildren.update { it + (relativePath to kids) }
+        }
+      } finally {
+        loadingDirs.remove(relativePath)
+      }
+    }
+  }
+
+  /** Debounced background filename search across the (ignore-pruned) tree. */
+  fun searchFileNames(query: String) {
+    nameSearchJob?.cancel()
+    if (query.isBlank()) {
+      _nameSearchResults.value = emptyList()
+      return
+    }
+    val project = _activeProject.value
+    if (project.path.isBlank()) return
+    nameSearchJob = repositoryScope.launch {
+      delay(250)
+      val hits = withContext(Dispatchers.IO) {
+        runCatching { fileSystem.findFilesByName(project, query) }.getOrDefault(emptyList())
+      }
+      if (_activeProject.value.id == project.id) _nameSearchResults.value = hits
+    }
+  }
 
   // Currently Active File in Editor
   private val _activeFile = MutableStateFlow<ProjectFile>(
@@ -536,30 +640,42 @@ class WorkspaceRepository(
   private fun loadActiveProjectState(project: Project) {
     if (project.path.isBlank()) {
       _projectFiles.value = emptyList()
+      _dirChildren.value = emptyMap()
       _editorContent.value = ""
       _isEditorDirty.value = false
       _fileDiffs.value = emptyList()
       return
     }
 
-    val files = fileSystem.getFileTree(project)
-    _projectFiles.value = files
-
-    // Pick first code file
-    fun findFirstFile(list: List<ProjectFile>): ProjectFile? {
-      for (f in list) {
-        if (!f.isDirectory) return f
-        val sub = findFirstFile(f.children)
-        if (sub != null) return sub
-      }
-      return null
+    _dirChildren.value = emptyMap()
+    loadingDirs.clear()
+    _nameSearchResults.value = emptyList()
+    repositoryScope.launch {
+      _isFilesLoading.value = true
+      // Root listing + bounded scan for the editor's initial file, off main.
+      val snapshot = withContext(Dispatchers.IO) {
+        runCatching {
+          val root = fileSystem.listChildren(project, "") ?: emptyList()
+          val shallow = fileSystem.getFileTree(project, maxDepth = 4)
+          fun findFirstFile(list: List<ProjectFile>): ProjectFile? {
+            for (f in list) {
+              if (!f.isDirectory) return f
+              findFirstFile(f.children)?.let { return it }
+            }
+            return null
+          }
+          val firstFile = findFirstFile(shallow) ?: ProjectFile("README.md", "README.md", false)
+          Triple(root, firstFile, fileSystem.readFile(project, firstFile.path))
+        }
+      }.getOrNull()
+      _isFilesLoading.value = false
+      if (snapshot == null || _activeProject.value.id != project.id) return@launch
+      val (root, firstFile, content) = snapshot
+      _projectFiles.value = root
+      _activeFile.value = firstFile.copy(content = content)
+      _editorContent.value = content
+      _isEditorDirty.value = false
     }
-
-    val firstFile = findFirstFile(files) ?: ProjectFile("README.md", "README.md", false)
-    val content = fileSystem.readFile(project, firstFile.path)
-    _activeFile.value = firstFile.copy(content = content)
-    _editorContent.value = content
-    _isEditorDirty.value = false
 
     // Terminal tabs belong to the project: open its tab set (with the real
     // project root as the working directory) and never inherit another
@@ -583,7 +699,29 @@ class WorkspaceRepository(
   }
 
   fun refreshFiles() {
-    _projectFiles.value = fileSystem.getFileTree(_activeProject.value)
+    val project = _activeProject.value
+    if (project.path.isBlank()) {
+      _projectFiles.value = emptyList()
+      _dirChildren.value = emptyMap()
+      refreshDiffsAndGit()
+      return
+    }
+    repositoryScope.launch {
+      _isFilesLoading.value = true
+      // Re-scan the root plus every folder the UI already has open.
+      val snapshot = withContext(Dispatchers.IO) {
+        runCatching {
+          val dirs = (setOf("") + _dirChildren.value.keys).mapNotNull { path ->
+            fileSystem.listChildren(project, path)?.let { path to it }
+          }.toMap()
+          (dirs[""] ?: emptyList()) to dirs
+        }
+      }.getOrNull()
+      _isFilesLoading.value = false
+      if (snapshot == null || _activeProject.value.id != project.id) return@launch
+      _projectFiles.value = snapshot.first
+      _dirChildren.value = snapshot.second
+    }
     refreshDiffsAndGit()
   }
 
@@ -669,17 +807,21 @@ class WorkspaceRepository(
    * reliably. The original folder is remembered as [Project.sourcePath] and
    * changes can be mirrored back (manually or automatically — see
    * [syncProjectToSource] / [setProjectAutoSync]).
+   *
+   * Ignored folders ([ProjectFileSystem.ignoredDirs]) are skipped and the
+   * copy runs on an IO thread, so importing a huge repo never blocks the UI.
    */
-  fun importProject(rootPath: String, displayName: String? = null): Project? {
+  suspend fun importProject(rootPath: String, displayName: String? = null): Project? {
+    val source = expandProjectPath(rootPath)
+    if (!source.isDirectory || !source.canRead()) {
+      _agentStatusText.value = "Folder not found or not readable: ${source.absolutePath}"
+      return null
+    }
+    val name = (displayName ?: source.name).ifBlank { source.name }
     return try {
-      val source = expandProjectPath(rootPath)
-      if (!source.isDirectory || !source.canRead()) {
-        _agentStatusText.value = "Folder not found or not readable: ${source.absolutePath}"
-        return null
-      }
-      val name = (displayName ?: source.name).ifBlank { source.name }
       val workspace = fileSystem.suggestDefaultRoot(name)
-      fileSystem.copyFolder(source, workspace)
+      _agentStatusText.value = "Importing \"$name\" — copying folder (dependency/build folders skipped)…"
+      val copied = withContext(Dispatchers.IO) { fileSystem.copyFolder(source, workspace) }
       val imported = fileSystem.importProject(workspace, name, sourcePath = source.absolutePath)
       projectRegistry.upsert(
         com.agentisco.data.local.ProjectRegistryEntry(
@@ -694,6 +836,7 @@ class WorkspaceRepository(
       )
       refreshProjectList()
       selectProject(imported)
+      _agentStatusText.value = "Imported \"$name\" — $copied file(s) copied into the workspace"
       imported
     } catch (e: Exception) {
       android.util.Log.e("ScoOS-Projects", "Failed to import project", e)
@@ -710,7 +853,9 @@ class WorkspaceRepository(
     if (project.sourcePath.isBlank()) return
     repositoryScope.launch {
       try {
-        val (copied, removed) = fileSystem.mirrorFolder(File(project.path), File(project.sourcePath))
+        val (copied, removed) = withContext(Dispatchers.IO) {
+          fileSystem.mirrorFolder(File(project.path), File(project.sourcePath))
+        }
         _agentStatusText.value = "Synced to ${project.sourcePath} — $copied file(s) updated, $removed removed"
       } catch (e: Exception) {
         android.util.Log.e("ScoOS-Sync", "sync failed", e)
@@ -756,60 +901,51 @@ class WorkspaceRepository(
       return null
     }
     var tempDir: File? = null
-    return try {
+    val imported = try {
       tempDir = File(context.cacheDir, "zip-import-" + System.currentTimeMillis())
       tempDir.mkdirs()
-      var extracted = 0
-      val canonicalRoot = tempDir.canonicalPath + File.separator
-      context.contentResolver.openInputStream(uri)?.use { input ->
-        java.util.zip.ZipInputStream(input.buffered()).use { zis ->
-          var entry = zis.nextEntry
-          while (entry != null) {
-            val outFile = resolveSafeZipTarget(tempDir, canonicalRoot, entry.name)
-            if (outFile != null) {
-              if (entry.isDirectory) {
-                outFile.mkdirs()
-              } else {
-                outFile.parentFile?.mkdirs()
-                zis.copyTo(outFile.outputStream())
-                extracted++
+      withContext(Dispatchers.IO) {
+        val input = context.contentResolver.openInputStream(uri)
+        if (input == null) {
+          _agentStatusText.value = "Could not read the selected zip file."
+          null
+        } else {
+          var extracted = 0
+          val canonicalRoot = tempDir.canonicalPath + File.separator
+          input.use { stream ->
+            java.util.zip.ZipInputStream(stream.buffered()).use { zis ->
+              var entry = zis.nextEntry
+              while (entry != null) {
+                val outFile = resolveSafeZipTarget(tempDir, canonicalRoot, entry.name)
+                if (outFile != null) {
+                  if (entry.isDirectory) {
+                    outFile.mkdirs()
+                  } else {
+                    outFile.parentFile?.mkdirs()
+                    zis.copyTo(outFile.outputStream())
+                    extracted++
+                  }
+                }
+                zis.closeEntry()
+                entry = zis.nextEntry
               }
             }
-            zis.closeEntry()
-            entry = zis.nextEntry
+          }
+          if (extracted == 0) {
+            _agentStatusText.value = "The archive is empty or could not be read."
+            null
+          } else {
+            // Root selection: a single top-level directory becomes the project root,
+            // otherwise use the extraction root directly (no 2-level nesting).
+            val tops = tempDir.listFiles().orEmpty()
+            val root = if (tops.size == 1 && tops[0].isDirectory) tops[0] else tempDir
+            val name = (displayName ?: root.name).ifBlank { "zip-project" }
+            val workspace = fileSystem.suggestDefaultRoot(name)
+            fileSystem.copyFolder(root, workspace)
+            fileSystem.importProject(workspace, name, sourcePath = "")
           }
         }
-      } ?: run {
-        _agentStatusText.value = "Could not read the selected zip file."
-        return null
       }
-      if (extracted == 0) {
-        _agentStatusText.value = "The archive is empty or could not be read."
-        return null
-      }
-
-      // Root selection: a single top-level directory becomes the project root,
-      // otherwise use the extraction root directly (no 2-level nesting).
-      val tops = tempDir.listFiles().orEmpty()
-      val root = if (tops.size == 1 && tops[0].isDirectory) tops[0] else tempDir
-      val name = (displayName ?: root.name).ifBlank { "zip-project" }
-
-      val workspace = fileSystem.suggestDefaultRoot(name)
-      fileSystem.copyFolder(root, workspace)
-      val imported = fileSystem.importProject(workspace, name, sourcePath = "")
-      projectRegistry.upsert(
-        com.agentisco.data.local.ProjectRegistryEntry(
-          id = imported.id, name = imported.name, description = imported.description,
-          rootPath = imported.path,
-          createdAt = System.currentTimeMillis(),
-          lastOpenedAt = System.currentTimeMillis(),
-          imported = true,
-          sourcePath = ""
-        )
-      )
-      refreshProjectList()
-      selectProject(imported)
-      imported
     } catch (e: Exception) {
       android.util.Log.e("ScoOS-Projects", "Failed to import zip", e)
       _agentStatusText.value = "Could not import zip: ${e.message}"
@@ -817,6 +953,20 @@ class WorkspaceRepository(
     } finally {
       tempDir?.deleteRecursively()
     }
+    if (imported == null) return null
+    projectRegistry.upsert(
+      com.agentisco.data.local.ProjectRegistryEntry(
+        id = imported.id, name = imported.name, description = imported.description,
+        rootPath = imported.path,
+        createdAt = System.currentTimeMillis(),
+        lastOpenedAt = System.currentTimeMillis(),
+        imported = true,
+        sourcePath = ""
+      )
+    )
+    refreshProjectList()
+    selectProject(imported)
+    return imported
   }
 
   /** Zip-slip protection: refuses paths escaping the extraction directory. */
@@ -839,13 +989,16 @@ class WorkspaceRepository(
   fun removeProject(project: Project) {
     projectRegistry.remove(project.id)
     chatStore.deleteSessionsForProject(project.path)
-    fileSystem.deleteProjectFolder(project)
-    refreshProjectList()
-    if (_activeProject.value.id == project.id) {
-      _activeProject.value = _projects.value.firstOrNull { !it.isMissing }
-        ?: _projects.value.firstOrNull()
-        ?: placeholderProject
-      loadActiveProjectState(_activeProject.value)
+    repositoryScope.launch {
+      // Deleting a big project folder takes real time — never on the main thread.
+      withContext(Dispatchers.IO) { fileSystem.deleteProjectFolder(project) }
+      refreshProjectList()
+      if (_activeProject.value.id == project.id) {
+        _activeProject.value = _projects.value.firstOrNull { !it.isMissing }
+          ?: _projects.value.firstOrNull()
+          ?: placeholderProject
+        loadActiveProjectState(_activeProject.value)
+      }
     }
   }
 
@@ -864,7 +1017,7 @@ class WorkspaceRepository(
       .forEach { entry ->
         try {
           val target = fileSystem.suggestDefaultRoot(entry.name)
-          fileSystem.copyFolder(File(entry.rootPath), target)
+          withContext(Dispatchers.IO) { fileSystem.copyFolder(File(entry.rootPath), target) }
           val oldPath = entry.rootPath
           projectRegistry.upsert(entry.copy(rootPath = target.absolutePath))
           chatStore.remapProjectSessionsBlocking(oldPath, target.absolutePath)

@@ -25,6 +25,34 @@ class ProjectFileSystem(private val baseDir: File) {
   companion object {
     const val CONFIG_FILE_NAME = ".agentisco.json"
 
+    /**
+     * Built-in dependency and build-output folders skipped by every scan,
+     * search and import. Repos routinely carry hundreds of thousands of
+     * generated files here; walking them makes opening a project unusably
+     * slow. Overridable from Settings — see [ignoredDirs].
+     */
+    val DEFAULT_IGNORED_DIRS: Set<String> = setOf(
+      "node_modules", "bower_components", "jspm_packages",
+      "build", "dist", "out", "target", "coverage", "htmlcov",
+      "__pycache__", ".venv", "venv", ".tox", ".eggs",
+      ".pytest_cache", ".mypy_cache", ".gradle",
+      ".next", ".nuxt", ".turbo", ".cache",
+      ".dart_tool", ".pub-cache", "pods", "deriveddata",
+      "cmake-build-debug", "cmake-build-release"
+    )
+
+    /** Effective exclusion list (lowercase folder names), set from Settings. */
+    @Volatile
+    var ignoredDirs: Set<String> = DEFAULT_IGNORED_DIRS
+
+    fun isIgnoredName(name: String): Boolean = name.lowercase() in ignoredDirs
+
+    fun isIgnoredDir(dir: File): Boolean = dir.isDirectory && isIgnoredName(dir.name)
+
+    /** Entries hidden from the workspace tree: git internals and app metadata. */
+    private fun isHiddenName(name: String): Boolean =
+      name.startsWith(".git") || name == ".sco_meta" || name == CONFIG_FILE_NAME || isIgnoredName(name)
+
     fun readProjectConfig(dir: File): ProjectConfig? {
       val file = File(dir, CONFIG_FILE_NAME)
       if (!file.isFile) return null
@@ -75,7 +103,6 @@ class ProjectFileSystem(private val baseDir: File) {
         "agentisco" -> "Agentisco"
         else -> dir.name.split("-").joinToString(" ") { it.replaceFirstChar { c -> c.uppercase() } }
       }
-      val fileCount = dir.walkTopDown().filter { it.isFile && !it.name.startsWith(".") }.count()
       Project(
         id = "proj-${dir.name}",
         name = projName,
@@ -203,12 +230,16 @@ class ProjectFileSystem(private val baseDir: File) {
     )
   }
 
-  /** Recursively copies a folder tree. Returns the number of files copied. */
+  /**
+   * Recursively copies a folder tree into the workspace, skipping ignored
+   * dependency/build folders. Returns the number of files copied.
+   */
   fun copyFolder(from: File, to: File): Int {
     if (!from.isDirectory) return 0
     to.mkdirs()
     var count = 0
     from.listFiles()?.forEach { child ->
+      if (child.isDirectory && isIgnoredDir(child)) return@forEach
       val target = File(to, child.name)
       if (child.isDirectory) {
         count += copyFolder(child, target)
@@ -226,6 +257,10 @@ class ProjectFileSystem(private val baseDir: File) {
    * One-way mirror of the workspace to the user's original folder: copies
    * new/updated files and removes files deleted in the workspace, so the
    * source folder ends up exactly matching the app workspace.
+   *
+   * Ignored folders ([ignoredDirs]) are never traversed and never pruned —
+   * the workspace skips them on import, so they must not be deleted from the
+   * user's original folder.
    */
   fun mirrorFolder(from: File, to: File): Pair<Int, Int> {
     if (!from.isDirectory) return 0 to 0
@@ -233,6 +268,7 @@ class ProjectFileSystem(private val baseDir: File) {
     var copied = 0
     var removed = 0
     from.listFiles()?.forEach { child ->
+      if (child.isDirectory && isIgnoredDir(child)) return@forEach
       val target = File(to, child.name)
       if (child.isDirectory) {
         val (c, r) = mirrorFolder(child, target)
@@ -250,6 +286,7 @@ class ProjectFileSystem(private val baseDir: File) {
     }
     // Remove files the workspace no longer has.
     to.listFiles()?.forEach { target ->
+      if (isIgnoredName(target.name)) return@forEach
       val source = File(from, target.name)
       if (!source.exists()) {
         if (target.isDirectory) {
@@ -264,62 +301,61 @@ class ProjectFileSystem(private val baseDir: File) {
     return copied to removed
   }
 
-  fun getFileTree(project: Project): List<ProjectFile> {
+  /**
+   * Metadata-only tree scan (no file content is ever read).
+   *
+   * [maxDepth] bounds how many folder levels are materialized: 1 = root
+   * entries only, 2 = root + one level of children, and so on. Callers that
+   * need deeper browsing should use [listChildren] lazily instead.
+   */
+  fun getFileTree(project: Project, maxDepth: Int = Int.MAX_VALUE): List<ProjectFile> {
     val dir = File(project.path)
-    if (!dir.exists()) return emptyList()
-    return scanDirectory(dir, dir)
+    if (!dir.exists() || maxDepth < 1) return emptyList()
+    return scanDirectory(dir, dir, maxDepth)
   }
 
-  private fun scanDirectory(currentDir: File, rootDir: File): List<ProjectFile> {
+  /**
+   * Direct children of one folder (non-recursive, no content read).
+   * Returns null when [relativePath] is not a directory.
+   */
+  fun listChildren(project: Project, relativePath: String): List<ProjectFile>? {
+    val root = File(project.path)
+    val dir = if (relativePath.isBlank()) root else File(root, relativePath)
+    if (!dir.isDirectory) return null
+    return scanDirectory(dir, root, 1)
+  }
+
+  private fun scanDirectory(currentDir: File, rootDir: File, depthLeft: Int): List<ProjectFile> {
     val items = currentDir.listFiles() ?: return emptyList()
     // Sort directories first, then alphabetical
-    val sorted = items.filter { !it.name.startsWith(".git") && it.name != ".sco_meta" && it.name != CONFIG_FILE_NAME }
+    val sorted = items.filter { !isHiddenName(it.name) }
       .sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() }))
 
     return sorted.map { file ->
-      val relativePath = file.toRelativeString(rootDir)
-      if (file.isDirectory) {
-        ProjectFile(
-          path = relativePath,
-          name = file.name,
-          isDirectory = true,
-          content = "",
-          language = "folder",
-          children = scanDirectory(file, rootDir),
-          sizeBytes = 0L,
-          lastModified = file.lastModified()
-        )
-      } else {
-        val ext = file.extension.lowercase()
-        val lang = when (ext) {
-          "ts", "tsx" -> "typescript"
-          "js", "jsx" -> "javascript"
-          "kt", "kts" -> "kotlin"
-          "json" -> "json"
-          "md" -> "markdown"
-          "html" -> "html"
-          "css" -> "css"
-          "sh" -> "shell"
-          "py" -> "python"
-          else -> "text"
-        }
-        val content = try {
-          if (file.length() < 100_000) file.readText() else "[File too large to display in preview]"
-        } catch (_: Exception) {
-          ""
-        }
-        ProjectFile(
-          path = relativePath,
-          name = file.name,
-          isDirectory = false,
-          content = content,
-          language = lang,
-          children = emptyList(),
-          sizeBytes = file.length(),
-          lastModified = file.lastModified()
-        )
-      }
+      ProjectFile(
+        path = file.toRelativeString(rootDir),
+        name = file.name,
+        isDirectory = file.isDirectory,
+        content = "",
+        language = if (file.isDirectory) "folder" else languageFor(file.extension),
+        children = if (file.isDirectory && depthLeft > 1) scanDirectory(file, rootDir, depthLeft - 1) else emptyList(),
+        sizeBytes = if (file.isDirectory) 0L else file.length(),
+        lastModified = file.lastModified()
+      )
     }
+  }
+
+  private fun languageFor(extension: String): String = when (extension.lowercase()) {
+    "ts", "tsx" -> "typescript"
+    "js", "jsx" -> "javascript"
+    "kt", "kts" -> "kotlin"
+    "json" -> "json"
+    "md" -> "markdown"
+    "html" -> "html"
+    "css" -> "css"
+    "sh" -> "shell"
+    "py" -> "python"
+    else -> "text"
   }
 
   fun readFile(project: Project, relativePath: String): String {
@@ -422,19 +458,23 @@ class ProjectFileSystem(private val baseDir: File) {
     }
   }
 
-  fun searchInProject(project: Project, query: String): List<SearchMatch> {
+  /** Full-text search across the project. Ignored folders are never walked. */
+  fun searchInProject(project: Project, query: String, maxMatches: Int = 500): List<SearchMatch> {
     if (query.isBlank()) return emptyList()
     val dir = File(project.path)
     if (!dir.exists()) return emptyList()
 
     val matches = mutableListOf<SearchMatch>()
     dir.walkTopDown()
+      .onEnter { !isIgnoredDir(it) }
       .filter { it.isFile && !it.name.startsWith(".") && it.length() < 200_000 }
       .forEach { file ->
+        if (matches.size >= maxMatches) return@forEach
         val relPath = file.toRelativeString(dir)
         try {
           file.useLines { lines ->
             lines.forEachIndexed { index, line ->
+              if (matches.size >= maxMatches) return@forEachIndexed
               if (line.contains(query, ignoreCase = true)) {
                 matches.add(SearchMatch(filePath = relPath, lineNumber = index + 1, lineText = line.trim()))
               }
@@ -443,6 +483,30 @@ class ProjectFileSystem(private val baseDir: File) {
         } catch (_: Exception) {}
       }
     return matches
+  }
+
+  /** Paths whose file or folder name contains [query] (case-insensitive), capped at [limit]. */
+  fun findFilesByName(project: Project, query: String, limit: Int = 200): List<ProjectFile> {
+    if (query.isBlank()) return emptyList()
+    val dir = File(project.path)
+    if (!dir.exists()) return emptyList()
+    val q = query.trim().lowercase()
+    return dir.walkTopDown()
+      .onEnter { !isIgnoredDir(it) }
+      .filter { it != dir && !isHiddenName(it.name) && it.name.lowercase().contains(q) }
+      .take(limit)
+      .map { file ->
+        ProjectFile(
+          path = file.toRelativeString(dir),
+          name = file.name,
+          isDirectory = file.isDirectory,
+          content = "",
+          language = if (file.isDirectory) "folder" else languageFor(file.extension),
+          sizeBytes = if (file.isDirectory) 0L else file.length(),
+          lastModified = file.lastModified()
+        )
+      }
+      .toList()
   }
 
   private fun initializeDefaultProjectsIfEmpty() {

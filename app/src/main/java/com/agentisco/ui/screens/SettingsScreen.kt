@@ -7,7 +7,9 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -407,9 +409,217 @@ fun SettingsScreen(
       }
     }
 
+    // Codebase Scanning Performance Card (bottom: affects every project)
+    item {
+      ScanExclusionsCard(viewModel)
+    }
+
     item {
       Spacer(modifier = Modifier.height(24.dp))
     }
+  }
+}
+
+/**
+ * Editable scan-exclusion list: the folder names skipped by tree scans,
+ * searches, agent tools and imports. Users can remove defaults, add their
+ * own, or replace the built-in list entirely.
+ */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun ScanExclusionsCard(viewModel: WorkspaceViewModel) {
+  val settings by viewModel.scanIgnoreSettings.collectAsState()
+  val skippedDirs by viewModel.effectiveIgnoredDirs.collectAsState()
+  var newDirInput by remember { mutableStateOf("") }
+
+  Card(
+    modifier = Modifier
+      .fillMaxWidth()
+      .clip(RoundedCornerShape(12.dp))
+      .border(1.dp, DarkBorder, RoundedCornerShape(12.dp)),
+    colors = CardDefaults.cardColors(containerColor = DarkSurface)
+  ) {
+    Column(modifier = Modifier.padding(14.dp)) {
+      Text("Codebase Scanning Performance", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+      Spacer(modifier = Modifier.height(6.dp))
+      Text(
+        "Folders listed here are skipped everywhere: the Files tree, project search, agent tools and folder imports. " +
+          "Generated folders like node_modules or build outputs often hold hundreds of thousands of files — " +
+          "skipping them is what keeps huge projects fast to open. Only remove one if you truly need to browse it.",
+        color = TextMuted,
+        fontSize = 11.sp,
+        lineHeight = 15.sp
+      )
+      Spacer(modifier = Modifier.height(12.dp))
+
+      // List composition mode: extend the defaults, or override them fully.
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Column(modifier = Modifier.weight(1f)) {
+          Text("Only my custom list", color = TextPrimary, fontSize = 13.sp)
+          Text(
+            if (settings.useCustomListOnly)
+              "Built-in defaults are fully overridden — only the folders below are skipped."
+            else
+              "Off: built-in defaults + folders you add, minus any you remove.",
+            color = TextMuted,
+            fontSize = 11.sp,
+            lineHeight = 14.sp
+          )
+        }
+        Switch(
+          checked = settings.useCustomListOnly,
+          onCheckedChange = { viewModel.setIgnoredDirsOverride(it) },
+          modifier = Modifier.testTag("switch_ignore_override"),
+          colors = SwitchDefaults.colors(
+            checkedThumbColor = ElectricBlue,
+            checkedTrackColor = ElectricBlue.copy(alpha = 0.35f),
+            checkedBorderColor = ElectricBlue,
+            uncheckedThumbColor = TextSecondary,
+            uncheckedTrackColor = DarkSurfaceHighlight,
+            uncheckedBorderColor = DarkBorder
+          )
+        )
+      }
+
+      HorizontalDivider(color = DarkBorderSubtle, modifier = Modifier.padding(vertical = 10.dp))
+
+      Text(
+        if (settings.useCustomListOnly) "Skipped folders (custom)" else "Skipped folders",
+        color = TextSecondary,
+        fontSize = 12.sp,
+        fontWeight = FontWeight.SemiBold
+      )
+      Spacer(modifier = Modifier.height(6.dp))
+      if (skippedDirs.isEmpty()) {
+        Text(
+          "Nothing is skipped — opening huge projects may be slow or run out of memory.",
+          color = WarningAmber,
+          fontSize = 11.sp,
+          modifier = Modifier.testTag("txt_ignore_warning")
+        )
+      } else {
+        FlowRow(
+          horizontalArrangement = Arrangement.spacedBy(6.dp),
+          verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+          skippedDirs.forEach { name ->
+            IgnoreChip(
+              name = name,
+              custom = settings.extraDirs.contains(name),
+              onRemove = { viewModel.removeIgnoredDir(name) }
+            )
+          }
+        }
+      }
+
+      // Removed defaults stay one tap away from being restored.
+      if (!settings.useCustomListOnly && settings.removedDefaults.isNotEmpty()) {
+        Spacer(modifier = Modifier.height(10.dp))
+        Text("Removed from defaults — tap to restore", color = TextMuted, fontSize = 11.sp)
+        Spacer(modifier = Modifier.height(6.dp))
+        FlowRow(
+          horizontalArrangement = Arrangement.spacedBy(6.dp),
+          verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+          settings.removedDefaults.sorted().forEach { name ->
+            IgnoreChip(
+              name = name,
+              custom = false,
+              struckThrough = true,
+              onRemove = { viewModel.addIgnoredDir(name) }
+            )
+          }
+        }
+      }
+
+      // Add a folder name to the list.
+      Spacer(modifier = Modifier.height(12.dp))
+      Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth()
+      ) {
+        OutlinedTextField(
+          value = newDirInput,
+          onValueChange = { newDirInput = it },
+          placeholder = { Text("folder name, e.g. third_party", color = TextMuted, fontSize = 12.sp) },
+          singleLine = true,
+          modifier = Modifier
+            .weight(1f)
+            .testTag("input_ignore_dir"),
+          textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp, color = TextPrimary),
+          shape = RoundedCornerShape(8.dp),
+          colors = OutlinedTextFieldDefaults.colors(
+            focusedBorderColor = ElectricBlue,
+            unfocusedBorderColor = DarkBorder,
+            focusedContainerColor = DarkBackground,
+            unfocusedContainerColor = DarkBackground
+          )
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Button(
+          onClick = {
+            viewModel.addIgnoredDir(newDirInput)
+            newDirInput = ""
+          },
+          enabled = newDirInput.isNotBlank(),
+          modifier = Modifier.testTag("btn_add_ignore_dir"),
+          colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue)
+        ) { Text("Add", fontSize = 12.sp) }
+      }
+
+      TextButton(
+        onClick = { viewModel.restoreDefaultIgnoredDirs() },
+        modifier = Modifier.testTag("btn_reset_ignore_dirs")
+      ) {
+        Text("Restore built-in defaults", color = TextMuted, fontSize = 12.sp)
+      }
+    }
+  }
+}
+
+@Composable
+private fun IgnoreChip(
+  name: String,
+  custom: Boolean,
+  struckThrough: Boolean = false,
+  onRemove: () -> Unit
+) {
+  Row(
+    verticalAlignment = Alignment.CenterVertically,
+    modifier = Modifier
+      .clip(RoundedCornerShape(6.dp))
+      .background(DarkSurfaceElevated)
+      .border(
+        1.dp,
+        if (custom) ElectricBlue.copy(alpha = 0.6f) else DarkBorderSubtle,
+        RoundedCornerShape(6.dp)
+      )
+      .clickable(onClick = onRemove)
+      .padding(horizontal = 8.dp, vertical = 5.dp)
+      .testTag("chip_ignore_$name")
+  ) {
+    Text(
+      text = name,
+      color = if (struckThrough) TextMuted else TextPrimary,
+      fontSize = 11.sp,
+      fontFamily = FontFamily.Monospace,
+      textDecoration = if (struckThrough) {
+        androidx.compose.ui.text.style.TextDecoration.LineThrough
+      } else {
+        androidx.compose.ui.text.style.TextDecoration.None
+      }
+    )
+    Spacer(modifier = Modifier.width(5.dp))
+    Icon(
+      imageVector = if (struckThrough) Icons.Default.Add else Icons.Default.Close,
+      contentDescription = if (struckThrough) "Restore $name" else "Stop skipping $name",
+      tint = TextMuted,
+      modifier = Modifier.size(12.dp)
+    )
   }
 }
 

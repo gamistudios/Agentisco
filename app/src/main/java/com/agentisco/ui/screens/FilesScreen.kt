@@ -37,6 +37,9 @@ fun FilesScreen(
 ) {
   val activeProject by viewModel.activeProject.collectAsState()
   val rootFiles by viewModel.projectFiles.collectAsState()
+  val dirChildren by viewModel.dirChildren.collectAsState()
+  val isFilesLoading by viewModel.isFilesLoading.collectAsState()
+  val searchResults by viewModel.nameSearchResults.collectAsState()
 
   var selectedFileForMenu by remember { mutableStateOf<ProjectFile?>(null) }
   var showAskAgentDialog by remember { mutableStateOf(false) }
@@ -150,40 +153,35 @@ fun FilesScreen(
       }
     }
 
-    // Which directories are expanded. Collapsed by default, so nested files stay
-    // inside their own folder instead of being listed alongside the root.
+    // Which directories are expanded. Collapsed by default; children of a
+    // folder are scanned lazily (off the main thread) the first time it opens.
     var expandedDirs by remember(activeProject) { mutableStateOf(setOf<String>()) }
 
+    LaunchedEffect(searchQuery) { viewModel.searchFileNames(searchQuery) }
+
     // Rows currently visible in the tree, each paired with its indent depth.
-    val visibleFiles = remember(rootFiles, searchQuery, expandedDirs) {
+    // Only expanded folders contribute rows, so huge repos render instantly.
+    val visibleFiles = remember(rootFiles, dirChildren, expandedDirs) {
       val result = mutableListOf<Pair<ProjectFile, Int>>()
-      if (searchQuery.isNotBlank()) {
-        // While searching, match against every file in the project (not just expanded
-        // folders) — each row's own path label still shows where it lives.
-        fun collectMatches(files: List<ProjectFile>) {
-          for (f in files) {
-            if (f.name.contains(searchQuery, ignoreCase = true)) {
-              result.add(f to 0)
-            }
-            if (f.isDirectory) {
-              collectMatches(f.children)
-            }
+      fun addVisible(files: List<ProjectFile>, depth: Int) {
+        for (f in files) {
+          result.add(f to depth)
+          if (f.isDirectory && expandedDirs.contains(f.path)) {
+            dirChildren[f.path]?.let { addVisible(it, depth + 1) }
           }
         }
-        collectMatches(rootFiles)
-      } else {
-        // Normal browsing: only descend into a folder's children once it's expanded.
-        fun addVisible(files: List<ProjectFile>, depth: Int) {
-          for (f in files) {
-            result.add(f to depth)
-            if (f.isDirectory && expandedDirs.contains(f.path)) {
-              addVisible(f.children, depth + 1)
-            }
-          }
-        }
-        addVisible(rootFiles, 0)
       }
+      addVisible(rootFiles, 0)
       result
+    }
+
+    val toggleExpand: (ProjectFile) -> Unit = { file ->
+      if (expandedDirs.contains(file.path)) {
+        expandedDirs = expandedDirs - file.path
+      } else {
+        expandedDirs = expandedDirs + file.path
+        viewModel.loadChildren(file.path)
+      }
     }
 
     LazyColumn(
@@ -193,31 +191,67 @@ fun FilesScreen(
         .padding(horizontal = 14.dp, vertical = 8.dp),
       verticalArrangement = Arrangement.spacedBy(4.dp)
     ) {
-      items(visibleFiles) { (file, depth) ->
-        FileTreeRow(
-          file = file,
-          depth = depth,
-          isExpanded = expandedDirs.contains(file.path),
-          onClick = {
-            if (file.isDirectory) {
-              expandedDirs = if (expandedDirs.contains(file.path)) {
-                expandedDirs - file.path
-              } else {
-                expandedDirs + file.path
-              }
-            } else {
-              viewModel.openFile(file)
-            }
-          },
-          onLongClick = {
-            selectedFileForMenu = file
-            showFileOptionsDialog = true
-          },
-          onAskAgent = {
-            selectedFileForMenu = file
-            showAskAgentDialog = true
+      if (isFilesLoading) {
+        item {
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)
+          ) {
+            CircularProgressIndicator(
+              modifier = Modifier.size(14.dp),
+              color = ElectricBlueGlow,
+              strokeWidth = 2.dp
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Scanning project files…", color = TextMuted, fontSize = 11.sp)
           }
-        )
+        }
+      }
+      if (searchQuery.isNotBlank()) {
+        // While searching, match names across the whole project in the
+        // background (dependency/build folders excluded) — each row's own
+        // path label still shows where it lives.
+        items(searchResults) { file ->
+          FileTreeRow(
+            file = file,
+            depth = 0,
+            isExpanded = false,
+            onClick = {
+              if (!file.isDirectory) viewModel.openFile(file)
+            },
+            onLongClick = {
+              selectedFileForMenu = file
+              showFileOptionsDialog = true
+            },
+            onAskAgent = {
+              selectedFileForMenu = file
+              showAskAgentDialog = true
+            }
+          )
+        }
+      } else {
+        items(visibleFiles) { (file, depth) ->
+          FileTreeRow(
+            file = file,
+            depth = depth,
+            isExpanded = expandedDirs.contains(file.path),
+            onClick = {
+              if (file.isDirectory) {
+                toggleExpand(file)
+              } else {
+                viewModel.openFile(file)
+              }
+            },
+            onLongClick = {
+              selectedFileForMenu = file
+              showFileOptionsDialog = true
+            },
+            onAskAgent = {
+              selectedFileForMenu = file
+              showAskAgentDialog = true
+            }
+          )
+        }
       }
     }
 

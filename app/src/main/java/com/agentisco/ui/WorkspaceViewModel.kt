@@ -39,6 +39,9 @@ class WorkspaceViewModel(
   val activeProject: StateFlow<Project> = repository.activeProject
   val currentDestination: StateFlow<AppDestination> = repository.currentDestination
   val projectFiles: StateFlow<List<ProjectFile>> = repository.projectFiles
+  val dirChildren: StateFlow<Map<String, List<ProjectFile>>> = repository.dirChildren
+  val isFilesLoading: StateFlow<Boolean> = repository.isFilesLoading
+  val nameSearchResults: StateFlow<List<ProjectFile>> = repository.nameSearchResults
   val activeFile: StateFlow<ProjectFile> = repository.activeFile
   val editorContent: StateFlow<String> = repository.editorContent
   val isEditorDirty: StateFlow<Boolean> = repository.isEditorDirty
@@ -510,8 +513,31 @@ class WorkspaceViewModel(
   fun createProject(name: String, desc: String, rootPath: String? = null): Project? =
     repository.createProject(name, desc, rootPath)
 
-  fun importProject(rootPath: String, displayName: String? = null): Project? =
-    repository.importProject(rootPath, displayName)
+  fun importProject(rootPath: String, displayName: String? = null, onResult: (Project?) -> Unit) {
+    viewModelScope.launch {
+      onResult(repository.importProject(rootPath, displayName))
+    }
+  }
+
+  fun loadChildren(relativePath: String) = repository.loadChildren(relativePath)
+
+  fun searchFileNames(query: String) = repository.searchFileNames(query)
+
+  // ---- Scan exclusions (Settings → Codebase scanning) ----
+  val scanIgnoreSettings: StateFlow<com.agentisco.data.local.ScanIgnoreSettings> =
+    repository.scanIgnoreSettings
+  val effectiveIgnoredDirs: StateFlow<List<String>> = repository.scanIgnoreSettings
+    .map { com.agentisco.data.local.ScanIgnoreStore.effectiveDirs(it).sorted() }
+    .stateIn(
+      viewModelScope,
+      SharingStarted.Eagerly,
+      com.agentisco.data.local.ScanIgnoreStore.effectiveDirs(repository.scanIgnoreSettings.value).sorted()
+    )
+
+  fun addIgnoredDir(raw: String) = repository.addIgnoredDir(raw)
+  fun removeIgnoredDir(name: String) = repository.removeIgnoredDir(name)
+  fun setIgnoredDirsOverride(enabled: Boolean) = repository.setIgnoredDirsOverride(enabled)
+  fun restoreDefaultIgnoredDirs() = repository.restoreDefaultIgnoredDirs()
 
   /**
    * Deletes a project entirely after the user confirms: folder, chat sessions

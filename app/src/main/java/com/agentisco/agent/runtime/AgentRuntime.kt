@@ -424,7 +424,7 @@ class AgentRuntime(
   )
 
   private fun buildSystemPrompt(project: Project, toolsAvailable: Boolean): String {
-    val files = fileSystem.getFileTree(project)
+    val files = fileSystem.getFileTree(project, maxDepth = 3)
     val paths = StringBuilder()
     fun walk(items: List<ProjectFile>, depth: Int) {
       if (depth > 2) return

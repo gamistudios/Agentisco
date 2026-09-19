@@ -3,7 +3,6 @@ package com.agentisco.agent.tool
 import com.agentisco.agent.model.PendingApproval
 import com.agentisco.agent.model.PermissionMode
 import com.agentisco.data.model.DiffLineType
-import com.agentisco.data.model.ProjectFile
 import com.agentisco.workspace.filesystem.ProjectFileSystem
 import com.agentisco.workspace.git.GitRepositoryManager
 import com.agentisco.workspace.terminal.TerminalProcessManager
@@ -115,20 +114,11 @@ class ListFilesTool(private val fs: ProjectFileSystem) : AgentTool {
   )
 
   override suspend fun execute(args: JSONObject, ctx: ToolContext): ToolResult {
-    val path = args.str("path").trim('/').takeIf { it.isNotEmpty() }
-    val tree = fs.getFileTree(ctx.project)
-    val items = if (path == null) tree else findDir(tree, path)?.children
+    val path = args.str("path").trim('/')
+    val items = fs.listChildren(ctx.project, path)
       ?: return ToolResult(success = false, error = "Directory not found: $path")
     val lines = items.map { (if (it.isDirectory) "[dir] " else "") + it.path }
     return ToolResult(success = true, output = lines.joinToString("\n").ifBlank { "(empty directory)" }, metadata = mapOf("count" to items.size.toString()))
-  }
-
-  private fun findDir(items: List<ProjectFile>, path: String): ProjectFile? {
-    for (item in items) {
-      if (item.path == path) return item
-      findDir(item.children, path)?.let { return it }
-    }
-    return null
   }
 }
 
