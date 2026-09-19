@@ -7,10 +7,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -811,6 +813,8 @@ private fun ToolCallRow(
   val iconColor = toolColor(item.name)
   // File edits render as an inline git-style diff instead of raw JSON.
   val diffLines = remember(item.argsJson) { editDiffForTool(item.name, item.argsJson) }
+  // Terminal cards show the real shell command instead of {"command": …}.
+  val command = remember(item.argsJson) { displayCommandForTool(item.name, item.argsJson) }
 
   Column(
     modifier = Modifier
@@ -890,6 +894,42 @@ private fun ToolCallRow(
       }
     }
 
+    // The command about to run / that ran — copyable, never truncated JSON.
+    if (command != null) {
+      Spacer(modifier = Modifier.height(5.dp))
+      Row(
+        modifier = Modifier
+          .fillMaxWidth()
+          .clip(RoundedCornerShape(6.dp))
+          .background(DarkBackground)
+          .padding(horizontal = 6.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Icon(
+          Icons.Outlined.ContentCopy,
+          contentDescription = "Copy command",
+          tint = TextMuted,
+          modifier = Modifier
+            .size(13.dp)
+            .clickable { clipboard.setText(AnnotatedString(command)) }
+            .testTag("btn_copy_command")
+        )
+        Spacer(modifier = Modifier.width(7.dp))
+        Text(
+          "\$ ${command.trim()}",
+          color = TextCode,
+          fontSize = 11.sp,
+          fontFamily = FontFamily.Monospace,
+          softWrap = false,
+          maxLines = 1,
+          overflow = TextOverflow.Clip,
+          modifier = Modifier
+            .weight(1f)
+            .horizontalScroll(rememberScrollState())
+        )
+      }
+    }
+
     // Inline error/result one-liner
     if (!item.running) {
       Spacer(modifier = Modifier.height(3.dp))
@@ -963,7 +1003,7 @@ private fun ToolCallRow(
           .background(DarkBackground)
           .padding(8.dp)
       ) {
-        if (item.argsJson.isNotBlank() && item.argsJson != "{}") {
+        if (item.argsJson.isNotBlank() && item.argsJson != "{}" && command == null && diffLines == null) {
           Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Arguments", color = TextMuted, fontSize = 9.sp, modifier = Modifier.weight(1f))
             Icon(
@@ -1518,6 +1558,23 @@ private fun prettyJson(raw: String): String = runCatching {
 
 /** Collapsed diff shows a bounded preview; the user can expand the rest. */
 private const val DIFF_PREVIEW_LINES = 14
+
+/**
+ * Human-readable shell command for terminal-family tools, or null when the
+ * tool isn't one. Script tools mirror [com.agentisco.agent.tool.ScriptTool]'s
+ * `npm run <script> [-- <args>]` construction.
+ */
+internal fun displayCommandForTool(name: String, argsJson: String): String? {
+  val args = runCatching { JSONObject(argsJson) }.getOrNull() ?: return null
+  return when (name) {
+    "run_command" -> args.optString("command").trim().takeIf { it.isNotEmpty() }
+    "build", "test", "run" -> {
+      val extra = args.optString("args").trim()
+      "npm run $name" + if (extra.isEmpty()) "" else " -- $extra"
+    }
+    else -> null
+  }
+}
 
 /**
  * Diff lines for file-mutation tools, or null when the tool isn't an edit.
