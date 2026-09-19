@@ -166,6 +166,33 @@ fun SettingsScreen(
             }
           }
 
+          if (updateUiState.hasUpdateFile) {
+            HorizontalDivider(
+              color = DarkBorderSubtle,
+              modifier = Modifier.padding(vertical = 10.dp)
+            )
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.SpaceBetween,
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              Column(modifier = Modifier.weight(1f)) {
+                Text("Downloaded update file", color = TextPrimary, fontSize = 13.sp)
+                Text(
+                  "Frees the space and forces a clean re-download next time.",
+                  color = TextMuted,
+                  fontSize = 11.sp
+                )
+              }
+              TextButton(
+                onClick = { updateViewModel.deleteDownloadedFile() },
+                modifier = Modifier.testTag("btn_delete_update_file")
+              ) {
+                Text("Delete file", color = DangerRed, fontSize = 13.sp)
+              }
+            }
+          }
+
           if (updateUiState.updateState != com.agentisco.data.repository.UpdateRepository.UpdateState.IDLE) {
             HorizontalDivider(
               color = DarkBorderSubtle,

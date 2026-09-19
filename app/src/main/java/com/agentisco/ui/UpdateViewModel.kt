@@ -30,6 +30,8 @@ class UpdateViewModel(
         val error: String? = null,
         val availableUpdate: UpdateRepository.AvailableUpdate? = null,
         val downloadedApkPath: String? = null,
+        /** Whether an update APK (finished or resumable partial) sits on disk. */
+        val hasUpdateFile: Boolean = false,
         val lastCheckText: String = "Never",
         val autoUpdateEnabled: Boolean = true,
         val showUpdateDialog: Boolean = false
@@ -45,7 +47,7 @@ class UpdateViewModel(
         // Each upstream flow simply writes its slice into the UI snapshot.
         viewModelScope.launch {
             updateRepository.updateState.collect { state ->
-                _uiState.update { it.copy(updateState = state) }
+                _uiState.update { it.copy(updateState = state, hasUpdateFile = updateRepository.hasUpdateFileOnDisk()) }
             }
         }
         viewModelScope.launch {
@@ -78,6 +80,8 @@ class UpdateViewModel(
                 }
             }
         }
+        // The file may already be on disk from a previous run, before any state flows.
+        _uiState.update { it.copy(hasUpdateFile = updateRepository.hasUpdateFileOnDisk()) }
     }
 
     /**
@@ -117,6 +121,23 @@ class UpdateViewModel(
     fun cancelDownload() {
         updateRepository.cancelDownload()
         downloadJob?.cancel()
+    }
+
+    /**
+     * Deletes the downloaded (or partially downloaded) update APK from disk,
+     * alongside its completion marker, so the download can start over clean.
+     */
+    fun deleteDownloadedFile() {
+        updateRepository.deleteDownloadedUpdate()
+        downloadJob?.cancel()
+        _uiState.update {
+            it.copy(
+                downloadedApkPath = null,
+                downloadProgress = 0f,
+                error = null,
+                hasUpdateFile = false
+            )
+        }
     }
 
     fun installUpdate() {

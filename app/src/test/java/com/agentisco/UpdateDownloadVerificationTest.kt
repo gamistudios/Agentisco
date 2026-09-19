@@ -408,6 +408,41 @@ class UpdateDownloadVerificationTest {
         assertFalse("the completion marker must not outlive its file", markerFile.exists())
     }
 
+    // ——— deleting the downloaded file ———
+
+    @Test
+    fun `deleting the downloaded update removes the file and every sidecar`() = runTest {
+        val payload = apkPayload(4096)
+        val repository = repository(InMemoryStreamSource(payload))
+        repository.adoptAvailableUpdate(update(assetSize = payload.size.toLong()))
+        assertTrue(repository.downloadUpdate())
+
+        repository.deleteDownloadedUpdate()
+
+        assertFalse(updateFile.exists())
+        assertFalse(markerFile.exists())
+        assertFalse(offsetSidecar.exists())
+        assertFalse(repository.hasUpdateFileOnDisk())
+        assertNull(repository.downloadedApkPath.value)
+        assertEquals(UpdateRepository.UpdateState.AVAILABLE, repository.updateState.value)
+    }
+
+    @Test
+    fun `a finished download that was deleted re-adopts as AVAILABLE, not install`() = runTest {
+        val payload = apkPayload(4096)
+        val repository = repository(InMemoryStreamSource(ByteArray(0)))
+        val deletedRepository = repository(InMemoryStreamSource(payload))
+        deletedRepository.adoptAvailableUpdate(update(assetSize = payload.size.toLong()))
+        assertTrue(deletedRepository.downloadUpdate())
+
+        deletedRepository.deleteDownloadedUpdate()
+
+        // Same release, nothing left on disk: the UI must offer Download again.
+        repository.adoptAvailableUpdate(update(assetSize = payload.size.toLong()))
+        assertEquals(UpdateRepository.UpdateState.AVAILABLE, repository.updateState.value)
+        assertNull(repository.downloadedApkPath.value)
+    }
+
     // ——— helpers ———
 
     private fun repository(source: UpdateStreamSource): UpdateRepository =

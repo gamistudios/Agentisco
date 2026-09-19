@@ -479,6 +479,27 @@ class UpdateRepository(
         }
     }
 
+    /** True when an update APK — complete or a resumable partial — is on disk. */
+    fun hasUpdateFileOnDisk(): Boolean = updateFile().exists()
+
+    /**
+     * Throws away everything the update download has written: the APK, the legacy
+     * resume marker and the completion marker. Any in-flight download is aborted,
+     * and the state falls back so the UI offers a fresh download again.
+     */
+    fun deleteDownloadedUpdate() {
+        downloadCancelled = true
+        val file = updateFile()
+        file.delete()
+        File(file.parentFile, "${file.name}.offset").delete()
+        clearMarker()
+        _downloadedApkPath.value = null
+        _updateProgress.value = 0f
+        _updateError.value = null
+        _updateState.value =
+            if (_availableUpdate.value != null) UpdateState.AVAILABLE else UpdateState.IDLE
+    }
+
     fun resetToIdle() {
         _updateState.value = UpdateState.IDLE
         _updateError.value = null
