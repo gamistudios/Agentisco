@@ -45,10 +45,16 @@ class UpdateDownloadVerificationTest {
     private val offsetSidecar: File
         get() = File(updateFile.parentFile, "${updateFile.name}.offset")
 
+    /** Mirrors UpdateRepository's private UPDATE_META_NAME completion marker. */
+    private val markerFile: File
+        get() = File(context.filesDir, "agentisco-update.meta.json")
+
     @Before
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
         updateFile.delete()
+        offsetSidecar.delete()
+        markerFile.delete()
     }
 
     // ——— the reported bug: early completion ———
@@ -265,19 +271,99 @@ class UpdateDownloadVerificationTest {
         assertArrayEquals(payload, updateFile.readBytes())
     }
 
+    // ——— the checksum: proof that every byte arrived ———
+
+    @Test
+    fun `a file of the right size whose bytes do not match the digest is not complete`() = runTest {
+        val payload = apkPayload(4096)
+        val tampered = payload.copyOf().apply { this[4] = (this[4] + 1).toByte() }
+        // A full-length transfer that hashes to something else — a sparse hole or a
+        // swapped leftover — must never be marked downloaded.
+        val repository = repository(InMemoryStreamSource(payload))
+        repository.adoptAvailableUpdate(
+            update(assetSize = payload.size.toLong(), assetDigest = sha256Hex(tampered))
+        )
+
+        assertFalse(repository.downloadUpdate())
+
+        assertEquals(UpdateRepository.UpdateState.ERROR, repository.updateState.value)
+        assertTrue(
+            "checksum failure must be reported: ${repository.updateError.value}",
+            repository.updateError.value!!.contains("checksum")
+        )
+        assertNull(repository.downloadedApkPath.value)
+        assertFalse(updateFile.exists())
+        assertFalse(markerFile.exists())
+    }
+
+    @Test
+    fun `every part of a resumed download must be present for the digest to pass`() = runTest {
+        val payload = apkPayload(8192)
+        // Each response delivers 2048 bytes, so completion takes four resumptions;
+        // only the last one can hash to the whole asset.
+        val source = InMemoryStreamSource(payload, bytesAvailable = 2048)
+        val repository = repository(source)
+        repository.adoptAvailableUpdate(
+            update(assetSize = payload.size.toLong(), assetDigest = sha256Hex(payload))
+        )
+
+        assertTrue(repository.downloadUpdate())
+
+        assertEquals(listOf(0L, 2048L, 4096L, 6144L), source.requestedOffsets)
+        assertArrayEquals(payload, updateFile.readBytes())
+        assertEquals(UpdateRepository.UpdateState.DOWNLOADED, repository.updateState.value)
+        assertTrue(markerFile.exists())
+    }
+
     // ——— surviving a restart ———
 
     @Test
-    fun `a verified apk already on disk makes the adopted release offer install`() {
+    fun `a verified apk already on disk makes the adopted release offer install`() = runTest {
         val payload = apkPayload(4096)
-        updateFile.writeBytes(payload)
+        val first = repository(InMemoryStreamSource(payload))
+        first.adoptAvailableUpdate(update(assetSize = payload.size.toLong()))
+        assertTrue(first.downloadUpdate())
+        assertTrue(markerFile.exists())
 
-        val repository = repository(InMemoryStreamSource(ByteArray(0)))
-        val state = repository.adoptAvailableUpdate(update(assetSize = payload.size.toLong()))
+        // A fresh repository — standing in for a new app process over the same
+        // filesDir — must recognise the finished download and offer install.
+        val restarted = repository(InMemoryStreamSource(ByteArray(0)))
+        val state = restarted.adoptAvailableUpdate(update(assetSize = payload.size.toLong()))
 
         assertEquals(UpdateRepository.UpdateState.DOWNLOADED, state)
-        assertEquals(updateFile.absolutePath, repository.downloadedApkPath.value)
-        assertEquals(1f, repository.updateProgress.value, 0f)
+        assertEquals(updateFile.absolutePath, restarted.downloadedApkPath.value)
+        assertEquals(1f, restarted.updateProgress.value, 0f)
+    }
+
+    @Test
+    fun `a leftover no completed download produced is not offered for install`() {
+        // Regression: full-length APK-shaped leftovers from the old sparse-file bug
+        // used to be adopted straight into DOWNLOADED on size + magic alone.
+        updateFile.writeBytes(apkPayload(4096))
+
+        val repository = repository(InMemoryStreamSource(ByteArray(0)))
+        val state = repository.adoptAvailableUpdate(update(assetSize = 4096L))
+
+        assertEquals(UpdateRepository.UpdateState.AVAILABLE, state)
+        assertNull(repository.downloadedApkPath.value)
+    }
+
+    @Test
+    fun `a marker from a different release does not offer the leftover for install`() = runTest {
+        val payload = apkPayload(4096)
+        val repository = repository(InMemoryStreamSource(payload))
+        repository.adoptAvailableUpdate(update(assetSize = payload.size.toLong()))
+        assertTrue(repository.downloadUpdate())
+
+        // Same bytes on disk, but the release asset has moved on: the download has
+        // to run again instead of offering the stale file for install.
+        val movedOn = repository(InMemoryStreamSource(ByteArray(0)))
+        val state = movedOn.adoptAvailableUpdate(
+            update(assetSize = payload.size.toLong(), assetDigest = sha256Hex(payload))
+        )
+
+        assertEquals(UpdateRepository.UpdateState.AVAILABLE, state)
+        assertNull(movedOn.downloadedApkPath.value)
     }
 
     @Test
@@ -319,6 +405,7 @@ class UpdateDownloadVerificationTest {
         assertEquals(UpdateRepository.UpdateState.AVAILABLE, repository.updateState.value)
         assertNotNull(repository.updateError.value)
         assertFalse(updateFile.exists())
+        assertFalse("the completion marker must not outlive its file", markerFile.exists())
     }
 
     // ——— helpers ———
@@ -326,14 +413,15 @@ class UpdateDownloadVerificationTest {
     private fun repository(source: UpdateStreamSource): UpdateRepository =
         UpdateRepository(context, streamSource = source, retryDelayMs = 0L)
 
-    private fun update(assetSize: Long) = UpdateRepository.AvailableUpdate(
+    private fun update(assetSize: Long, assetDigest: String? = null) = UpdateRepository.AvailableUpdate(
         tagName = "v9.9.9",
         versionName = "9.9.9",
         versionCode = 9_09_09L,
         downloadUrl = "https://example.invalid/agentisco-debug.apk",
         releaseNotes = "",
         assetName = "agentisco-debug.apk",
-        assetSize = assetSize
+        assetSize = assetSize,
+        assetDigest = assetDigest
     )
 
     /** Bytes that pass the signature check: "PK\u0003\u0004" followed by filler. */
@@ -346,6 +434,10 @@ class UpdateDownloadVerificationTest {
         for (i in 4 until size) bytes[i] = (i % 251).toByte()
         return bytes
     }
+
+    private fun sha256Hex(bytes: ByteArray): String =
+        java.security.MessageDigest.getInstance("SHA-256").digest(bytes)
+            .joinToString("") { "%02x".format(it) }
 
     /**
      * Serves a fixed payload from memory. [bytesAvailable] cuts the stream short,

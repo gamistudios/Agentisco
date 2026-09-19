@@ -161,6 +161,91 @@ class UpdateDownloadVerifierTest {
         assertFalse(resumed.complete)
     }
 
+    // ——— checksum ———
+
+    @Test
+    fun `a matching digest completes even when the size claim is the only other proof`() {
+        val digest = "a".repeat(64)
+        val decision = UpdateDownloadVerifier.decide(
+            expectedSize = 1000L,
+            actualSize = 1000L,
+            hasApkMagic = true,
+            actualPackage = null,
+            downloadedFromZero = false,
+            expectedDigest = digest,
+            actualDigest = digest
+        )
+        assertTrue(decision.complete)
+    }
+
+    @Test
+    fun `a digest mismatch is not complete whatever the size says`() {
+        val decision = UpdateDownloadVerifier.decide(
+            expectedSize = 1000L,
+            actualSize = 1000L,
+            hasApkMagic = true,
+            actualPackage = UpdateDownloadVerifier.EXPECTED_PACKAGE,
+            downloadedFromZero = true,
+            expectedDigest = "a".repeat(64),
+            actualDigest = "b".repeat(64)
+        )
+        assertFalse(decision.complete)
+        assertEquals(UpdateDownloadVerifier.CHECKSUM_MISMATCH_REASON, decision.reason)
+    }
+
+    @Test
+    fun `a file that cannot be hashed against a known digest is not complete`() {
+        val decision = UpdateDownloadVerifier.decide(
+            expectedSize = 1000L,
+            actualSize = 1000L,
+            hasApkMagic = true,
+            actualPackage = null,
+            downloadedFromZero = true,
+            expectedDigest = "a".repeat(64),
+            actualDigest = null
+        )
+        assertFalse(decision.complete)
+    }
+
+    @Test
+    fun `digest normalisation accepts only well formed sha256 hex`() {
+        val hex = "0123456789abcdef".repeat(4)
+        assertEquals(hex, UpdateDownloadVerifier.normalizeDigest("sha256:$hex"))
+        assertEquals(hex, UpdateDownloadVerifier.normalizeDigest(hex.uppercase()))
+        assertEquals(null, UpdateDownloadVerifier.normalizeDigest(null))
+        assertEquals(null, UpdateDownloadVerifier.normalizeDigest(""))
+        assertEquals(null, UpdateDownloadVerifier.normalizeDigest("sha256:"))
+        assertEquals(null, UpdateDownloadVerifier.normalizeDigest(hex.drop(1)))
+        assertEquals(null, UpdateDownloadVerifier.normalizeDigest("g" + hex.drop(1)))
+        assertEquals(null, UpdateDownloadVerifier.normalizeDigest("md5:$hex"))
+    }
+
+    @Test
+    fun `sha256Hex hashes every byte of the file`() {
+        val file = File.createTempFile("hash", ".bin")
+        try {
+            file.writeBytes("abc".toByteArray())
+            val abc = UpdateDownloadVerifier.sha256Hex(file)
+            assertEquals(
+                "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+                abc
+            )
+            // A single changed byte moves the hash completely — this is what makes
+            // the digest catch sparse holes a size check walks straight past.
+            file.writeBytes("abd".toByteArray())
+            val abd = UpdateDownloadVerifier.sha256Hex(file)
+            assertTrue("one byte must change the whole hash: $abd", abd != null && abd != abc)
+        } finally {
+            file.delete()
+        }
+    }
+
+    @Test
+    fun `sha256Hex reports null for a missing file`() {
+        val missing = File(System.getProperty("java.io.tmpdir"), "definitely-missing-${System.nanoTime()}.bin")
+        assertEquals(null, UpdateDownloadVerifier.sha256Hex(missing))
+    }
+
     // ——— file signature ———
 
     @Test

@@ -27,6 +27,9 @@ object UpdateDownloadVerifier {
 
     const val NOT_AN_APK_REASON = "Downloaded file is not a valid APK"
 
+    const val CHECKSUM_MISMATCH_REASON =
+        "Download incomplete: file contents do not match the release checksum"
+
     fun sizeMismatchReason(expectedBytes: Long, actualBytes: Long): String =
         "Download incomplete: expected $expectedBytes bytes, got $actualBytes"
 
@@ -58,6 +61,34 @@ object UpdateDownloadVerifier {
             }
         } catch (e: Exception) {
             false
+        }
+    }
+
+    /**
+     * GitHub reports asset digests as `"sha256:<hex>"` (older payloads may carry the
+     * bare hex or nothing). Returns a lowercase hex string, or null when unusable.
+     */
+    fun normalizeDigest(raw: String?): String? {
+        val value = raw?.trim()?.lowercase()?.removePrefix("sha256:")?.trim() ?: return null
+        return if (value.length == 64 && value.all { it in '0'..'9' || it in 'a'..'f' }) value else null
+    }
+
+    /** Lowercase SHA-256 hex of every byte in [file], or null when it cannot be read. */
+    fun sha256Hex(file: File): String? {
+        if (!file.isFile) return null
+        return try {
+            val digest = java.security.MessageDigest.getInstance("SHA-256")
+            file.inputStream().use { input ->
+                val buffer = ByteArray(64 * 1024)
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read == -1) break
+                    digest.update(buffer, 0, read)
+                }
+            }
+            digest.digest().joinToString("") { "%02x".format(it) }
+        } catch (e: Exception) {
+            null
         }
     }
 
@@ -108,13 +139,21 @@ object UpdateDownloadVerifier {
      * @param downloadedFromZero whether this transfer started at offset 0 and no Range
      *        request was ignored: the last-resort proof of completeness when the
      *        expected size is unknown.
+     * @param expectedDigest lowercase SHA-256 of the release asset, when GitHub
+     *        reports one. This is the only proof that every byte — not just the
+     *        right count — is on disk, so it catches sparse/truncated leftovers
+     *        that happen to match the asset size.
+     * @param actualDigest SHA-256 computed over the real file contents, or null
+     *        when it could not be computed.
      */
     fun decide(
         expectedSize: Long,
         actualSize: Long,
         hasApkMagic: Boolean,
         actualPackage: String?,
-        downloadedFromZero: Boolean
+        downloadedFromZero: Boolean,
+        expectedDigest: String? = null,
+        actualDigest: String? = null
     ): Decision {
         if (expectedSize > 0L) {
             if (actualSize != expectedSize) {
@@ -122,6 +161,13 @@ object UpdateDownloadVerifier {
             }
         } else if (!downloadedFromZero) {
             return Decision(false, UNKNOWN_SIZE_REASON)
+        }
+
+        if (expectedDigest != null) {
+            // A known checksum outranks every heuristic: unreadable or mismatching
+            // contents mean the transfer is NOT finished, full stop.
+            if (actualDigest == null) return Decision(false, CHECKSUM_MISMATCH_REASON)
+            if (actualDigest != expectedDigest) return Decision(false, CHECKSUM_MISMATCH_REASON)
         }
 
         if (actualSize < MAGIC_LENGTH) return Decision(false, NOT_AN_APK_REASON)

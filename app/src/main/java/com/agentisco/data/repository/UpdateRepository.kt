@@ -53,7 +53,14 @@ class UpdateRepository(
          * authoritative download total: progress and completion are measured
          * against it, not against whatever the HTTP response happened to send.
          */
-        val assetSize: Long = 0L
+        val assetSize: Long = 0L,
+        /**
+         * Lowercase SHA-256 hex of the asset, when the GitHub API reports one.
+         * Hashing the whole file is the only proof that every byte of a (possibly
+         * resumed, multi-part) transfer really landed — size alone cannot see
+         * sparse holes or a leftover that merely happens to match.
+         */
+        val assetDigest: String? = null
     )
 
     private val _updateState = MutableStateFlow(UpdateState.IDLE)
@@ -77,6 +84,41 @@ class UpdateRepository(
 
     private fun updateFile(): File = File(context.filesDir, UPDATE_APK_NAME)
 
+    /**
+     * Sidecar recording which release the APK on disk was *fully* downloaded and
+     * verified as. It is written only after a transfer passed [UpdateDownloadVerifier]
+     * and deleted whenever that proof is invalidated, so a leftover file whose size
+     * merely happens to match (e.g. one left by the old sparse-file bug) can never
+     * be promoted to DOWNLOADED on the next app start.
+     */
+    private fun markerFile(): File = File(context.filesDir, UPDATE_META_NAME)
+
+    private fun writeMarker(update: AvailableUpdate) {
+        runCatching {
+            markerFile().writeText(
+                JSONObject()
+                    .put("url", update.downloadUrl)
+                    .put("size", update.assetSize)
+                    .put("digest", update.assetDigest ?: "")
+                    .toString()
+            )
+        }
+    }
+
+    private fun clearMarker() {
+        markerFile().delete()
+    }
+
+    /** True when the marker says the file on disk completed this exact download. */
+    private fun markerMatches(update: AvailableUpdate): Boolean {
+        val json = runCatching { JSONObject(markerFile().readText()) }.getOrNull() ?: return false
+        if (json.optString("url", "") != update.downloadUrl) return false
+        if (update.assetSize > 0L && json.optLong("size", -1L) != update.assetSize) return false
+        val markedDigest = json.optString("digest", "")
+        if (markedDigest != (update.assetDigest ?: "")) return false
+        return true
+    }
+
     suspend fun checkForUpdates(): Boolean = withContext(Dispatchers.IO) {
         _updateState.value = UpdateState.CHECKING
         _updateError.value = null
@@ -99,6 +141,7 @@ class UpdateRepository(
 
                 var apkName: String? = null
                 var apkSize = 0L
+                var apkDigest: String? = null
 
                 // Find the -debug.apk file from assets
                 val assets = json.getJSONArray("assets")
@@ -110,11 +153,17 @@ class UpdateRepository(
                         name.contains("-debug.apk", ignoreCase = true) -> {
                             apkName = name
                             apkSize = assetJSON.optLong("size", 0L)
+                            apkDigest = UpdateDownloadVerifier.normalizeDigest(
+                                assetJSON.optString("digest", "")
+                            )
                             break
                         }
                         name.endsWith(".apk", ignoreCase = true) && apkName == null -> {
                             apkName = name
                             apkSize = assetJSON.optLong("size", 0L)
+                            apkDigest = UpdateDownloadVerifier.normalizeDigest(
+                                assetJSON.optString("digest", "")
+                            )
                         }
                     }
                 }
@@ -138,7 +187,8 @@ class UpdateRepository(
                             downloadUrl = apkUrl,
                             releaseNotes = notes,
                             assetName = apkName,
-                            assetSize = apkSize
+                            assetSize = apkSize,
+                            assetDigest = apkDigest
                         )
                     )
                 } else {
@@ -163,17 +213,22 @@ class UpdateRepository(
      * show for it.
      *
      * A previous run may already have finished this very download, so the file on
-     * disk is re-validated against the freshly fetched asset size: when it is
-     * complete and really our APK the state goes straight to [UpdateState.DOWNLOADED]
-     * (Install) instead of [UpdateState.AVAILABLE] (Download). This is also the entry
-     * point tests use to point the downloader at a known asset.
+     * disk is only trusted when the completion marker left by that run names it and
+     * the bytes still validate against the freshly fetched asset size (and digest):
+     * when so, the state goes straight to [UpdateState.DOWNLOADED] (Install) instead
+     * of [UpdateState.AVAILABLE] (Download). This is also the entry point tests use
+     * to point the downloader at a known asset.
      */
     fun adoptAvailableUpdate(update: AvailableUpdate): UpdateState {
         _availableUpdate.value = update
-        // Without a size (or a Content-Length fallback) the leftover cannot be
-        // checked, so never claim it is ready.
-        val verifiedLeftover = update.assetSize > 0L &&
-            verifyUpdateFile(expectedSize = update.assetSize, downloadedFromZero = false).complete
+        // A leftover only counts as ready when a previous run actually finished and
+        // verified this exact download (marker) and the bytes still check out.
+        val verifiedLeftover = markerMatches(update) &&
+            verifyUpdateFile(
+                expectedSize = update.assetSize,
+                downloadedFromZero = false,
+                expectedDigest = update.assetDigest
+            ).complete
         return if (verifiedLeftover) {
             _downloadedApkPath.value = updateFile().absolutePath
             _updateProgress.value = 1f
@@ -221,9 +276,11 @@ class UpdateRepository(
      * Progress and completion are measured against [AvailableUpdate.assetSize] — the
      * size GitHub reports for the asset — never against the response that happens to
      * be in flight (a resumed response only describes the remaining range). Returns
-     * true, and sets [UpdateState.DOWNLOADED], only when the finished file is exactly
-     * that size and [UpdateDownloadVerifier] recognises it as our APK; anything else
-     * surfaces an error through [updateError] and removes the unusable file.
+     * true, and sets [UpdateState.DOWNLOADED], only when the finished file passes
+     * [UpdateDownloadVerifier]: exactly the expected size, the SHA-256 the release
+     * reports when it publishes one (so every byte of a multi-part/resumed transfer
+     * is proven present), and really our APK. Anything else surfaces an error
+     * through [updateError] and removes the unusable file.
      */
     suspend fun downloadUpdate(): Boolean = withContext(Dispatchers.IO) {
         val update = _availableUpdate.value ?: return@withContext false
@@ -235,6 +292,9 @@ class UpdateRepository(
         _updateState.value = UpdateState.DOWNLOADING
         _updateError.value = null
         downloadCancelled = false
+        // The completion marker only describes a finished download; once a new one
+        // starts the file on disk is in flight again.
+        clearMarker()
 
         // GitHub's asset size is authoritative; Content-Length only fills in when
         // the release omits it.
@@ -305,7 +365,8 @@ class UpdateRepository(
                     val bytesOnDisk = file.length()
                     val decision = verifyUpdateFile(
                         expectedSize = expectedSize,
-                        downloadedFromZero = startedAtZero
+                        downloadedFromZero = startedAtZero,
+                        expectedDigest = update.assetDigest
                     )
                     if (!decision.complete) {
                         throw Exception(decision.reason ?: "Download verification failed")
@@ -316,17 +377,19 @@ class UpdateRepository(
                         expectedSize = expectedSize,
                         verified = true
                     )
+                    writeMarker(update)
                     _downloadedApkPath.value = file.absolutePath
                     _updateState.value = UpdateState.DOWNLOADED
                     return@withContext true
                 }
             } catch (e: AbortedDownloadException) {
-                // Cancelling keeps the partial file so the next run resumes it.
-                _downloadedApkPath.value = file.absolutePath
+                // Cancelling keeps the partial file so the next run resumes it; the
+                // file is NOT downloaded, so no install path may be exposed.
+                _downloadedApkPath.value = null
                 _updateProgress.value = UpdateDownloadVerifier.progress(file.length(), expectedSize)
                 return@withContext false
             } catch (e: CancellationException) {
-                _downloadedApkPath.value = file.absolutePath
+                _downloadedApkPath.value = null
                 _updateProgress.value = UpdateDownloadVerifier.progress(file.length(), expectedSize)
                 throw e
             } catch (e: Exception) {
@@ -350,14 +413,18 @@ class UpdateRepository(
     }
 
     /**
-     * Reads the update file from disk and validates it against [expectedSize].
+     * Reads the update file from disk and validates it against [expectedSize] and,
+     * when the release publishes one, [expectedDigest] — the digest is computed over
+     * every byte actually on disk, so a file of the right length with holes or wrong
+     * contents fails.
      *
      * @param downloadedFromZero whether the transfer that produced the file started at
      *        offset 0 — the fallback proof of completeness when no size is known.
      */
     private fun verifyUpdateFile(
         expectedSize: Long,
-        downloadedFromZero: Boolean
+        downloadedFromZero: Boolean,
+        expectedDigest: String? = null
     ): UpdateDownloadVerifier.Decision {
         val file = updateFile()
         return UpdateDownloadVerifier.decide(
@@ -365,7 +432,11 @@ class UpdateRepository(
             actualSize = if (file.exists()) file.length() else 0L,
             hasApkMagic = UpdateDownloadVerifier.hasApkMagic(file),
             actualPackage = readApkPackageName(file),
-            downloadedFromZero = downloadedFromZero
+            downloadedFromZero = downloadedFromZero,
+            expectedDigest = expectedDigest,
+            actualDigest = if (expectedDigest != null) {
+                UpdateDownloadVerifier.sha256Hex(file)
+            } else null
         )
     }
 
@@ -419,12 +490,19 @@ class UpdateRepository(
         val realPath = File(path)
         if (!realPath.exists()) return false
 
-        // Final gate in front of the package installer: the file must still be the
-        // expected size and be a real Agentisco APK, whatever marked it ready.
-        val expectedSize = _availableUpdate.value?.assetSize?.takeIf { it > 0L } ?: realPath.length()
-        val decision = verifyUpdateFile(expectedSize = expectedSize, downloadedFromZero = true)
+        // Final gate in front of the package installer: whatever marked the file
+        // ready, it must still be the expected size, hash to the release digest when
+        // one is known, and be a real Agentisco APK.
+        val available = _availableUpdate.value
+        val expectedSize = available?.assetSize?.takeIf { it > 0L } ?: realPath.length()
+        val decision = verifyUpdateFile(
+            expectedSize = expectedSize,
+            downloadedFromZero = true,
+            expectedDigest = available?.assetDigest
+        )
         if (!decision.complete) {
             realPath.delete()
+            clearMarker()
             _downloadedApkPath.value = null
             _updateProgress.value = 0f
             _updateError.value = decision.reason ?: UpdateDownloadVerifier.NOT_AN_APK_REASON
@@ -466,6 +544,7 @@ class UpdateRepository(
     companion object {
         private const val RELEASES_URL = "https://api.github.com/repos/gamistudios/Agentisco/releases/latest"
         private const val UPDATE_APK_NAME = "agentisco-update.apk"
+        private const val UPDATE_META_NAME = "agentisco-update.meta.json"
         private const val MAX_ATTEMPTS = 5
         private const val RETRY_DELAY_MS = 2_000L
         private const val BUFFER_SIZE = 64 * 1024
