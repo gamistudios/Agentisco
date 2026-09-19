@@ -7,6 +7,7 @@ import com.agentisco.settings.model.AIModel
 import com.agentisco.settings.model.AIProvider
 import com.agentisco.settings.model.LLMProtocol
 import com.agentisco.settings.model.ModelCapabilities
+import com.agentisco.settings.model.ModelGenerationSettings
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
@@ -103,6 +104,40 @@ class ProviderConfigStoreTest {
     assertEquals("openai/gpt-oss-120b", reloaded.modelId)
     assertEquals(131072, reloaded.contextWindow)
     assertTrue(reloaded.capabilities.tools)
+  }
+
+  @Test
+  fun `Gemini protocol and generation defaults survive a restart`() {
+    val first = newStore()
+    first.upsertProvider(
+      AIProvider("gemini", "Gemini", "https://generativelanguage.googleapis.com/v1beta", LLMProtocol.GOOGLE_GEMINI),
+      "gemini-key"
+    )
+    first.upsertModel(
+      AIModel(
+        id = "gemini-flash",
+        providerId = "gemini",
+        modelId = "gemini-2.5-flash",
+        displayName = "Gemini Flash",
+        generationSettings = ModelGenerationSettings(
+          temperature = 0.3,
+          topP = 0.8,
+          topK = 40,
+          stopSequences = listOf("DONE", "STOP"),
+          responseMimeType = "application/json",
+          responseJsonSchema = "{\"type\":\"object\"}"
+        )
+      )
+    )
+
+    val reloaded = newStore().getModels().single { it.id == "gemini-flash" }
+    assertEquals(LLMProtocol.GOOGLE_GEMINI, newStore().getProviders().single { it.id == "gemini" }.protocol)
+    assertEquals(0.3, reloaded.generationSettings.temperature!!, 0.0)
+    assertEquals(0.8, reloaded.generationSettings.topP!!, 0.0)
+    assertEquals(40, reloaded.generationSettings.topK)
+    assertEquals(listOf("DONE", "STOP"), reloaded.generationSettings.stopSequences)
+    assertEquals("application/json", reloaded.generationSettings.responseMimeType)
+    assertEquals("{\"type\":\"object\"}", reloaded.generationSettings.responseJsonSchema)
   }
 
   @Test

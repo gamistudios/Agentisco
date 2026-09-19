@@ -2,6 +2,7 @@ package com.agentisco.data.repository
 
 import com.agentisco.settings.model.AIProvider
 import com.agentisco.settings.model.AIModel
+import com.agentisco.settings.model.ModelGenerationSettings
 import com.agentisco.agent.model.AgentPermissions
 import com.agentisco.agent.model.PendingApproval
 import com.agentisco.agent.model.ToolExecution
@@ -459,6 +460,7 @@ class WorkspaceRepository(
     maxOutputTokens: Int?,
     capabilities: com.agentisco.settings.model.ModelCapabilities,
     reasoning: com.agentisco.settings.model.ReasoningConfig?,
+    generationSettings: ModelGenerationSettings = ModelGenerationSettings(),
     recordId: String? = null
   ): AIModel? {
     if (modelId.isBlank() || displayName.isBlank()) return null
@@ -471,7 +473,8 @@ class WorkspaceRepository(
       contextWindow = contextWindow,
       maxOutputTokens = maxOutputTokens,
       capabilities = capabilities,
-      reasoning = reasoning
+      reasoning = reasoning,
+      generationSettings = generationSettings
     )
     providerStore?.upsertModel(model)
     _aiModels.value = providerStore?.getModels() ?: (_aiModels.value.filterNot { it.id == model.id } + model)

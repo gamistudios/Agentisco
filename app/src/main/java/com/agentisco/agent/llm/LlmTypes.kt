@@ -3,12 +3,31 @@ package com.agentisco.agent.llm
 /** Roles for LLM conversation messages. */
 enum class LlmRole { SYSTEM, USER, ASSISTANT, TOOL }
 
+/** Binary input is kept raw until a provider adapter serializes its wire format. */
+data class LlmInlineData(
+  val mimeType: String,
+  val data: ByteArray
+)
+
+enum class LlmFinishReason { STOP, LENGTH, TOOL_CALLS, CONTENT_FILTER, ERROR, OTHER }
+
+data class LlmUsage(
+  val inputTokens: Int? = null,
+  val outputTokens: Int? = null,
+  val cachedInputTokens: Int? = null,
+  val reasoningTokens: Int? = null,
+  val totalTokens: Int? = null
+)
+
 data class LlmMessage(
   val role: LlmRole,
   val content: String,
   val toolCalls: List<LlmToolCall> = emptyList(),
   val toolCallId: String? = null,
-  val toolName: String? = null
+  val toolName: String? = null,
+  val inlineData: List<LlmInlineData> = emptyList(),
+  val finishReason: LlmFinishReason? = null,
+  val usage: LlmUsage? = null
 )
 
 /** A tool exposed to the model. The model may only request it; execution stays app-owned. */
@@ -29,6 +48,11 @@ data class LlmRequest(
   val tools: List<LlmToolSpec> = emptyList(),
   val maxOutputTokens: Int? = null,
   val temperature: Double? = null,
+  val topP: Double? = null,
+  val topK: Int? = null,
+  val stopSequences: List<String> = emptyList(),
+  val responseMimeType: String? = null,
+  val responseJsonSchema: String? = null,
   /** Background tasks (commit msgs, titles) suppress the model's reasoning mode. */
   val disableReasoning: Boolean = false
 )

@@ -5,6 +5,7 @@ import com.agentisco.settings.model.AIModel
 import com.agentisco.settings.model.AIProvider
 import com.agentisco.settings.model.LLMProtocol
 import com.agentisco.settings.model.ModelCapabilities
+import com.agentisco.settings.model.ModelGenerationSettings
 import com.agentisco.settings.model.ReasoningConfig
 import org.json.JSONArray
 import org.json.JSONObject
@@ -193,6 +194,14 @@ class ProviderConfigStore(private val context: Context? = null) {
         put("effort", it.effort)
       })
     }
+    put("generationSettings", JSONObject().apply {
+      generationSettings.temperature?.let { put("temperature", it) }
+      generationSettings.topP?.let { put("topP", it) }
+      generationSettings.topK?.let { put("topK", it) }
+      put("stopSequences", JSONArray(generationSettings.stopSequences))
+      generationSettings.responseMimeType?.let { put("responseMimeType", it) }
+      generationSettings.responseJsonSchema?.let { put("responseJsonSchema", it) }
+    })
   }
 
   private fun JSONArray.toProviderList(): List<AIProvider> = (0 until length()).mapNotNull { i ->
@@ -206,6 +215,12 @@ class ProviderConfigStore(private val context: Context? = null) {
       )
     }.getOrNull()
   }
+
+  private fun JSONObject.optDoubleOrNull(name: String): Double? =
+    if (has(name) && !isNull(name)) optDouble(name) else null
+
+  private fun JSONObject.optIntOrNull(name: String): Int? =
+    if (has(name) && !isNull(name)) optInt(name) else null
 
   private fun JSONArray.toModelList(): List<AIModel> = (0 until length()).mapNotNull { i ->
     runCatching {
@@ -229,7 +244,19 @@ class ProviderConfigStore(private val context: Context? = null) {
         ),
         reasoning = o.optJSONObject("reasoning")?.let {
           ReasoningConfig(enabled = it.optBoolean("enabled", false), effort = it.optString("effort", "medium"))
-        }
+        },
+        generationSettings = o.optJSONObject("generationSettings")?.let { settings ->
+          ModelGenerationSettings(
+            temperature = settings.optDoubleOrNull("temperature"),
+            topP = settings.optDoubleOrNull("topP"),
+            topK = settings.optIntOrNull("topK"),
+            stopSequences = settings.optJSONArray("stopSequences")?.let { values ->
+              (0 until values.length()).mapNotNull { index -> values.optString(index).takeIf { it.isNotBlank() } }
+            } ?: emptyList(),
+            responseMimeType = settings.optString("responseMimeType").takeIf { it.isNotBlank() },
+            responseJsonSchema = settings.optString("responseJsonSchema").takeIf { it.isNotBlank() }
+          )
+        } ?: ModelGenerationSettings()
       )
     }.getOrNull()
   }

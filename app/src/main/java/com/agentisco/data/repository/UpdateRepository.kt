@@ -241,14 +241,10 @@ class UpdateRepository(private val context: Context) {
                                     offsetFile.writeText(downloadedOffset.toString())
                                 }
 
-                                if (totalSize != null) {
-                                    _updateProgress.value = downloadedOffset.toFloat() / totalSize.toFloat()
-                                }
+                                _updateProgress.value = downloadedOffset.toFloat() / totalSize.toFloat()
                             }
                         }
                     }
-                }
-            }
                 }
 
                 if (downloadCancelled) {

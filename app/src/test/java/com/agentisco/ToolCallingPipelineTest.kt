@@ -2,6 +2,9 @@ package com.agentisco
 
 import androidx.test.core.app.ApplicationProvider
 import com.agentisco.agent.llm.BaseLlmClient
+import com.agentisco.agent.llm.GeminiNativeClient
+import com.agentisco.agent.llm.LlmFinishReason
+import com.agentisco.agent.llm.LlmInlineData
 import com.agentisco.agent.llm.LlmMessage
 import com.agentisco.agent.llm.LlmRequest
 import com.agentisco.agent.llm.LlmRole
@@ -250,6 +253,118 @@ class ToolCallingPipelineTest {
     val result = body.getJSONArray("messages").getJSONObject(2)
     assertEquals("tool", result.getString("role"))
     assertEquals("call_1", result.getString("tool_call_id"))
+  }
+
+  // ---- Gemini native wire format and response normalization ----
+
+  @Test
+  fun `Gemini native request serializes system media tools results and generation defaults`() {
+    val client = GeminiNativeClient(OkHttpClient())
+    val provider = AIProvider("gemini", "Gemini", "https://generativelanguage.googleapis.com/v1beta", LLMProtocol.GOOGLE_GEMINI)
+    val model = AIModel(
+      id = "gemini-model",
+      providerId = "gemini",
+      modelId = "models/gemini-2.5-flash",
+      displayName = "Gemini 2.5 Flash",
+      capabilities = com.agentisco.settings.model.ModelCapabilities(tools = true),
+      generationSettings = com.agentisco.settings.model.ModelGenerationSettings(
+        temperature = 0.4,
+        topP = 0.9,
+        topK = 32,
+        stopSequences = listOf("END"),
+        responseMimeType = "application/json",
+        responseJsonSchema = "{\"type\":\"object\",\"properties\":{\"answer\":{\"type\":\"string\"}}}"
+      )
+    )
+
+    val request = client.buildRequest(
+      provider,
+      model,
+      "gemini-key",
+      LlmRequest(
+        messages = listOf(
+          LlmMessage(LlmRole.SYSTEM, "You are concise."),
+          LlmMessage(LlmRole.USER, "Inspect this image", inlineData = listOf(LlmInlineData("image/png", byteArrayOf(1, 2, 3)))),
+          LlmMessage(LlmRole.ASSISTANT, "", toolCalls = listOf(LlmToolCall("call_1", "read_file", "{\"path\":\"src/App.kt\"}"))),
+          LlmMessage(LlmRole.TOOL, "first result", toolCallId = "call_1", toolName = "read_file"),
+          LlmMessage(LlmRole.TOOL, "second result", toolCallId = "call_2", toolName = "list_files")
+        ),
+        tools = listOf(LlmToolSpec("read_file", testTool.description, testTool.parametersJsonSchema()))
+      ),
+      stream = false
+    )
+
+    assertEquals(
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+      request.url.toString()
+    )
+    assertEquals("gemini-key", request.header("x-goog-api-key"))
+    val buffer = okio.Buffer()
+    request.body!!.writeTo(buffer)
+    val body = JSONObject(buffer.readUtf8())
+
+    assertEquals("You are concise.", body.getJSONObject("systemInstruction").getJSONArray("parts").getJSONObject(0).getString("text"))
+    val contents = body.getJSONArray("contents")
+    val userParts = contents.getJSONObject(0).getJSONArray("parts")
+    assertEquals("Inspect this image", userParts.getJSONObject(0).getString("text"))
+    assertEquals("image/png", userParts.getJSONObject(1).getJSONObject("inline_data").getString("mime_type"))
+    assertEquals("AQID", userParts.getJSONObject(1).getJSONObject("inline_data").getString("data"))
+    assertEquals("model", contents.getJSONObject(1).getString("role"))
+    assertEquals("read_file", contents.getJSONObject(1).getJSONArray("parts").getJSONObject(0).getJSONObject("functionCall").getString("name"))
+
+    val responses = contents.getJSONObject(2).getJSONArray("parts")
+    assertEquals(2, responses.length())
+    assertEquals("first result", responses.getJSONObject(0).getJSONObject("functionResponse").getJSONObject("response").getString("result"))
+    assertEquals("object", body.getJSONArray("tools").getJSONObject(0).getJSONArray("functionDeclarations").getJSONObject(0).getJSONObject("parameters").getString("type"))
+
+    val config = body.getJSONObject("generationConfig")
+    assertEquals(0.4, config.getDouble("temperature"), 0.0)
+    assertEquals(0.9, config.getDouble("topP"), 0.0)
+    assertEquals(32, config.getInt("topK"))
+    assertEquals("END", config.getJSONArray("stopSequences").getString(0))
+    assertEquals("application/json", config.getString("responseMimeType"))
+    assertEquals("object", config.getJSONObject("responseJsonSchema").getString("type"))
+  }
+
+  @Test
+  fun `Gemini native response normalizes text thought tool calls usage and finish reason`() {
+    val client = GeminiNativeClient(OkHttpClient())
+    val state = newState()
+    val events = mutableListOf<LlmStreamEvent>()
+    val data = JSONObject().apply {
+      put("usageMetadata", JSONObject().apply {
+        put("promptTokenCount", 11)
+        put("candidatesTokenCount", 7)
+        put("thoughtsTokenCount", 3)
+        put("totalTokenCount", 18)
+      })
+      put("candidates", JSONArray().put(JSONObject().apply {
+        put("content", JSONObject().put("parts", JSONArray().apply {
+          put(JSONObject().put("text", "internal reasoning").put("thought", true))
+          put(JSONObject().put("text", "final answer"))
+          put(JSONObject().put("functionCall", JSONObject().apply {
+            put("id", "call_1")
+            put("name", "read_file")
+            put("args", JSONObject().put("path", "src/App.kt"))
+          }))
+        }))
+        put("finishReason", "STOP")
+      }))
+    }
+
+    assertTrue(client.handleData(data.toString(), state, events::add))
+    assertEquals("final answer", state.content.toString())
+    assertEquals(LlmFinishReason.TOOL_CALLS, state.finishReason)
+    assertEquals(11, state.usage?.inputTokens)
+    assertEquals(7, state.usage?.outputTokens)
+    assertEquals(3, state.usage?.reasoningTokens)
+    assertEquals(18, state.usage?.totalTokens)
+    assertTrue(events.any { it is LlmStreamEvent.ReasoningToken && it.text == "internal reasoning" })
+    assertTrue(events.any { it is LlmStreamEvent.Token && it.text == "final answer" })
+    val toolCall = state.toolCalls.values.single()
+    assertEquals("call_1", toolCall.id)
+    assertEquals("read_file", toolCall.name)
+    assertEquals("src/App.kt", JSONObject(toolCall.argumentsJson).getString("path"))
   }
 
   // ---- Provider/model relationship sanity inside the pipeline ----

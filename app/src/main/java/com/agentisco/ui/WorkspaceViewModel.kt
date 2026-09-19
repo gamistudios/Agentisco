@@ -612,8 +612,12 @@ class WorkspaceViewModel(
     maxOutputTokens: Int?,
     capabilities: com.agentisco.settings.model.ModelCapabilities,
     reasoning: com.agentisco.settings.model.ReasoningConfig?,
+    generationSettings: com.agentisco.settings.model.ModelGenerationSettings = com.agentisco.settings.model.ModelGenerationSettings(),
     recordId: String? = null
-  ): AIModel? = repository.saveModel(providerId, modelId, displayName, contextWindow, maxOutputTokens, capabilities, reasoning, recordId)
+  ): AIModel? = repository.saveModel(
+    providerId, modelId, displayName, contextWindow, maxOutputTokens,
+    capabilities, reasoning, generationSettings, recordId
+  )
 
   fun deleteModel(recordId: String) {
     repository.deleteModel(recordId)

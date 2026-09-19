@@ -1,5 +1,6 @@
 package com.agentisco.agent.llm
 
+import android.util.Base64
 import com.agentisco.settings.model.AIModel
 import com.agentisco.settings.model.AIProvider
 import com.agentisco.settings.model.LLMProtocol
@@ -51,6 +52,7 @@ class LlmService(
   ): Unit = when (provider.protocol) {
     LLMProtocol.OPENAI_CHAT_COMPLETIONS -> OpenAIChatCompletionsClient(http).streamChat(provider, model, apiKey, request, onEvent)
     LLMProtocol.ANTHROPIC_MESSAGES -> AnthropicMessagesClient(http).streamChat(provider, model, apiKey, request, onEvent)
+    LLMProtocol.GOOGLE_GEMINI -> GeminiNativeClient(http).streamChat(provider, model, apiKey, request, onEvent)
   }
 
   /**
@@ -65,6 +67,7 @@ class LlmService(
     val client = when (provider.protocol) {
       LLMProtocol.OPENAI_CHAT_COMPLETIONS -> OpenAIChatCompletionsClient(http)
       LLMProtocol.ANTHROPIC_MESSAGES -> AnthropicMessagesClient(http)
+      LLMProtocol.GOOGLE_GEMINI -> GeminiNativeClient(http)
     }
 
     // Stage 1: free credential/endpoint probe via the provider's model listing.
@@ -123,6 +126,8 @@ internal abstract class BaseLlmClient(protected val http: OkHttpClient) {
     // Keyed by provider block index: OpenAI streams tool-call argument
     // fragments across chunks where only the first carries the id/name.
     val toolCalls = LinkedHashMap<Int, LlmToolCall>()
+    var finishReason: LlmFinishReason? = null
+    var usage: LlmUsage? = null
     var sawAnyData = false
   }
 
@@ -194,7 +199,17 @@ internal abstract class BaseLlmClient(protected val http: OkHttpClient) {
         return@withContext
       }
       if (!state.sawAnyData) throw LlmException("Provider returned an empty stream.", LlmErrorKind.INVALID_RESPONSE)
-      onEvent(LlmStreamEvent.Completed(LlmMessage(role = LlmRole.ASSISTANT, content = state.content.toString(), toolCalls = state.toolCalls.values.toList())))
+      onEvent(
+        LlmStreamEvent.Completed(
+          LlmMessage(
+            role = LlmRole.ASSISTANT,
+            content = state.content.toString(),
+            toolCalls = state.toolCalls.values.toList(),
+            finishReason = state.finishReason,
+            usage = state.usage
+          )
+        )
+      )
     } catch (e: LlmException) {
       onEvent(LlmStreamEvent.Failed(e))
       throw e
@@ -517,6 +532,202 @@ internal class AnthropicMessagesClient(http: OkHttpClient) : BaseLlmClient(http)
       false to "Network error: ${e.message ?: "connection failed"}"
     }
   }
+}
+
+/** Google Gemini native GenerateContent protocol. */
+internal class GeminiNativeClient(http: OkHttpClient) : BaseLlmClient(http) {
+
+  override internal fun buildRequest(provider: AIProvider, model: AIModel, apiKey: String, request: LlmRequest, stream: Boolean): Request {
+    val body = JSONObject().apply {
+      val systemText = request.messages.filter { it.role == LlmRole.SYSTEM }
+        .joinToString("\n") { it.content }
+      if (systemText.isNotBlank()) {
+        put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", systemText))))
+      }
+      put("contents", buildContents(request.messages.filter { it.role != LlmRole.SYSTEM }))
+      if (request.tools.isNotEmpty() && model.capabilities.tools) {
+        put("tools", JSONArray().put(JSONObject().put("functionDeclarations", JSONArray().apply {
+          request.tools.forEach { tool ->
+            put(JSONObject().apply {
+              put("name", tool.name)
+              put("description", tool.description)
+              put("parameters", runCatching { JSONObject(tool.parametersJsonSchema) }.getOrDefault(JSONObject()))
+            })
+          }
+        })))
+      }
+      put("generationConfig", buildGenerationConfig(model, request))
+    }
+    val action = if (stream) ":streamGenerateContent?alt=sse" else ":generateContent"
+    return Request.Builder()
+      .url(modelUrl(provider, model, action))
+      .header("x-goog-api-key", apiKey)
+      .post(jsonBody(body))
+      .build()
+  }
+
+  private fun buildContents(messages: List<LlmMessage>): JSONArray {
+    val contents = JSONArray()
+    var index = 0
+    while (index < messages.size) {
+      val message = messages[index]
+      if (message.role == LlmRole.TOOL) {
+        val parts = JSONArray()
+        while (index < messages.size && messages[index].role == LlmRole.TOOL) {
+          val result = messages[index]
+          parts.put(JSONObject().put("functionResponse", JSONObject().apply {
+            put("name", result.toolName.orEmpty())
+            result.toolCallId?.takeIf { it.isNotBlank() }?.let { put("id", it) }
+            put("response", JSONObject().put("result", result.content))
+          }))
+          index++
+        }
+        contents.put(JSONObject().put("role", "user").put("parts", parts))
+        continue
+      }
+
+      val parts = JSONArray()
+      message.content.takeIf { it.isNotEmpty() }?.let { parts.put(JSONObject().put("text", it)) }
+      message.inlineData.forEach { media ->
+        parts.put(JSONObject().put("inline_data", JSONObject().apply {
+          put("mime_type", media.mimeType)
+          put("data", Base64.encodeToString(media.data, Base64.NO_WRAP))
+        }))
+      }
+      if (message.role == LlmRole.ASSISTANT) {
+        message.toolCalls.forEach { call ->
+          parts.put(JSONObject().put("functionCall", JSONObject().apply {
+            put("name", call.name)
+            put("id", call.id)
+            put("args", runCatching { JSONObject(normalizeArgs(call.argumentsJson)) }.getOrDefault(JSONObject()))
+          }))
+        }
+      }
+      if (parts.length() > 0) {
+        contents.put(JSONObject().apply {
+          put("role", if (message.role == LlmRole.ASSISTANT) "model" else "user")
+          put("parts", parts)
+        })
+      }
+      index++
+    }
+    return contents
+  }
+
+  private fun buildGenerationConfig(model: AIModel, request: LlmRequest): JSONObject = JSONObject().apply {
+    val settings = model.generationSettings
+    (request.maxOutputTokens ?: model.maxOutputTokens)?.let { put("maxOutputTokens", it) }
+    (request.temperature ?: settings.temperature)?.let { put("temperature", it) }
+    (request.topP ?: settings.topP)?.let { put("topP", it) }
+    (request.topK ?: settings.topK)?.let { put("topK", it) }
+    val stopSequences = request.stopSequences.ifEmpty { settings.stopSequences }
+    if (stopSequences.isNotEmpty()) put("stopSequences", JSONArray(stopSequences))
+    val schema = request.responseJsonSchema ?: settings.responseJsonSchema
+    val responseMimeType = request.responseMimeType ?: settings.responseMimeType
+    (responseMimeType ?: if (!schema.isNullOrBlank()) "application/json" else null)?.let { put("responseMimeType", it) }
+    schema?.takeIf { it.isNotBlank() }?.let {
+      put("responseJsonSchema", runCatching { JSONObject(it) }.getOrElse {
+        throw LlmException("Gemini structured-output schema must be valid JSON.", LlmErrorKind.INVALID_RESPONSE)
+      })
+    }
+    model.reasoning?.takeIf { it.enabled && !request.disableReasoning }?.let { reasoning ->
+      put("thinkingConfig", JSONObject().apply {
+        put("thinkingLevel", reasoning.effort.uppercase())
+        put("includeThoughts", model.capabilities.interleavedReasoning)
+      })
+    }
+  }
+
+  override internal fun handleData(data: String, state: StreamState, onEvent: (LlmStreamEvent) -> Unit): Boolean {
+    if (data == "[DONE]") return true
+    val obj = runCatching { JSONObject(data) }.getOrElse {
+      throw LlmException("Provider returned invalid JSON.", LlmErrorKind.INVALID_RESPONSE)
+    }
+    obj.optJSONObject("error")?.let { error ->
+      throw LlmException(error.optString("message", "Gemini provider error"), LlmErrorKind.SERVER)
+    }
+    state.usage = obj.optJSONObject("usageMetadata")?.toUsage() ?: state.usage
+    val candidate = obj.optJSONArray("candidates")?.optJSONObject(0) ?: return false
+    val parts = candidate.optJSONObject("content")?.optJSONArray("parts")
+    if (parts != null) {
+      for (index in 0 until parts.length()) {
+        val part = parts.optJSONObject(index) ?: continue
+        part.optString("text").takeIf { it.isNotEmpty() }?.let { text ->
+          if (part.optBoolean("thought", false)) onEvent(LlmStreamEvent.ReasoningToken(text))
+          else {
+            state.content.append(text)
+            onEvent(LlmStreamEvent.Token(text))
+          }
+        }
+        part.optJSONObject("functionCall")?.let { functionCall ->
+          val name = functionCall.optString("name")
+          val arguments = normalizeArgs(functionCall.optJSONObject("args")?.toString() ?: "{}")
+          val wireId = cleanWireString(functionCall.optString("id"))
+          val existing = state.toolCalls.entries.firstOrNull { entry ->
+            (wireId.isNotEmpty() && entry.value.id == wireId) ||
+              (wireId.isEmpty() && entry.value.name == name && entry.value.argumentsJson == arguments)
+          }
+          val key = existing?.key ?: state.toolCalls.size
+          val call = LlmToolCall(
+            id = existing?.value?.id ?: wireId.ifEmpty { "gemini_call_$key" },
+            name = name,
+            argumentsJson = arguments
+          )
+          state.toolCalls[key] = call
+          if (existing == null) onEvent(LlmStreamEvent.ToolCallRequested(call))
+        }
+      }
+    }
+    val wireFinishReason = candidate.optString("finishReason").takeIf { it.isNotBlank() }
+    if (wireFinishReason != null) {
+      state.finishReason = if (state.toolCalls.isNotEmpty()) LlmFinishReason.TOOL_CALLS else normalizeFinishReason(wireFinishReason)
+      return true
+    }
+    return false
+  }
+
+  private fun JSONObject.toUsage(): LlmUsage = LlmUsage(
+    inputTokens = optIntOrNull("promptTokenCount"),
+    outputTokens = optIntOrNull("candidatesTokenCount"),
+    cachedInputTokens = optIntOrNull("cachedContentTokenCount"),
+    reasoningTokens = optIntOrNull("thoughtsTokenCount"),
+    totalTokens = optIntOrNull("totalTokenCount")
+  )
+
+  private fun JSONObject.optIntOrNull(name: String): Int? =
+    if (has(name) && !isNull(name)) optInt(name) else null
+
+  private fun normalizeFinishReason(value: String): LlmFinishReason = when (value.uppercase()) {
+    "STOP" -> LlmFinishReason.STOP
+    "MAX_TOKENS" -> LlmFinishReason.LENGTH
+    "SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII", "IMAGE_SAFETY" -> LlmFinishReason.CONTENT_FILTER
+    "MALFORMED_FUNCTION_CALL" -> LlmFinishReason.ERROR
+    else -> LlmFinishReason.OTHER
+  }
+
+  override suspend fun probeModels(provider: AIProvider, apiKey: String): Pair<Boolean, String> {
+    return try {
+      val request = Request.Builder()
+        .url(provider.baseUrl.trimEnd('/') + "/models")
+        .header("x-goog-api-key", apiKey)
+        .get()
+        .build()
+      withContext(Dispatchers.IO) {
+        http.newCall(request).execute().use { response ->
+          if (response.isSuccessful) true to "Connected"
+          else {
+            val body = response.body?.string().orEmpty().take(2000)
+            false to (httpError(response.code, body).message ?: "Connection failed")
+          }
+        }
+      }
+    } catch (e: IOException) {
+      false to "Network error: ${e.message ?: "connection failed"}"
+    }
+  }
+
+  private fun modelUrl(provider: AIProvider, model: AIModel, action: String): String =
+    provider.baseUrl.trimEnd('/') + "/models/" + model.modelId.removePrefix("models/") + action
 }
 
 /** Shared holder for the in-flight streaming call so Stop can abort blocked socket reads. */
