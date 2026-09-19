@@ -114,6 +114,16 @@ class WorkspaceRepository(
     _scanIgnoreSettings.value = scanIgnoreStore.get()
   }
 
+  // ---- Chat display (Settings → Tool activity) ----
+  val chatDisplayStore = com.agentisco.data.local.ChatDisplayStore(context)
+  private val _chatDisplay = MutableStateFlow(chatDisplayStore.get())
+  val chatDisplay: StateFlow<com.agentisco.data.local.ChatDisplaySettings> =
+    _chatDisplay.asStateFlow()
+
+  fun setChatToolJsonVisible(visible: Boolean) {
+    _chatDisplay.value = chatDisplayStore.update { it.copy(showToolJson = visible) }
+  }
+
   val gitManager = GitRepositoryManager(fileSystem) { projectPath, args ->
     runGitCommand(projectPath, args)
   }

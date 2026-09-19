@@ -546,6 +546,12 @@ class WorkspaceViewModel(
   fun setIgnoredDirsOverride(enabled: Boolean) = repository.setIgnoredDirsOverride(enabled)
   fun restoreDefaultIgnoredDirs() = repository.restoreDefaultIgnoredDirs()
 
+  // ---- Chat display (Settings → Tool activity) ----
+  val chatDisplay: StateFlow<com.agentisco.data.local.ChatDisplaySettings> =
+    repository.chatDisplay
+
+  fun setChatToolJsonVisible(visible: Boolean) = repository.setChatToolJsonVisible(visible)
+
   /**
    * Deletes a project entirely after the user confirms: folder, chat sessions
    * and registry entry all go together (see [WorkspaceRepository.removeProject]).

@@ -15,6 +15,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.Chat
@@ -100,6 +101,7 @@ fun AgentScreen(
   val sessions by viewModel.chatSessions.collectAsState()
   val activeSession by viewModel.activeChatSession.collectAsState()
   val activeSessionId by viewModel.activeSessionId.collectAsState()
+  val chatDisplay by viewModel.chatDisplay.collectAsState()
 
   var promptText by remember { mutableStateOf("") }
   var showSessionSheet by remember { mutableStateOf(false) }
@@ -257,6 +259,7 @@ fun AgentScreen(
               is UserMessageItem -> UserBubble(item, onEdit = { viewModel.editUserMessage(item.id, it) })
               is AgentTurnItem -> AgentTurnCard(
                 item = item,
+                showToolJson = chatDisplay.showToolJson,
                 onAllow = { viewModel.resolveApproval(true) },
                 onDeny = { viewModel.resolveApproval(false) },
                 onRetry = { viewModel.retryAgentTurn(item.id) },
@@ -564,6 +567,7 @@ private fun UserBubble(item: UserMessageItem, onEdit: (String) -> Unit = {}) {
 @Composable
 private fun AgentTurnCard(
   item: AgentTurnItem,
+  showToolJson: Boolean,
   onAllow: () -> Unit,
   onDeny: () -> Unit,
   onRetry: () -> Unit,
@@ -701,6 +705,7 @@ private fun AgentTurnCard(
         is ReasoningBlock -> ThinkingBlock(block)
         is ActionBlock -> ToolCallRow(
           item = block,
+          showToolJson = showToolJson,
           onCancelTool = { onCancelTool(block.callId) },
           onRetryTool = { onRetryTool(block.callId) },
           onContinueTool = { onContinueTool(block.callId) }
@@ -802,6 +807,7 @@ private fun AgentEmptyState(project: com.agentisco.data.model.Project, hasHistor
 @Composable
 private fun ToolCallRow(
   item: ActionBlock,
+  showToolJson: Boolean = false,
   onCancelTool: () -> Unit = {},
   onRetryTool: () -> Unit = {},
   onContinueTool: () -> Unit = {}
@@ -890,6 +896,13 @@ private fun ToolCallRow(
           modifier = Modifier
             .size(12.dp)
             .clickable { clipboard.setText(AnnotatedString(item.detail)) }
+        )
+        Spacer(modifier = Modifier.width(4.dp))
+        Icon(
+          Icons.Default.KeyboardArrowDown,
+          contentDescription = if (expanded) "Collapse details" else "Expand details",
+          tint = TextMuted,
+          modifier = Modifier.size(14.dp)
         )
       }
     }
@@ -1003,9 +1016,10 @@ private fun ToolCallRow(
           .background(DarkBackground)
           .padding(8.dp)
       ) {
-        if (item.argsJson.isNotBlank() && item.argsJson != "{}" && command == null && diffLines == null) {
+        // Raw request JSON is opt-in (Settings → Chat Tool Activity).
+        if (showToolJson && item.argsJson.isNotBlank() && item.argsJson != "{}") {
           Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Arguments", color = TextMuted, fontSize = 9.sp, modifier = Modifier.weight(1f))
+            Text("Request (raw JSON)", color = TextMuted, fontSize = 9.sp, modifier = Modifier.weight(1f))
             Icon(
               Icons.Outlined.ContentCopy,
               contentDescription = "Copy arguments",
@@ -1030,7 +1044,16 @@ private fun ToolCallRow(
                 .clickable { clipboard.setText(AnnotatedString(item.detail)) }
             )
           }
-          Text(item.detail, color = TextCode, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+          Spacer(modifier = Modifier.height(2.dp))
+          Box(
+            modifier = Modifier
+              .fillMaxWidth()
+              .heightIn(max = 260.dp)
+              .verticalScroll(rememberScrollState())
+              .testTag("tool_output_detail")
+          ) {
+            Text(item.detail, color = TextCode, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+          }
         }
         item.exitCode?.let {
           Spacer(modifier = Modifier.height(6.dp))

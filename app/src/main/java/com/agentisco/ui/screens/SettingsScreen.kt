@@ -409,6 +409,11 @@ fun SettingsScreen(
       }
     }
 
+    // Chat Tool Activity Card
+    item {
+      ChatToolActivityCard(viewModel)
+    }
+
     // Codebase Scanning Performance Card (bottom: affects every project)
     item {
       ScanExclusionsCard(viewModel)
@@ -416,6 +421,66 @@ fun SettingsScreen(
 
     item {
       Spacer(modifier = Modifier.height(24.dp))
+    }
+  }
+}
+
+/**
+ * How agent tool activity is rendered in chat: structured cards (command,
+ * git-style diff, plain output) by default, with raw request JSON optional.
+ */
+@Composable
+private fun ChatToolActivityCard(viewModel: WorkspaceViewModel) {
+  val chatDisplay by viewModel.chatDisplay.collectAsState()
+
+  Card(
+    modifier = Modifier
+      .fillMaxWidth()
+      .clip(RoundedCornerShape(12.dp))
+      .border(1.dp, DarkBorder, RoundedCornerShape(12.dp)),
+    colors = CardDefaults.cardColors(containerColor = DarkSurface)
+  ) {
+    Column(modifier = Modifier.padding(14.dp)) {
+      Text("Chat Tool Activity", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+      Spacer(modifier = Modifier.height(6.dp))
+      Text(
+        "Tool cards always show the structured view: the real command with a copy button, " +
+          "git-style +/- diffs for file edits, and plain output. Turn this on to ALSO see the " +
+          "raw JSON the agent sent with each request when a card is expanded.",
+        color = TextMuted,
+        fontSize = 11.sp,
+        lineHeight = 15.sp
+      )
+      Spacer(modifier = Modifier.height(10.dp))
+
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Column(modifier = Modifier.weight(1f)) {
+          Text("Show raw JSON requests", color = TextPrimary, fontSize = 13.sp)
+          Text(
+            if (chatDisplay.showToolJson) "Expanded cards include a \"Request (raw JSON)\" section"
+            else "Structured view only (recommended)",
+            color = TextMuted,
+            fontSize = 11.sp
+          )
+        }
+        Switch(
+          checked = chatDisplay.showToolJson,
+          onCheckedChange = { viewModel.setChatToolJsonVisible(it) },
+          colors = SwitchDefaults.colors(
+            checkedThumbColor = ElectricBlue,
+            checkedTrackColor = ElectricBlue.copy(alpha = 0.35f),
+            checkedBorderColor = ElectricBlue,
+            uncheckedThumbColor = TextSecondary,
+            uncheckedTrackColor = DarkSurfaceHighlight,
+            uncheckedBorderColor = DarkBorder
+          ),
+          modifier = Modifier.testTag("switch_show_tool_json")
+        )
+      }
     }
   }
 }
