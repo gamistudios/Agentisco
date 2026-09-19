@@ -265,6 +265,150 @@ class ToolCallingPipelineTest {
     assertEquals("call_1", result.getString("tool_call_id"))
   }
 
+  // ---- OpenAI wire format: request shape, finish reason and usage ----
+
+  private val openAiProvider =
+    AIProvider("openai", "OpenAI", "https://api.openai.com/v1", LLMProtocol.OPENAI_CHAT_COMPLETIONS)
+
+  private fun openAiModel(
+    maxOutputTokens: Int? = null,
+    tools: Boolean = true,
+    maxTokensParameter: Boolean = true
+  ) = AIModel(
+    id = "openai-model",
+    providerId = "openai",
+    modelId = "gpt-4o",
+    displayName = "GPT-4o",
+    maxOutputTokens = maxOutputTokens,
+    capabilities = com.agentisco.settings.model.ModelCapabilities(
+      tools = tools,
+      maxTokensParameter = maxTokensParameter
+    )
+  )
+
+  @Test
+  fun `OpenAI request maps roles tool results and the modern token parameter onto the wire format`() {
+    val client = OpenAIChatCompletionsClient(OkHttpClient())
+
+    val request = client.buildRequest(
+      openAiProvider, openAiModel(maxOutputTokens = 4000), "sk-redacted",
+      LlmRequest(
+        messages = listOf(
+          LlmMessage(LlmRole.SYSTEM, "You are a coding agent."),
+          LlmMessage(LlmRole.USER, "Read src/App.tsx"),
+          LlmMessage(LlmRole.ASSISTANT, "", toolCalls = listOf(LlmToolCall("call_1", "read_file", "{\"path\":\"src/App.tsx\"}"))),
+          LlmMessage(LlmRole.TOOL, "export default App", toolCallId = "call_1", toolName = "read_file")
+        ),
+        tools = listOf(LlmToolSpec("read_file", testTool.description, testTool.parametersJsonSchema()))
+      ),
+      stream = false
+    )
+
+    assertEquals("https://api.openai.com/v1/chat/completions", request.url.toString())
+    assertEquals("Bearer sk-redacted", request.header("Authorization"))
+
+    val body = bodyOf(request)
+    assertEquals("gpt-4o", body.getString("model"))
+    // max_tokens is deprecated on this endpoint; the modern name carries the cap.
+    assertEquals(4000, body.getInt("max_completion_tokens"))
+    assertFalse(body.has("max_tokens"))
+
+    // Unlike the other protocols, the system prompt is a message in the array.
+    val messages = body.getJSONArray("messages")
+    assertEquals(4, messages.length())
+    assertEquals("system", messages.getJSONObject(0).getString("role"))
+    assertEquals("user", messages.getJSONObject(1).getString("role"))
+    assertEquals("assistant", messages.getJSONObject(2).getString("role"))
+    assertEquals("tool", messages.getJSONObject(3).getString("role"))
+    assertEquals("call_1", messages.getJSONObject(3).getString("tool_call_id"))
+
+    val tool = body.getJSONArray("tools").getJSONObject(0)
+    assertEquals("function", tool.getString("type"))
+    assertEquals("read_file", tool.getJSONObject("function").getString("name"))
+    assertEquals("object", tool.getJSONObject("function").getJSONObject("parameters").getString("type"))
+  }
+
+  @Test
+  fun `OpenAI routers without the modern parameter fall back to max_tokens`() {
+    val client = OpenAIChatCompletionsClient(OkHttpClient())
+    val body = bodyOf(
+      client.buildRequest(
+        openAiProvider,
+        openAiModel(maxOutputTokens = 4096, tools = false, maxTokensParameter = false), "k",
+        LlmRequest(messages = listOf(LlmMessage(LlmRole.USER, "hi"))),
+        stream = false
+      )
+    )
+    assertEquals(4096, body.getInt("max_tokens"))
+    assertFalse(body.has("max_completion_tokens"))
+    // A model without tool support must not be offered tools at all.
+    assertFalse(body.has("tools"))
+  }
+
+  @Test
+  fun `OpenAI stream captures finish reason and the usage-only final chunk`() {
+    val client = OpenAIChatCompletionsClient(OkHttpClient())
+    val state = newState()
+    val events = mutableListOf<LlmStreamEvent>()
+
+    client.handleData("""{"choices":[{"index":0,"delta":{"role":"assistant","content":"Read"},"finish_reason":null}]}""", state, events::add)
+    client.handleData("""{"choices":[{"index":0,"delta":{"content":"ing now"},"finish_reason":null}]}""", state, events::add)
+    client.handleData("""{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"read_file","arguments":""}}]},"finish_reason":null}]}""", state, events::add)
+    client.handleData("""{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"path\":"}}]},"finish_reason":null}]}""", state, events::add)
+    client.handleData("""{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"src\"}"}}]},"finish_reason":null}]}""", state, events::add)
+    client.handleData("""{"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}""", state, events::add)
+    // The usage chunk has an empty choices array; parsing must not stop there.
+    client.handleData("""{"choices":[],"usage":{"prompt_tokens":120,"completion_tokens":34,"total_tokens":154,"prompt_tokens_details":{"cached_tokens":96},"completion_tokens_details":{"reasoning_tokens":8}}}""", state, events::add)
+    assertTrue(client.handleData("[DONE]", state, events::add))
+
+    assertEquals("Reading now", state.content.toString())
+    assertEquals(LlmFinishReason.TOOL_CALLS, state.finishReason)
+    assertEquals(120, state.usage?.inputTokens)
+    assertEquals(34, state.usage?.outputTokens)
+    assertEquals(154, state.usage?.totalTokens)
+    assertEquals(96, state.usage?.cachedInputTokens)
+    assertEquals(8, state.usage?.reasoningTokens)
+    val call = state.toolCalls.values.single()
+    assertEquals("call_1", call.id)
+    assertEquals("src", JSONObject(call.argumentsJson).getString("path"))
+  }
+
+  @Test
+  fun `OpenAI non streamed completion yields finish reason and usage`() {
+    val client = OpenAIChatCompletionsClient(OkHttpClient())
+    val state = newState()
+    val events = mutableListOf<LlmStreamEvent>()
+
+    client.handleData("""{"choices":[{"index":0,"finish_reason":"length","message":{"role":"assistant","content":"truncated"}}],"usage":{"prompt_tokens":9,"completion_tokens":5,"total_tokens":14}}""", state, events::add)
+
+    assertEquals("truncated", state.content.toString())
+    assertEquals(LlmFinishReason.LENGTH, state.finishReason)
+    assertEquals(9, state.usage?.inputTokens)
+    assertEquals(14, state.usage?.totalTokens)
+  }
+
+  @Test
+  fun `OpenAI error bodies separate retryable from permanent failures`() {
+    val client = OpenAIChatCompletionsClient(OkHttpClient())
+
+    // A permanent request fault must not be retried by the agent loop.
+    val invalid = assertThrows(LlmException::class.java) {
+      client.handleData("""{"error":{"message":"Unknown parameter: 'foo'.","type":"invalid_request_error"}}""", newState()) { }
+    }
+    assertEquals(LlmErrorKind.INVALID_RESPONSE, invalid.kind)
+    assertEquals("Unknown parameter: 'foo'.", invalid.message)
+
+    val limited = assertThrows(LlmException::class.java) {
+      client.handleData("""{"error":{"message":"Rate limit reached","type":"rate_limit_error"}}""", newState()) { }
+    }
+    assertEquals(LlmErrorKind.RATE_LIMIT, limited.kind)
+
+    val server = assertThrows(LlmException::class.java) {
+      client.handleData("""{"error":{"message":"The server had an error","type":"server_error"}}""", newState()) { }
+    }
+    assertEquals(LlmErrorKind.SERVER, server.kind)
+  }
+
   // ---- Anthropic Messages wire format and response normalization ----
 
   private val anthropicProvider =

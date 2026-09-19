@@ -29,6 +29,11 @@ class LlmService(
   httpClient: OkHttpClient? = null,
   private val chainStore: GeminiChainStore = GeminiChainStoreImpl()
 ) {
+  private companion object {
+    /** Floor for the connection probe; see [testConnection]. */
+    const val TEST_MIN_OUTPUT_TOKENS = 1024
+  }
+
   private val http = httpClient ?: OkHttpClient.Builder()
     .connectTimeout(30, TimeUnit.SECONDS)
     .readTimeout(300, TimeUnit.SECONDS)
@@ -92,7 +97,9 @@ class LlmService(
         request = LlmRequest(
           messages = listOf(LlmMessage(LlmRole.USER, "Connection test. Reply with exactly: PONG")),
           tools = emptyList(),
-          maxOutputTokens = 16
+          // Reasoning models spend this budget on hidden thinking before any
+          // visible text, so a tiny cap answers nothing and fails the test.
+          maxOutputTokens = TEST_MIN_OUTPUT_TOKENS
         )
       ) { event ->
         if (event is LlmStreamEvent.Token) collected.append(event.text)
@@ -333,11 +340,24 @@ internal class OpenAIChatCompletionsClient(http: OkHttpClient) : BaseLlmClient(h
       throw LlmException("Provider returned invalid JSON.", LlmErrorKind.INVALID_RESPONSE)
     }
     if (obj.has("error")) {
-      val msg = obj.optJSONObject("error")?.optString("message") ?: "Provider error"
-      throw LlmException(msg, LlmErrorKind.SERVER)
+      val err = obj.optJSONObject("error")
+      throw LlmException(
+        err?.optString("message")?.takeIf { it.isNotBlank() } ?: "Provider error",
+        when (err?.optString("type")) {
+          "rate_limit_error" -> LlmErrorKind.RATE_LIMIT
+          // Permanent request faults must not be retried by the agent loop.
+          "invalid_request_error", "request_too_large" -> LlmErrorKind.INVALID_RESPONSE
+          "authentication_error" -> LlmErrorKind.AUTH
+          else -> LlmErrorKind.SERVER
+        }
+      )
     }
+    // Counters are read before the choices guard: with usage included, the final
+    // chunk carries an empty choices array and would otherwise be discarded.
+    obj.optJSONObject("usage")?.let { state.usage = it.toUsage() }
     val choices = obj.optJSONArray("choices") ?: return false
     val choice = choices.optJSONObject(0) ?: return false
+    finishFor(cleanWireString(choice.optString("finish_reason")))?.let { state.finishReason = it }
     // Streaming responses carry incremental "delta"; non-streaming carry the full "message".
     val delta = choice.optJSONObject("delta") ?: choice.optJSONObject("message") ?: return false
     delta.optString("content", "").takeIf { it.isNotEmpty() }?.let {
@@ -364,6 +384,22 @@ internal class OpenAIChatCompletionsClient(http: OkHttpClient) : BaseLlmClient(h
     return false
   }
 
+  private fun JSONObject.toUsage(): LlmUsage = LlmUsage(
+    inputTokens = optIntOrNull("prompt_tokens"),
+    outputTokens = optIntOrNull("completion_tokens"),
+    totalTokens = optIntOrNull("total_tokens"),
+    cachedInputTokens = optJSONObject("prompt_tokens_details")?.optIntOrNull("cached_tokens"),
+    reasoningTokens = optJSONObject("completion_tokens_details")?.optIntOrNull("reasoning_tokens")
+  )
+
+  private fun finishFor(reason: String): LlmFinishReason? = when (reason) {
+    "" -> null
+    "stop" -> LlmFinishReason.STOP
+    "length" -> LlmFinishReason.LENGTH
+    "tool_calls", "function_call" -> LlmFinishReason.TOOL_CALLS
+    "content_filter" -> LlmFinishReason.CONTENT_FILTER
+    else -> LlmFinishReason.OTHER
+  }
 
   override suspend fun probeModels(provider: AIProvider, apiKey: String): Pair<Boolean, String> {
     return try {
