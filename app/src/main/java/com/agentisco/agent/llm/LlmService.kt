@@ -138,6 +138,10 @@ internal abstract class BaseLlmClient(protected val http: OkHttpClient) {
   /** org.json renders JSON null as the literal string "null" — treat it as absent. */
   internal fun cleanWireString(v: String?): String = if (v.isNullOrEmpty() || v == "null") "" else v
 
+  /** A counter the provider never reported must stay absent, not become 0. */
+  internal fun JSONObject.optIntOrNull(name: String): Int? =
+    if (has(name) && !isNull(name)) optInt(name) else null
+
   internal fun normalizeArgs(raw: String?): String {
     val text = raw?.trim().orEmpty()
     if (text.isEmpty() || text == "null") return "{}"
@@ -385,8 +389,21 @@ internal class OpenAIChatCompletionsClient(http: OkHttpClient) : BaseLlmClient(h
   }
 }
 
-/** Anthropic Messages protocol. */
+/**
+ * Anthropic Messages protocol.
+ *
+ * Extended thinking is deliberately left off: once tools are in play the API
+ * requires every `thinking` block and its `signature` to be echoed back on the
+ * next assistant turn, and the persisted chat history stores neither.
+ */
 internal class AnthropicMessagesClient(http: OkHttpClient) : BaseLlmClient(http) {
+
+  /** The settings hint omits the version segment, but users routinely paste a base ending in `/v1`. */
+  private fun endpoint(provider: AIProvider, path: String): String {
+    val base = provider.baseUrl.trimEnd('/')
+    val root = if (base.endsWith("/v1")) base.removeSuffix("/v1") else base
+    return "$root/v1/$path"
+  }
 
   override internal fun buildRequest(provider: AIProvider, model: AIModel, apiKey: String, request: LlmRequest, stream: Boolean): Request {
     val body = JSONObject().apply {
@@ -422,7 +439,9 @@ internal class AnthropicMessagesClient(http: OkHttpClient) : BaseLlmClient(http)
               }
             })
           })
-          else -> msgs.put(JSONObject().apply {
+          // The API rejects any message whose content is empty, so a blank row
+          // from persisted history is dropped instead of poisoning the request.
+          m.content.isNotBlank() -> msgs.put(JSONObject().apply {
             put("role", if (m.role == LlmRole.ASSISTANT) "assistant" else "user")
             put("content", m.content)
           })
@@ -442,7 +461,7 @@ internal class AnthropicMessagesClient(http: OkHttpClient) : BaseLlmClient(http)
       }
     }
     return Request.Builder()
-      .url(provider.baseUrl.trimEnd('/') + "/v1/messages")
+      .url(endpoint(provider, "messages"))
       .header("x-api-key", apiKey)
       .header("anthropic-version", "2023-06-01")
       .post(jsonBody(body))
@@ -454,10 +473,20 @@ internal class AnthropicMessagesClient(http: OkHttpClient) : BaseLlmClient(http)
       throw LlmException("Provider returned invalid JSON.", LlmErrorKind.INVALID_RESPONSE)
     }
     when (obj.optString("type")) {
-      "error" -> throw LlmException(
-        obj.optJSONObject("error")?.optString("message") ?: "Provider error",
-        LlmErrorKind.SERVER
-      )
+      "error" -> {
+        val err = obj.optJSONObject("error")
+        throw LlmException(
+          err?.optString("message")?.takeIf { it.isNotBlank() } ?: "Anthropic provider error",
+          when (err?.optString("type")) {
+            "rate_limit_error" -> LlmErrorKind.RATE_LIMIT
+            // Permanent request faults must not be retried by the agent loop.
+            "invalid_request_error", "request_too_large" -> LlmErrorKind.INVALID_RESPONSE
+            "authentication_error" -> LlmErrorKind.AUTH
+            // api_error and overloaded_error are transient.
+            else -> LlmErrorKind.SERVER
+          }
+        )
+      }
       // Non-streaming responses arrive as a single "message" payload.
       "message" -> {
         val content = obj.optJSONArray("content")
@@ -478,8 +507,12 @@ internal class AnthropicMessagesClient(http: OkHttpClient) : BaseLlmClient(http)
             }
           }
         }
+        finishFor(cleanWireString(obj.optString("stop_reason")))?.let { state.finishReason = it }
+        absorbUsage(state, obj.optJSONObject("usage"))
         return true
       }
+      // Carries the prompt counters; output_tokens here is only the first chunk.
+      "message_start" -> obj.optJSONObject("message")?.let { absorbUsage(state, it.optJSONObject("usage")) }
       "content_block_start" -> {
         val block = obj.optJSONObject("content_block")
         if (block?.optString("type") == "tool_use") {
@@ -506,17 +539,48 @@ internal class AnthropicMessagesClient(http: OkHttpClient) : BaseLlmClient(http)
               state.toolCalls[idx] = existing.copy(argumentsJson = existing.argumentsJson + delta.optString("partial_json"))
             }
           }
+          // signature_delta and citations_delta carry nothing the agent acts on.
         }
       }
+      // The terminal stop_reason and the cumulative output count arrive here,
+      // not in message_start — dropping them loses usage for streamed replies.
+      "message_delta" -> {
+        obj.optJSONObject("delta")?.let { d ->
+          finishFor(cleanWireString(d.optString("stop_reason")))?.let { state.finishReason = it }
+        }
+        absorbUsage(state, obj.optJSONObject("usage"))
+      }
       "message_stop" -> return true
+      // ping, content_block_stop: nothing to act on.
     }
     return false
+  }
+
+  /** Anthropic reports no total, and `input_tokens` excludes cache reads — so nothing is synthesized. */
+  private fun absorbUsage(state: StreamState, usage: JSONObject?) {
+    usage ?: return
+    val prior = state.usage
+    val input = usage.optIntOrNull("input_tokens") ?: prior?.inputTokens
+    val output = usage.optIntOrNull("output_tokens") ?: prior?.outputTokens
+    val cached = usage.optIntOrNull("cache_read_input_tokens") ?: prior?.cachedInputTokens
+    if (input == null && output == null && cached == null) return
+    state.usage = LlmUsage(inputTokens = input, outputTokens = output, cachedInputTokens = cached)
+  }
+
+  private fun finishFor(stopReason: String): LlmFinishReason? = when (stopReason) {
+    "" -> null
+    "tool_use" -> LlmFinishReason.TOOL_CALLS
+    "max_tokens" -> LlmFinishReason.LENGTH
+    "end_turn", "stop_sequence" -> LlmFinishReason.STOP
+    "refusal", "model_failure" -> LlmFinishReason.ERROR
+    // pause_turn and any future value: the agent has no special handling for them.
+    else -> LlmFinishReason.OTHER
   }
 
   override suspend fun probeModels(provider: AIProvider, apiKey: String): Pair<Boolean, String> {
     return try {
       val request = Request.Builder()
-        .url(provider.baseUrl.trimEnd('/') + "/v1/models")
+        .url(endpoint(provider, "models"))
         .header("x-api-key", apiKey)
         .header("anthropic-version", "2023-06-01")
         .get()
@@ -913,9 +977,6 @@ internal class GeminiInteractionsClient(
     reasoningTokens = optIntOrNull("total_thought_tokens"),
     totalTokens = optIntOrNull("total_tokens")
   )
-
-  private fun JSONObject.optIntOrNull(name: String): Int? =
-    if (has(name) && !isNull(name)) optInt(name) else null
 
   override suspend fun probeModels(provider: AIProvider, apiKey: String): Pair<Boolean, String> {
     return try {

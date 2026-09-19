@@ -1,6 +1,7 @@
 package com.agentisco
 
 import androidx.test.core.app.ApplicationProvider
+import com.agentisco.agent.llm.AnthropicMessagesClient
 import com.agentisco.agent.llm.BaseLlmClient
 import com.agentisco.agent.llm.GeminiChainState
 import com.agentisco.agent.llm.GeminiChainStoreImpl
@@ -262,6 +263,176 @@ class ToolCallingPipelineTest {
     val result = body.getJSONArray("messages").getJSONObject(2)
     assertEquals("tool", result.getString("role"))
     assertEquals("call_1", result.getString("tool_call_id"))
+  }
+
+  // ---- Anthropic Messages wire format and response normalization ----
+
+  private val anthropicProvider =
+    AIProvider("anthropic", "Anthropic", "https://api.anthropic.com", LLMProtocol.ANTHROPIC_MESSAGES)
+
+  private fun anthropicModel(maxOutputTokens: Int? = null) = AIModel(
+    id = "claude-model",
+    providerId = "anthropic",
+    modelId = "claude-sonnet-4-5",
+    displayName = "Claude Sonnet 4.5",
+    maxOutputTokens = maxOutputTokens,
+    capabilities = com.agentisco.settings.model.ModelCapabilities(tools = true)
+  )
+
+  @Test
+  fun `Anthropic request maps system tool calls and results onto the messages wire format`() {
+    val client = AnthropicMessagesClient(OkHttpClient())
+
+    val request = client.buildRequest(
+      anthropicProvider, anthropicModel(maxOutputTokens = 8000), "sk-ant-redacted",
+      LlmRequest(
+        messages = listOf(
+          LlmMessage(LlmRole.SYSTEM, "You are a coding agent."),
+          LlmMessage(LlmRole.USER, "Read src/App.tsx"),
+          LlmMessage(LlmRole.ASSISTANT, "", toolCalls = listOf(LlmToolCall("toolu_01", "read_file", "{\"path\":\"src/App.tsx\"}"))),
+          LlmMessage(LlmRole.TOOL, "export default App", toolCallId = "toolu_01", toolName = "read_file"),
+          // A blank row from persisted history must never reach the API.
+          LlmMessage(LlmRole.ASSISTANT, "")
+        ),
+        tools = listOf(LlmToolSpec("read_file", testTool.description, testTool.parametersJsonSchema()))
+      ),
+      stream = true
+    )
+
+    assertEquals("https://api.anthropic.com/v1/messages", request.url.toString())
+    assertEquals("sk-ant-redacted", request.header("x-api-key"))
+    assertEquals("2023-06-01", request.header("anthropic-version"))
+
+    val body = bodyOf(request)
+    assertEquals("claude-sonnet-4-5", body.getString("model"))
+    assertTrue(body.getBoolean("stream"))
+    assertEquals(8000, body.getInt("max_tokens"))
+    // The system prompt travels as its own top-level field, never as a message.
+    assertEquals("You are a coding agent.", body.getString("system"))
+
+    val tool = body.getJSONArray("tools").getJSONObject(0)
+    assertEquals("read_file", tool.getString("name"))
+    assertEquals("object", tool.getJSONObject("input_schema").getString("type"))
+
+    val messages = body.getJSONArray("messages")
+    assertEquals(3, messages.length())
+    assertEquals("user", messages.getJSONObject(0).getString("role"))
+    assertEquals("Read src/App.tsx", messages.getJSONObject(0).getString("content"))
+
+    // tool_use carries `input` as a JSON object, never as an argument string.
+    val assistantBlock = messages.getJSONObject(1).getJSONArray("content").getJSONObject(0)
+    assertEquals("tool_use", assistantBlock.getString("type"))
+    assertEquals("toolu_01", assistantBlock.getString("id"))
+    assertEquals("src/App.tsx", assistantBlock.getJSONObject("input").getString("path"))
+
+    // A tool result is a user message wrapping one tool_result block.
+    val result = messages.getJSONObject(2)
+    assertEquals("user", result.getString("role"))
+    val resultBlock = result.getJSONArray("content").getJSONObject(0)
+    assertEquals("tool_result", resultBlock.getString("type"))
+    assertEquals("toolu_01", resultBlock.getString("tool_use_id"))
+    assertEquals("export default App", resultBlock.getString("content"))
+  }
+
+  @Test
+  fun `Anthropic base url already ending in v1 is not duplicated`() {
+    val client = AnthropicMessagesClient(OkHttpClient())
+    val request = client.buildRequest(
+      anthropicProvider.copy(baseUrl = "https://api.anthropic.com/v1"), anthropicModel(), "k",
+      LlmRequest(messages = listOf(LlmMessage(LlmRole.USER, "hi"))),
+      stream = false
+    )
+    assertEquals("https://api.anthropic.com/v1/messages", request.url.toString())
+    assertFalse(bodyOf(request).getBoolean("stream"))
+  }
+
+  @Test
+  fun `Anthropic stream normalizes text tool fragments stop reason and usage`() {
+    val client = AnthropicMessagesClient(OkHttpClient())
+    val state = newState()
+    val events = mutableListOf<LlmStreamEvent>()
+
+    assertFalse(client.handleData("""{"type":"message_start","message":{"id":"msg_01","role":"assistant","model":"claude-sonnet-4-5","content":[],"stop_reason":null,"usage":{"input_tokens":1204,"cache_read_input_tokens":300,"output_tokens":4}}}""", state, events::add))
+    client.handleData("""{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}""", state, events::add)
+    client.handleData("""{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Reading "}}""", state, events::add)
+    client.handleData("""{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"now"}}""", state, events::add)
+    client.handleData("""{"type":"content_block_stop","index":0}""", state, events::add)
+    client.handleData("""{"type":"ping"}""", state, events::add)
+    client.handleData("""{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_01","name":"read_file","input":{}}}""", state, events::add)
+    client.handleData("""{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"pa"}}""", state, events::add)
+    client.handleData("""{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"th\":\"src\"}"}}""", state, events::add)
+    client.handleData("""{"type":"content_block_stop","index":1}""", state, events::add)
+    // The terminal stop_reason and cumulative output count arrive only here.
+    client.handleData("""{"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"output_tokens":87}}""", state, events::add)
+    assertTrue(client.handleData("""{"type":"message_stop"}""", state, events::add))
+
+    assertEquals("Reading now", state.content.toString())
+    assertEquals(LlmFinishReason.TOOL_CALLS, state.finishReason)
+    // Prompt counters come from message_start and survive the later delta.
+    assertEquals(1204, state.usage?.inputTokens)
+    assertEquals(300, state.usage?.cachedInputTokens)
+    assertEquals(87, state.usage?.outputTokens)
+    val call = state.toolCalls.values.single()
+    assertEquals("toolu_01", call.id)
+    assertEquals("read_file", call.name)
+    assertEquals("src", JSONObject(call.argumentsJson).getString("path"))
+    assertTrue(events.any { it is LlmStreamEvent.Token && it.text == "Reading " })
+  }
+
+  @Test
+  fun `Anthropic non streamed message yields stop reason usage and tool call`() {
+    val client = AnthropicMessagesClient(OkHttpClient())
+    val state = newState()
+    val events = mutableListOf<LlmStreamEvent>()
+
+    assertTrue(
+      client.handleData(
+        """{"id":"msg_02","type":"message","role":"assistant","model":"claude-sonnet-4-5","content":[{"type":"text","text":"Done"},{"type":"tool_use","id":"toolu_02","name":"read_file","input":{"path":"src/main.kt"}}],"stop_reason":"tool_use","usage":{"input_tokens":42,"output_tokens":17}}""",
+        state, events::add
+      )
+    )
+
+    assertEquals("Done", state.content.toString())
+    assertEquals(LlmFinishReason.TOOL_CALLS, state.finishReason)
+    assertEquals(42, state.usage?.inputTokens)
+    assertEquals(17, state.usage?.outputTokens)
+    assertEquals("src/main.kt", JSONObject(state.toolCalls.values.single().argumentsJson).getString("path"))
+  }
+
+  @Test
+  fun `Anthropic truncation maps to a length finish reason without inventing counters`() {
+    val client = AnthropicMessagesClient(OkHttpClient())
+    val state = newState()
+
+    client.handleData("""{"type":"message_delta","delta":{"stop_reason":"max_tokens"},"usage":{"output_tokens":4096}}""", state) { }
+
+    assertEquals(LlmFinishReason.LENGTH, state.finishReason)
+    assertEquals(4096, state.usage?.outputTokens)
+    // Anthropic reports no total and never sent a prompt count here.
+    assertNull(state.usage?.inputTokens)
+    assertNull(state.usage?.totalTokens)
+  }
+
+  @Test
+  fun `Anthropic error events separate retryable from permanent failures`() {
+    val client = AnthropicMessagesClient(OkHttpClient())
+
+    val overloaded = assertThrows(LlmException::class.java) {
+      client.handleData("""{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}""", newState()) { }
+    }
+    assertEquals(LlmErrorKind.SERVER, overloaded.kind)
+    assertEquals("Overloaded", overloaded.message)
+
+    // A permanent request fault must not be retried by the agent loop.
+    val invalid = assertThrows(LlmException::class.java) {
+      client.handleData("""{"type":"error","error":{"type":"invalid_request_error","message":"messages.2.content: at least one item required"}}""", newState()) { }
+    }
+    assertEquals(LlmErrorKind.INVALID_RESPONSE, invalid.kind)
+
+    val limited = assertThrows(LlmException::class.java) {
+      client.handleData("""{"type":"error","error":{"type":"rate_limit_error","message":"Rate limited"}}""", newState()) { }
+    }
+    assertEquals(LlmErrorKind.RATE_LIMIT, limited.kind)
   }
 
   // ---- Gemini Interactions wire format, streaming, and multi-turn chaining ----
