@@ -93,6 +93,7 @@ fun AgentScreen(
   val allModels by viewModel.aiModels.collectAsState()
   val sessions by viewModel.chatSessions.collectAsState()
   val activeSession by viewModel.activeChatSession.collectAsState()
+  val activeSessionId by viewModel.activeSessionId.collectAsState()
 
   var promptText by remember { mutableStateOf("") }
   var showSessionSheet by remember { mutableStateOf(false) }
@@ -108,8 +109,19 @@ fun AgentScreen(
     val total = info.totalItemsCount
     total <= 2 || last >= total - 3
   } }
-  LaunchedEffect(chatItems) {
-    if (chatItems.isNotEmpty() && autoFollow) {
+  // Open a session at its LATEST message (chat-app style): the first non-empty
+  // load after a session switch jumps straight to the bottom; afterwards new
+  // activity is followed only while the user is already at the bottom,
+  // otherwise they keep their position and get a "Jump to latest" chip.
+  var followedSessionId by remember { mutableStateOf<String?>(null) }
+  LaunchedEffect(activeSessionId, chatItems) {
+    if (chatItems.isEmpty()) {
+      // Rows for the next session are still loading from Room.
+      followedSessionId = null
+    } else if (followedSessionId != activeSessionId) {
+      followedSessionId = activeSessionId
+      listState.scrollToItem(chatItems.size)
+    } else if (autoFollow) {
       listState.animateScrollToItem(chatItems.size) // bottom spacer item
     }
   }

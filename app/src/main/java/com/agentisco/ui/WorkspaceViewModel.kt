@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -90,7 +91,13 @@ class WorkspaceViewModel(
 
   val chatItems: StateFlow<List<ChatItem>> = _activeSessionId
     .flatMapLatest { id ->
-      if (id == null) flowOf(emptyList()) else chatStore.messagesWithBlocks(id)
+      if (id == null) flowOf(emptyList())
+      else flow<List<com.agentisco.data.local.chat.MessageWithBlocks>> {
+        // Clear stale rows from the previous session before the new query
+        // lands, so the chat UI can detect "freshly opened session" reliably.
+        emit(emptyList())
+        chatStore.messagesWithBlocks(id).collect { emit(it) }
+      }
     }
     .map { rows -> rows.map { it.toChatItem() } }
     .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
