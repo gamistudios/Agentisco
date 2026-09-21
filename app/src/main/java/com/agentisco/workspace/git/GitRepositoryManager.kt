@@ -468,7 +468,7 @@ class GitRepositoryManager(
     if (!checkHead.success) return emptyList()
 
     // Log format: %h | %H | %an | %ae | %ci | %cr | %d | %s
-    val logCmd = "git log --pretty=format:\"%h|%H|%an|%ae|%ci|%cr|%d|%s\" -n $limit --skip $offset"
+    val logCmd = "git log --pretty=format:%h|%H|%an|%ae|%ci|%cr|%d|%s -n $limit --skip $offset"
     val out = git(project, logCmd).output
     if (out.isBlank()) return emptyList()
 
