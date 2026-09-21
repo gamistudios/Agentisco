@@ -501,8 +501,8 @@ class WorkspaceRepository(
 
   /** Real-time filesystem observer that watches project directory for changes. */
   private val fileWatcher = WorkspaceFileWatcher(repositoryScope) {
+    refreshFiles(showLoadingIndicator = false)
     refreshDiffsAndGit()
-    refreshFiles()
   }
 
   /** Last git operation failure, surfaced in the Git tab for debugging. */
@@ -835,7 +835,7 @@ class WorkspaceRepository(
     refreshDiffsAndGit()
   }
 
-  fun refreshFiles() {
+  fun refreshFiles(showLoadingIndicator: Boolean = false) {
     val project = _activeProject.value
     if (project.path.isBlank()) {
       _projectFiles.value = emptyList()
@@ -844,7 +844,9 @@ class WorkspaceRepository(
       return
     }
     repositoryScope.launch {
-      _isFilesLoading.value = true
+      if (showLoadingIndicator || _projectFiles.value.isEmpty()) {
+        _isFilesLoading.value = true
+      }
       // Re-scan the root plus every folder the UI already has open.
       val snapshot = withContext(Dispatchers.IO) {
         runCatching {
@@ -859,8 +861,9 @@ class WorkspaceRepository(
       _projectFiles.value = snapshot.first
       _dirChildren.value = snapshot.second
     }
-    refreshDiffsAndGit()
   }
+
+  private var gitRefreshJob: Job? = null
 
   /** Refreshes diffs/staging/history/status from real git, asynchronously. */
   fun refreshDiffsAndGit() {
@@ -877,7 +880,8 @@ class WorkspaceRepository(
       _tags.value = emptyList()
       return
     }
-    repositoryScope.launch {
+    gitRefreshJob?.cancel()
+    gitRefreshJob = repositoryScope.launch {
       try {
         val isRepo = gitManager.isGitRepository(project)
         _isGitRepository.value = isRepo
@@ -910,7 +914,9 @@ class WorkspaceRepository(
         }
         _commitHistory.value = gitManager.getCommitHistory(project, limit = 30)
       } catch (e: Exception) {
-        android.util.Log.e("ScoOS-Git", "git refresh failed", e)
+        if (e !is kotlinx.coroutines.CancellationException) {
+          android.util.Log.e("ScoOS-Git", "git refresh failed", e)
+        }
       }
     }
   }
@@ -1260,6 +1266,19 @@ class WorkspaceRepository(
 
   fun renameFile(oldPath: String, newName: String): Boolean {
     val success = fileSystem.renameFile(_activeProject.value, oldPath, newName)
+    if (success) {
+      refreshFiles()
+    }
+    return success
+  }
+
+  fun duplicateFile(relativePath: String): Boolean {
+    val project = _activeProject.value
+    val content = fileSystem.readFile(project, relativePath)
+    val ext = relativePath.substringAfterLast(".", "")
+    val base = if (ext.isNotEmpty()) relativePath.substringBeforeLast(".") else relativePath
+    val newPath = if (ext.isNotEmpty()) "${base}_copy.$ext" else "${base}_copy"
+    val success = fileSystem.createFile(project, newPath, content)
     if (success) {
       refreshFiles()
     }

@@ -821,8 +821,12 @@ class WorkspaceViewModel(
     return repository.renameFile(oldPath, newName)
   }
 
-  fun refreshFiles() {
-    repository.refreshFiles()
+  fun duplicateFile(relativePath: String): Boolean {
+    return repository.duplicateFile(relativePath)
+  }
+
+  fun refreshFiles(showLoading: Boolean = false) {
+    repository.refreshFiles(showLoading)
   }
 
   fun toggleCommandPalette(open: Boolean? = null) {

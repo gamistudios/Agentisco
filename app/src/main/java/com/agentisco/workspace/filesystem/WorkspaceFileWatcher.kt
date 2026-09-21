@@ -26,15 +26,21 @@ class WorkspaceFileWatcher(
   private var debounceJob: Job? = null
 
   companion object {
-    private const val DEBOUNCE_MS = 250L
+    private const val DEBOUNCE_MS = 350L
 
     private val IGNORED_FOLDER_NAMES = setOf(
-      "objects", // under .git
+      ".git",
+      "objects",
       "node_modules",
       ".gradle",
       "build",
+      "dist",
+      "out",
+      "target",
       ".idea",
-      ".scannerwork"
+      ".scannerwork",
+      ".cache",
+      ".turbo"
     )
 
     private const val WATCH_MASK = FileObserver.CREATE or
@@ -83,18 +89,10 @@ class WorkspaceFileWatcher(
       runCatching { obs.startWatching() }
     }
 
-    // Traverse children up to a reasonable depth (e.g. max 5 levels deep)
+    // Traverse children up to a reasonable depth
     dir.listFiles()?.forEach { child ->
       if (child.isDirectory && !IGNORED_FOLDER_NAMES.contains(child.name)) {
-        // Only recurse into .git top-level directory (to monitor index/HEAD/refs), not deeper objects
-        if (dir.name == ".git") {
-          // Watch .git directly, but don't recurse into .git subdirs except refs
-          if (child.name == "refs") {
-            registerTree(child)
-          }
-        } else {
-          registerTree(child)
-        }
+        registerTree(child)
       }
     }
   }
@@ -103,7 +101,7 @@ class WorkspaceFileWatcher(
     // If a new directory was created, attach an observer to it
     if (changedPath != null) {
       val f = File(changedPath)
-      if (f.isDirectory && !activeObservers.containsKey(f.absolutePath)) {
+      if (f.isDirectory && !IGNORED_FOLDER_NAMES.contains(f.name) && !activeObservers.containsKey(f.absolutePath)) {
         registerTree(f)
       }
     }
@@ -125,11 +123,19 @@ class WorkspaceFileWatcher(
   }
 
   private fun handleFileEvent(folderPath: String, path: String?) {
-    // Ignore null paths or internal git objects / temp files
-    if (path != null && (path.endsWith(".swp") || path.endsWith(".tmp") || path == "objects")) {
+    if (path == null) return
+    // Ignore internal git objects, locks, and swap/temp files to prevent feedback loops
+    if (path.endsWith(".swp") ||
+        path.endsWith(".tmp") ||
+        path.endsWith(".lock") ||
+        path == "index.lock" ||
+        path == "objects" ||
+        folderPath.contains("/.git") ||
+        folderPath.endsWith("/.git")
+    ) {
       return
     }
-    val fullPath = if (path != null) "$folderPath/$path" else null
+    val fullPath = "$folderPath/$path"
     notifyChange(fullPath)
   }
 

@@ -103,43 +103,14 @@ class ExampleRobolectricTest {
     }
   }
 
-  /**
-   * Splits a command line POSIX-shell style: quotes are stripped and the text
-   * they enclosed stays one argument (`--pretty=format:"%h|%s"` -> `%h|%s`).
-   * A naive whitespace tokenizer would leave the quotes inside the argument,
-   * which real shells remove but ProcessBuilder (Linux CI) passes verbatim.
-   */
-  private fun shellSplit(args: String): List<String> {
-    val tokens = mutableListOf<String>()
-    val cur = StringBuilder()
-    var started = false
-    var i = 0
-    while (i < args.length) {
-      when (val c = args[i]) {
-        ' ', '\t' -> {
-          if (started) { tokens.add(cur.toString()); cur.setLength(0); started = false }
-          i++
-        }
-        '\'', '"' -> {
-          started = true
-          i++
-          while (i < args.length && args[i] != c) { cur.append(args[i]); i++ }
-          if (i < args.length) i++
-        }
-        '\\' -> {
-          started = true
-          if (i + 1 < args.length) { cur.append(args[i + 1]); i += 2 } else { cur.append(c); i++ }
-        }
-        else -> { started = true; cur.append(c); i++ }
-      }
-    }
-    if (cur.isNotEmpty()) tokens.add(cur.toString())
-    return tokens
-  }
-
   /** Runs a git command for tests using the real git binary. */
   private fun runGitForTest(gitExe: String, projectPath: String, args: String): com.agentisco.workspace.git.GitRunResult {
-    val tokens = shellSplit(args).filter { it != "2>/dev/null" && it != "true" }.toMutableList()
+    val tokens = Regex("\"[^\"]*\"|'[^']*'|\\S+").findAll(args).map { m ->
+      val t = m.value
+      if (t.startsWith("\"") || t.startsWith("'")) t.substring(1, t.length - 1)
+      else t
+    }.filter { it != "2>/dev/null" }.toList()
+      .toMutableList()
     if (tokens.firstOrNull() == "git") tokens[0] = gitExe
     val process = ProcessBuilder(tokens)
       .directory(File(projectPath))
