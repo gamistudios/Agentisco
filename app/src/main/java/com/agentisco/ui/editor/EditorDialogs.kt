@@ -9,6 +9,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
@@ -148,7 +149,7 @@ fun GoToSymbolSheet(
         verticalAlignment = Alignment.CenterVertically
       ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-          Icon(Icons.Default.Segment, contentDescription = null, tint = CyanAccent, modifier = Modifier.size(20.dp))
+          Icon(Icons.AutoMirrored.Filled.Segment, contentDescription = null, tint = CyanAccent, modifier = Modifier.size(20.dp))
           Text("File Symbols & Outline", color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
         }
         Text("${symbols.size} symbols", color = TextMuted, fontSize = 12.sp)
@@ -214,7 +215,7 @@ fun GoToSymbolSheet(
                     SymbolKind.INTERFACE -> Icons.Default.Handshake to CyanAccent
                     SymbolKind.FUNCTION -> Icons.Default.Code to ElectricBlueGlow
                     SymbolKind.STRUCT -> Icons.Default.Widgets to Color(0xFFDEA584)
-                    SymbolKind.ENUM -> Icons.Default.List to Color(0xFFA78BFA)
+                    SymbolKind.ENUM -> Icons.AutoMirrored.Filled.List to Color(0xFFA78BFA)
                     SymbolKind.HEADING -> Icons.Default.Title to TerminalGreen
                     SymbolKind.VARIABLE -> Icons.Default.DataObject to TextSecondary
                   }
@@ -524,7 +525,7 @@ fun AiEditorActionDialog(
         modifier = Modifier.testTag("btn_send_ai_prompt")
       ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-          Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(14.dp))
+          Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null, modifier = Modifier.size(14.dp))
           Text("Ask Agent")
         }
       }

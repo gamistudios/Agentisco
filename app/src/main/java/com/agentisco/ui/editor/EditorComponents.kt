@@ -552,7 +552,7 @@ fun EditorActionBar(
             .testTag("btn_editor_symbols")
         ) {
           Icon(
-            imageVector = Icons.Default.Segment,
+            imageVector = Icons.AutoMirrored.Filled.Segment,
             contentDescription = "Go to Symbol",
             tint = TextSecondary,
             modifier = Modifier.size(14.dp)
@@ -627,7 +627,7 @@ fun EditorActionBar(
             )
             DropdownMenuItem(
               text = { Text(if (isWordWrapEnabled) "Disable Word Wrap" else "Enable Word Wrap", color = TextPrimary, fontSize = 12.sp) },
-              leadingIcon = { Icon(Icons.Default.WrapText, contentDescription = null, tint = TextMuted, modifier = Modifier.size(16.dp)) },
+              leadingIcon = { Icon(Icons.AutoMirrored.Filled.WrapText, contentDescription = null, tint = TextMuted, modifier = Modifier.size(16.dp)) },
               onClick = {
                 showOverflowMenu = false
                 onToggleWordWrap()
