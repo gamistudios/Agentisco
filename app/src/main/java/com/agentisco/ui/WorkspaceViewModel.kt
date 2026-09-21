@@ -16,6 +16,9 @@ import com.agentisco.data.local.chat.AgentSessionEntity
 import com.agentisco.data.model.*
 import com.agentisco.data.repository.AgentChatStore
 import com.agentisco.data.repository.WorkspaceRepository
+import com.agentisco.editor.model.EditorSettings
+import com.agentisco.editor.model.EditorTab
+import com.agentisco.editor.syntax.Language
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -46,6 +49,21 @@ class WorkspaceViewModel(
   val activeFile: StateFlow<ProjectFile> = repository.activeFile
   val editorContent: StateFlow<String> = repository.editorContent
   val isEditorDirty: StateFlow<Boolean> = repository.isEditorDirty
+
+  // Multi-file editor tab management
+  private val _openTabs = MutableStateFlow<List<EditorTab>>(emptyList())
+  val openTabs: StateFlow<List<EditorTab>> = _openTabs.asStateFlow()
+
+  private val _activeTabIndex = MutableStateFlow(0)
+  val activeTabIndex: StateFlow<Int> = _activeTabIndex.asStateFlow()
+
+  private val _recentlyClosedTabs = MutableStateFlow<List<EditorTab>>(emptyList())
+  val recentlyClosedTabs: StateFlow<List<EditorTab>> = _recentlyClosedTabs.asStateFlow()
+  val hasClosedTabs: StateFlow<Boolean> = _recentlyClosedTabs.map { it.isNotEmpty() }
+    .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+  private val _editorSettings = MutableStateFlow(EditorSettings())
+  val editorSettings: StateFlow<EditorSettings> = _editorSettings.asStateFlow()
 
   val isAgentWorking: StateFlow<Boolean> = repository.isAgentWorking
   val agentStatusText: StateFlow<String> = repository.agentStatusText
@@ -169,6 +187,41 @@ class WorkspaceViewModel(
           lastProjectPath = project.path
           if (!isAgentWorking.value) {
             _activeSessionId.value = chatStore.latestSession(project.path)?.id
+          }
+        }
+      }
+    }
+    // Synchronize open tabs with active file
+    viewModelScope.launch {
+      activeFile.collect { file ->
+        if (file.path.isNotBlank()) {
+          val current = _openTabs.value
+          val existingIdx = current.indexOfFirst { it.file.path == file.path }
+          if (existingIdx >= 0) {
+            _activeTabIndex.value = existingIdx
+          } else {
+            val newTab = EditorTab(
+              id = file.path,
+              file = file,
+              content = file.content,
+              savedContent = file.content
+            )
+            _openTabs.value = current + newTab
+            _activeTabIndex.value = _openTabs.value.lastIndex
+          }
+        }
+      }
+    }
+    viewModelScope.launch {
+      editorContent.collect { content ->
+        val current = _openTabs.value
+        val idx = _activeTabIndex.value
+        if (idx in current.indices) {
+          val tab = current[idx]
+          if (tab.content != content) {
+            val updated = current.toMutableList()
+            updated[idx] = tab.copy(content = content)
+            _openTabs.value = updated
           }
         }
       }
@@ -589,6 +642,147 @@ class WorkspaceViewModel(
 
   fun openFile(file: ProjectFile) {
     repository.openFile(file)
+  }
+
+  fun openTab(tab: EditorTab) {
+    val current = _openTabs.value
+    val existingIdx = current.indexOfFirst { it.file.path == tab.file.path }
+    if (existingIdx >= 0) {
+      _activeTabIndex.value = existingIdx
+    } else {
+      _openTabs.value = current + tab
+      _activeTabIndex.value = _openTabs.value.lastIndex
+    }
+    repository.openFile(tab.file)
+    repository.updateEditorContent(tab.content)
+  }
+
+  fun selectTab(index: Int) {
+    val tabs = _openTabs.value
+    if (index in tabs.indices) {
+      _activeTabIndex.value = index
+      val tab = tabs[index]
+      repository.openFile(tab.file)
+      repository.updateEditorContent(tab.content)
+    }
+  }
+
+  fun closeTab(index: Int) {
+    val tabs = _openTabs.value.toMutableList()
+    if (index in tabs.indices) {
+      val removed = tabs.removeAt(index)
+      _recentlyClosedTabs.update { (listOf(removed) + it).take(10) }
+      _openTabs.value = tabs
+      if (tabs.isNotEmpty()) {
+        val newIndex = index.coerceAtMost(tabs.lastIndex)
+        _activeTabIndex.value = newIndex
+        val active = tabs[newIndex]
+        repository.openFile(active.file)
+        repository.updateEditorContent(active.content)
+      } else {
+        _activeTabIndex.value = 0
+      }
+    }
+  }
+
+  fun closeOtherTabs(keepIndex: Int) {
+    val tabs = _openTabs.value
+    if (keepIndex in tabs.indices) {
+      val kept = tabs[keepIndex]
+      val closed = tabs.filterIndexed { i, _ -> i != keepIndex }
+      _recentlyClosedTabs.update { (closed + it).take(10) }
+      _openTabs.value = listOf(kept)
+      _activeTabIndex.value = 0
+    }
+  }
+
+  fun closeAllTabs() {
+    val tabs = _openTabs.value
+    if (tabs.isNotEmpty()) {
+      _recentlyClosedTabs.update { (tabs + it).take(10) }
+      _openTabs.value = emptyList()
+      _activeTabIndex.value = 0
+    }
+  }
+
+  fun reopenLastClosedTab() {
+    val closed = _recentlyClosedTabs.value
+    if (closed.isNotEmpty()) {
+      val tabToReopen = closed.first()
+      _recentlyClosedTabs.value = closed.drop(1)
+      val tabs = _openTabs.value
+      val existingIdx = tabs.indexOfFirst { it.file.path == tabToReopen.file.path }
+      if (existingIdx >= 0) {
+        _activeTabIndex.value = existingIdx
+      } else {
+        _openTabs.value = tabs + tabToReopen
+        _activeTabIndex.value = _openTabs.value.lastIndex
+        repository.openFile(tabToReopen.file)
+        repository.updateEditorContent(tabToReopen.content)
+      }
+    }
+  }
+
+  fun updateTabContent(index: Int, newContent: String) {
+    val tabs = _openTabs.value.toMutableList()
+    if (index in tabs.indices) {
+      tabs[index] = tabs[index].withContent(newContent)
+      _openTabs.value = tabs
+      if (index == _activeTabIndex.value) {
+        repository.updateEditorContent(newContent)
+      }
+    }
+  }
+
+  fun undoTab(index: Int = _activeTabIndex.value): String? {
+    val tabs = _openTabs.value.toMutableList()
+    if (index in tabs.indices) {
+      val undoneTab = tabs[index].undo() ?: return null
+      tabs[index] = undoneTab
+      _openTabs.value = tabs
+      if (index == _activeTabIndex.value) {
+        repository.updateEditorContent(undoneTab.content)
+      }
+      return undoneTab.content
+    }
+    return null
+  }
+
+  fun redoTab(index: Int = _activeTabIndex.value): String? {
+    val tabs = _openTabs.value.toMutableList()
+    if (index in tabs.indices) {
+      val redoneTab = tabs[index].redo() ?: return null
+      tabs[index] = redoneTab
+      _openTabs.value = tabs
+      if (index == _activeTabIndex.value) {
+        repository.updateEditorContent(redoneTab.content)
+      }
+      return redoneTab.content
+    }
+    return null
+  }
+
+  fun setTab(index: Int, tab: EditorTab) {
+    val tabs = _openTabs.value.toMutableList()
+    if (index in tabs.indices) {
+      tabs[index] = tab
+      _openTabs.value = tabs
+      if (index == _activeTabIndex.value) {
+        repository.updateEditorContent(tab.content)
+      }
+    }
+  }
+
+  fun setTabManualLanguage(index: Int, language: Language) {
+    val tabs = _openTabs.value.toMutableList()
+    if (index in tabs.indices) {
+      tabs[index] = tabs[index].copy(manualLanguage = language)
+      _openTabs.value = tabs
+    }
+  }
+
+  fun updateEditorSettings(settings: EditorSettings) {
+    _editorSettings.value = settings
   }
 
   fun updateEditorContent(content: String) {

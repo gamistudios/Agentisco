@@ -87,12 +87,15 @@ fun DevKeyboardBar(
               onClick = { ctrlArmed = !ctrlArmed },
               testTag = "key_ctrl"
             )
+
             val symbols = listOf(
-              "Tab", "{ }", "( )", "[ ]", "=>", ";", "/", "|", "<", ">", "_", "\"", "'", ":", "=", "+", "!", "?", "&", "$", "`", "#", "@"
+              "Tab", "{ }", "( )", "[ ]", "=>", ";", "/", "|", "<", ">", "_", "\"", "'", ":", "=", "+", "!", "?", "&", "$", "`", "#", "@",
+              "Z", "Y", "S", "F", "A", "C", "V", "X", "D"
             )
+
             for (sym in symbols) {
               DevKeyButton(
-                text = sym,
+                text = if (ctrlArmed && sym in listOf("Z", "Y", "S", "F", "A", "C", "V", "X", "D")) "$sym" else sym,
                 onClick = {
                   val insert = when (sym) {
                     "Tab" -> "  "
@@ -114,7 +117,7 @@ fun DevKeyboardBar(
           }
           DevKeyMode.ACTIONS -> {
             val actions = listOf(
-              "// Comment", "Indent", "Outdent", "Format", "Duplicate", "Delete Line", "Undo", "Redo"
+              "// Comment", "Indent", "Outdent", "Format", "Duplicate", "Delete Line", "Undo", "Redo", "Save", "Find", "Select All"
             )
             for (act in actions) {
               DevKeyButton(
@@ -130,11 +133,28 @@ fun DevKeyboardBar(
               "◀", "▶", "▲", "▼", "Home", "End", "PageUp", "PageDn", "Ctrl", "Alt", "Shift", "Esc"
             )
             for (k in navKeys) {
-              DevKeyButton(
-                text = k,
-                onClick = { onAction(k) },
-                testTag = "key_$k"
-              )
+              if (k == "Ctrl") {
+                DevKeyButton(
+                  text = if (ctrlArmed) "Ctrl ●" else "Ctrl",
+                  isModifier = true,
+                  isArmed = ctrlArmed,
+                  onClick = { ctrlArmed = !ctrlArmed },
+                  testTag = "key_Ctrl"
+                )
+              } else {
+                DevKeyButton(
+                  text = k,
+                  onClick = {
+                    if (ctrlArmed) {
+                      ctrlArmed = false
+                      onAction("Ctrl+$k")
+                    } else {
+                      onAction(k)
+                    }
+                  },
+                  testTag = "key_$k"
+                )
+              }
             }
           }
         }
