@@ -18,10 +18,12 @@ import com.agentisco.workspace.terminal.TerminalProcessManager
 import com.termux.terminal.TerminalSessionClient
 import com.agentisco.workspace.git.GitRepositoryManager
 import com.agentisco.workspace.filesystem.ProjectFileSystem
+import com.agentisco.workspace.filesystem.ProjectMetadataScanner
 import android.content.Context
 import com.agentisco.data.model.*
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -202,6 +204,9 @@ class WorkspaceRepository(
   private val _activeProject = MutableStateFlow<Project>(placeholderProject)
   val activeProject: StateFlow<Project> = _activeProject.asStateFlow()
 
+  /** In-flight background measurement pass (cancelled/restarted per refresh). */
+  private var metadataJob: Job? = null
+
   /** Rebuilds the project list from the registry, re-validating root folders. */
   private fun refreshProjectList() {
     // The workspace's own .agentisco.json is the authoritative project config;
@@ -242,17 +247,71 @@ class WorkspaceRepository(
     }
     _projects.value = projectRegistry.all().map { entry ->
       val cfg = configFor(entry)
-      Project(
-        id = entry.id, name = entry.name, branch = "main",
-        lastActivity = relativeActivity(entry.lastOpenedAt),
-        description = entry.description, path = entry.rootPath,
-        isMissing = !File(entry.rootPath).isDirectory,
-        isImported = entry.imported,
-        sourcePath = cfg?.sourcePath ?: entry.sourcePath,
-        autoSyncToSource = cfg?.autoSync ?: entry.autoSync
+      withCachedMetadata(
+        Project(
+          id = entry.id, name = entry.name, branch = "main",
+          lastActivity = relativeActivity(entry.lastOpenedAt),
+          description = entry.description, path = entry.rootPath,
+          isMissing = !File(entry.rootPath).isDirectory,
+          isImported = entry.imported,
+          sourcePath = cfg?.sourcePath ?: entry.sourcePath,
+          autoSyncToSource = cfg?.autoSync ?: entry.autoSync
+        )
       )
     }
+    enrichProjectMetadataAsync()
   }
+
+  /**
+   * Overlays the metadata measured for [project.path] on a previous refresh.
+   * Reads only the in-memory cache, so it is safe on the main thread; unknown
+   * values keep their "not measured yet" defaults.
+   */
+  private fun withCachedMetadata(project: Project): Project {
+    val meta = ProjectMetadataScanner.cached(project.path) ?: return project
+    return project.copy(
+      sizeBytes = meta.sizeBytes,
+      lastModified = meta.lastModified,
+      iconPath = meta.iconPath,
+      kind = meta.kind
+    )
+  }
+
+  /**
+   * Measures every project folder (recursive size, newest modification time,
+   * icon file, project type) on IO and republishes the list once done. Results
+   * are cached by [ProjectMetadataScanner], so a refresh that finds the folders
+   * unchanged never re-walks them.
+   */
+  private fun enrichProjectMetadataAsync() {
+    val targets = _projects.value.filter { it.path.isNotBlank() }
+    if (targets.isEmpty()) return
+    metadataJob?.cancel()
+    metadataJob = repositoryScope.launch {
+      val measured = withContext(Dispatchers.IO) {
+        ProjectMetadataScanner.evictStale()
+        targets.mapNotNull { project ->
+          ProjectMetadataScanner.scan(project)?.let { project.id to it }
+        }
+      }
+      if (measured.isEmpty()) return@launch
+      val byId = measured.toMap()
+      _projects.update { list ->
+        list.map { project -> byId[project.id]?.let { project.withMetadata(it) } ?: project }
+      }
+      // The open project feeds the header (branch/size) — keep it in step.
+      val active = _activeProject.value
+      _projects.value.firstOrNull { it.id == active.id }?.let { _activeProject.value = it }
+    }
+  }
+
+  private fun Project.withMetadata(meta: com.agentisco.workspace.filesystem.ProjectMetadata): Project =
+    copy(
+      sizeBytes = meta.sizeBytes,
+      lastModified = meta.lastModified,
+      iconPath = meta.iconPath,
+      kind = meta.kind
+    )
 
   private fun relativeActivity(timestamp: Long): String {
     if (timestamp <= 0) return "Active"

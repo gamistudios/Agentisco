@@ -1,7 +1,5 @@
 package com.agentisco.ui.components
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -18,7 +16,6 @@ import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -32,6 +29,12 @@ import androidx.compose.ui.unit.sp
 import com.agentisco.core.model.AppDestination
 import com.agentisco.ui.theme.*
 
+/**
+ * The IDE's three primary surfaces. Projects and Terminal are workspaces with
+ * their own chrome; Agent is the hero surface and keeps an accented outline of
+ * its own (plus a live pulse while it is working). Only the open surface is ever
+ * filled, so the bar never shows two equally active items.
+ */
 @Composable
 fun AgentIDEBottomBar(
   currentDestination: AppDestination,
@@ -49,9 +52,9 @@ fun AgentIDEBottomBar(
       modifier = Modifier
         .fillMaxWidth()
         .navigationBarsPadding()
-        .defaultMinSize(minHeight = 64.dp)
-        .padding(horizontal = 16.dp, vertical = 6.dp),
-      horizontalArrangement = Arrangement.SpaceAround,
+        .defaultMinSize(minHeight = 62.dp)
+        .padding(horizontal = 10.dp, vertical = 5.dp),
+      horizontalArrangement = Arrangement.SpaceEvenly,
       verticalAlignment = Alignment.CenterVertically
     ) {
       BottomNavItem(
@@ -99,16 +102,33 @@ private fun BottomNavItem(
 ) {
   val interactionSource = remember { MutableInteractionSource() }
 
+  // Exactly one item is ever "active": only the selected surface gets a filled
+  // highlight. The hero (Agent) keeps its standing by wearing an accent *outline*
+  // when it is not selected — important, but visibly not the open screen.
+  val container = when {
+    selected -> ElectricBlue.copy(alpha = 0.20f)
+    else -> Color.Transparent
+  }
+  val borderColor = when {
+    selected -> ElectricBlue.copy(alpha = 0.55f)
+    isHero -> ElectricBlue.copy(alpha = 0.22f)
+    else -> Color.Transparent
+  }
+  val contentColor = when {
+    selected -> ElectricBlueGlow
+    isHero -> ElectricBlueGlow.copy(alpha = 0.62f)
+    else -> TextMuted
+  }
+
   Box(
     modifier = Modifier
-      .defaultMinSize(minWidth = 72.dp, minHeight = 52.dp)
-      .clip(RoundedCornerShape(16.dp))
+      .defaultMinSize(minWidth = 84.dp, minHeight = 50.dp)
+      .clip(RoundedCornerShape(14.dp))
       .clickable(
         interactionSource = interactionSource,
         indication = ripple(color = ElectricBlue),
         onClick = onClick
       )
-      .padding(horizontal = 12.dp, vertical = 4.dp)
       .testTag(testTag),
     contentAlignment = Alignment.Center
   ) {
@@ -118,24 +138,17 @@ private fun BottomNavItem(
     ) {
       Box(
         contentAlignment = Alignment.Center,
-        modifier = if (selected) {
-          Modifier
-            .clip(RoundedCornerShape(12.dp))
-            .background(if (isHero) ElectricBlue.copy(alpha = 0.22f) else DarkSurfaceElevated)
-            .padding(horizontal = 14.dp, vertical = 4.dp)
-        } else {
-          Modifier.padding(horizontal = 14.dp, vertical = 4.dp)
-        }
+        modifier = Modifier
+          .clip(RoundedCornerShape(11.dp))
+          .background(container)
+          .border(1.dp, borderColor, RoundedCornerShape(11.dp))
+          .padding(horizontal = 18.dp, vertical = 5.dp)
       ) {
         Icon(
           imageVector = if (selected) selectedIcon else unselectedIcon,
           contentDescription = label,
-          tint = when {
-            selected && isHero -> ElectricBlueGlow
-            selected -> TextPrimary
-            else -> TextMuted
-          },
-          modifier = Modifier.size(24.dp)
+          tint = contentColor,
+          modifier = Modifier.size(22.dp)
         )
 
         // Working pulse badge
@@ -144,6 +157,7 @@ private fun BottomNavItem(
             modifier = Modifier
               .size(8.dp)
               .align(Alignment.TopEnd)
+              .offset(x = 2.dp, y = (-2).dp)
               .clip(CircleShape)
               .background(TerminalGreen)
               .border(1.dp, DarkSurface, CircleShape)
@@ -155,9 +169,9 @@ private fun BottomNavItem(
 
       Text(
         text = label,
-        fontSize = 11.sp,
-        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-        color = if (selected) TextPrimary else TextSecondary,
+        fontSize = 10.5.sp,
+        fontWeight = if (selected || isHero) FontWeight.SemiBold else FontWeight.Medium,
+        color = contentColor,
         maxLines = 1
       )
     }

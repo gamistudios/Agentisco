@@ -19,8 +19,60 @@ data class Project(
   /** The original folder this project was imported from ("" = none). */
   val sourcePath: String = "",
   /** Mirror changes back to [sourcePath] automatically. */
-  val autoSyncToSource: Boolean = true
+  val autoSyncToSource: Boolean = true,
+  /**
+   * Real on-disk size of the project folder in bytes, measured by
+   * [com.agentisco.workspace.filesystem.ProjectMetadataScanner] off the main
+   * thread. -1 means "not measured yet" — the UI shows a placeholder.
+   */
+  val sizeBytes: Long = -1L,
+  /**
+   * Newest modification time found inside the project (epoch millis, 0 when
+   * unknown). Measured by the same walk that computes [sizeBytes].
+   */
+  val lastModified: Long = 0L,
+  /**
+   * Absolute path of a real logo/favicon/launcher icon found inside the
+   * project (see [com.agentisco.workspace.filesystem.ProjectMetadataScanner]).
+   * null when the project ships no decodable icon — the UI falls back to a
+   * type icon or a name-derived initial.
+   */
+  val iconPath: String? = null,
+  /** Project type inferred from real marker files in the project root. */
+  val kind: ProjectKind = ProjectKind.UNKNOWN
 )
+
+/**
+ * Project type inferred from files that actually exist in the project root —
+ * never guessed from the project's name. [label] is what the UI shows.
+ */
+enum class ProjectKind(val label: String) {
+  ANDROID("Android"),
+  GRADLE("Gradle"),
+  NODE("Node"),
+  FLUTTER("Flutter"),
+  RUST("Rust"),
+  GO("Go"),
+  PYTHON("Python"),
+  MAVEN("Maven"),
+  DOTNET(".NET"),
+  RUBY("Ruby"),
+  PHP("PHP"),
+  CPP("C/C++"),
+  GIT_REPO("Git repo"),
+  UNKNOWN("")
+}
+
+/** Free/total space of the filesystem the workspace lives on. */
+data class WorkspaceStorageInfo(
+  val freeBytes: Long,
+  val totalBytes: Long
+) {
+  val usedBytes: Long get() = (totalBytes - freeBytes).coerceAtLeast(0L)
+  /** 0f..1f — how full the volume is. */
+  val usedFraction: Float
+    get() = if (totalBytes <= 0L) 0f else (usedBytes.toFloat() / totalBytes.toFloat()).coerceIn(0f, 1f)
+}
 
 data class ProjectFile(
   val path: String,
