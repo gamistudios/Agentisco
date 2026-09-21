@@ -19,6 +19,7 @@ import com.agentisco.data.repository.WorkspaceRepository
 import com.agentisco.editor.model.EditorSettings
 import com.agentisco.editor.model.EditorTab
 import com.agentisco.editor.syntax.Language
+import com.agentisco.workspace.git.*
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -75,6 +76,15 @@ class WorkspaceViewModel(
   val stagedFiles: StateFlow<Set<String>> = repository.stagedFiles
   val commitMessage: StateFlow<String> = repository.commitMessage
   val commitHistory: StateFlow<List<GitCommit>> = repository.commitHistory
+  val repoStatus: StateFlow<GitRepoStatus> = repository.repoStatus
+  val branches: StateFlow<List<GitBranch>> = repository.branches
+  val stashes: StateFlow<List<GitStash>> = repository.stashes
+  val remotes: StateFlow<List<GitRemote>> = repository.remotes
+  val tags: StateFlow<List<String>> = repository.tags
+  val activeGitOperationText: StateFlow<String?> = repository.activeGitOperationText
+  val gitOperationFeedback: StateFlow<String?> = repository.gitOperationFeedback
+  val gitError: StateFlow<String?> = repository.gitError
+  val commitGenState: StateFlow<WorkspaceRepository.CommitGenState> = repository.commitGenState
 
   val terminalSessions: StateFlow<List<TerminalSession>> = repository.terminalSessions
   val activeTerminalSessionId: StateFlow<String> = repository.activeTerminalSessionId
@@ -681,6 +691,7 @@ class WorkspaceViewModel(
         repository.updateEditorContent(active.content)
       } else {
         _activeTabIndex.value = 0
+        repository.openFile(com.agentisco.data.model.ProjectFile("", "", false))
       }
     }
   }
@@ -702,6 +713,7 @@ class WorkspaceViewModel(
       _recentlyClosedTabs.update { (tabs + it).take(10) }
       _openTabs.value = emptyList()
       _activeTabIndex.value = 0
+      repository.openFile(com.agentisco.data.model.ProjectFile("", "", false))
     }
   }
 
@@ -861,6 +873,10 @@ class WorkspaceViewModel(
     repository.updateSearchQuery(query)
   }
 
+  fun refreshDiffsAndGit() {
+    repository.refreshDiffsAndGit()
+  }
+
   fun toggleFileStaged(filePath: String) {
     repository.toggleFileStaged(filePath)
   }
@@ -868,6 +884,14 @@ class WorkspaceViewModel(
   /** Explicit staging intent from the Git tab (VS Code-style +/− rows). */
   fun setFileStaged(filePath: String, stage: Boolean) {
     repository.setFileStaged(filePath, stage)
+  }
+
+  fun stageFile(filePath: String) {
+    repository.setFileStaged(filePath, true)
+  }
+
+  fun unstageFile(filePath: String) {
+    repository.setFileStaged(filePath, false)
   }
 
   fun stageAll() {
@@ -886,8 +910,176 @@ class WorkspaceViewModel(
     repository.generateCommitMessageWithAgent()
   }
 
-  fun commitStagedChanges() {
-    repository.commitStagedChanges()
+  fun dismissCommitGenState() {
+    repository.dismissCommitGenState()
+  }
+
+  fun commitStagedChanges(customMessage: String? = null, amend: Boolean = false) {
+    repository.commitStagedChanges(customMessage, amend)
+  }
+
+  fun commitAndPush(customMessage: String? = null) {
+    repository.commitAndPush(customMessage)
+  }
+
+  fun undoLastCommit(mode: UndoCommitMode = UndoCommitMode.KEEP_STAGED) {
+    repository.undoLastCommit(mode)
+  }
+
+  fun loadMoreCommitHistory() {
+    repository.loadMoreCommitHistory()
+  }
+
+  suspend fun getCommitDetail(hash: String): GitCommitDetail? {
+    return repository.getCommitDetail(hash)
+  }
+
+  suspend fun getCommitDiff(hash: String): String {
+    return repository.getCommitDiff(hash)
+  }
+
+  fun revertCommit(hash: String) {
+    repository.revertCommit(hash)
+  }
+
+  fun cherryPickCommit(hash: String) {
+    repository.cherryPickCommit(hash)
+  }
+
+  fun resetToCommit(hash: String, mode: ResetMode) {
+    repository.resetToCommit(hash, mode)
+  }
+
+  fun checkoutBranch(name: String) {
+    repository.checkoutBranch(name)
+  }
+
+  fun createBranch(name: String, checkout: Boolean = true) {
+    repository.createBranch(name, checkout)
+  }
+
+  fun deleteBranch(name: String, force: Boolean = false) {
+    repository.deleteBranch(name, force)
+  }
+
+  fun renameBranch(oldName: String, newName: String) {
+    repository.renameBranch(oldName, newName)
+  }
+
+  fun mergeBranch(name: String) {
+    repository.mergeBranch(name)
+  }
+
+  fun abortMerge() {
+    repository.abortMerge()
+  }
+
+  fun continueMerge() {
+    repository.continueMerge()
+  }
+
+  fun rebaseBranch(name: String) {
+    repository.rebaseBranch(name)
+  }
+
+  fun abortRebase() {
+    repository.abortRebase()
+  }
+
+  fun continueRebase() {
+    repository.continueRebase()
+  }
+
+  fun abortCherryPick() {
+    repository.abortCherryPick()
+  }
+
+  fun continueCherryPick() {
+    repository.continueCherryPick()
+  }
+
+  fun fetch(remote: String = "origin", prune: Boolean = false) {
+    repository.fetch(remote, prune)
+  }
+
+  fun pull(remote: String = "origin", branch: String? = null, rebase: Boolean = false) {
+    repository.pull(remote, branch, rebase)
+  }
+
+  fun push(remote: String = "origin", branch: String? = null, setUpstream: Boolean = false, force: Boolean = false) {
+    repository.push(remote, branch, setUpstream, force)
+  }
+
+  fun sync() {
+    repository.sync()
+  }
+
+  fun addRemote(name: String, url: String) {
+    repository.addRemote(name, url)
+  }
+
+  fun removeRemote(name: String) {
+    repository.removeRemote(name)
+  }
+
+  fun setRemoteUrl(name: String, url: String) {
+    repository.setRemoteUrl(name, url)
+  }
+
+  fun createTag(name: String, message: String = "", commitHash: String? = null) {
+    repository.createTag(name, message, commitHash)
+  }
+
+  fun deleteTag(name: String) {
+    repository.deleteTag(name)
+  }
+
+  fun saveStash(message: String = "", includeUntracked: Boolean = false) {
+    repository.saveStash(message, includeUntracked)
+  }
+
+  fun applyStash(index: Int) {
+    repository.applyStash(index)
+  }
+
+  fun popStash(index: Int) {
+    repository.popStash(index)
+  }
+
+  fun dropStash(index: Int) {
+    repository.dropStash(index)
+  }
+
+  fun deleteUntrackedFile(filePath: String) {
+    repository.deleteUntrackedFile(filePath)
+  }
+
+  fun clearGitError() {
+    repository.clearGitError()
+  }
+
+  fun dismissGitError() {
+    repository.dismissGitError()
+  }
+
+  fun clearGitOperationFeedback() {
+    repository.clearGitOperationFeedback()
+  }
+
+  suspend fun getFullDiffText(type: DiffCopyType, filePath: String? = null): String {
+    return repository.getFullDiffText(type, filePath)
+  }
+
+  suspend fun explainChangesWithAgent(diffText: String): String? {
+    return repository.explainChangesWithAgent(diffText)
+  }
+
+  suspend fun reviewChangesWithAgent(diffText: String): String? {
+    return repository.reviewChangesWithAgent(diffText)
+  }
+
+  suspend fun explainCommitWithAgent(commit: GitCommit): String? {
+    return repository.explainCommitWithAgent(commit)
   }
 
   fun acceptAllDiffs() {
@@ -945,8 +1137,6 @@ class WorkspaceViewModel(
     repository.resolveToolCancellation(callId, retry)
   }
 
-  val gitError: StateFlow<String?> = repository.gitError
-  val commitGenState: StateFlow<WorkspaceRepository.CommitGenState> = repository.commitGenState
   val defaultTaskModelId: StateFlow<String?> = repository.defaultTaskModelId
 
   /** Marks a model as the default for background tasks (commit msgs, titles, ...). */
@@ -954,19 +1144,11 @@ class WorkspaceViewModel(
     repository.setDefaultTaskModel(modelId)
   }
 
-  fun dismissCommitGenState() {
-    repository.dismissCommitGenState()
-  }
-
   /** Imports a .zip archive (SAF uri) as a project in the app workspace. */
   fun importZipProject(uri: android.net.Uri, displayName: String?, onResult: (Project?) -> Unit) {
     viewModelScope.launch {
       onResult(repository.importZipProject(uri, displayName))
     }
-  }
-
-  fun dismissGitError() {
-    repository.clearGitError()
   }
 
   fun updatePermissions(transform: (AgentPermissions) -> AgentPermissions) {

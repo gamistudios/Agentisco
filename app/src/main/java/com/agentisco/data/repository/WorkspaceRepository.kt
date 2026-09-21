@@ -19,6 +19,8 @@ import com.termux.terminal.TerminalSessionClient
 import com.agentisco.workspace.git.GitRepositoryManager
 import com.agentisco.workspace.filesystem.ProjectFileSystem
 import com.agentisco.workspace.filesystem.ProjectMetadataScanner
+import com.agentisco.workspace.filesystem.WorkspaceFileWatcher
+import com.agentisco.workspace.git.*
 import android.content.Context
 import com.agentisco.data.model.*
 import kotlinx.coroutines.CoroutineScope
@@ -156,8 +158,36 @@ class WorkspaceRepository(
       { line -> out.appendLine(line.text) },
       projectDir = File(projectPath).takeIf { it.isDirectory }
     )
-    return com.agentisco.workspace.git.GitRunResult(code, out.toString())
+    val outputStr = out.toString()
+    if (code != 0 && (outputStr.contains("Linux environment is not ready yet") || outputStr.contains("Failed to run command in Linux environment"))) {
+      val hostRes = runHostGit(projectPath, args)
+      if (hostRes != null) return hostRes
+    }
+    return com.agentisco.workspace.git.GitRunResult(code, outputStr)
   }
+
+  private suspend fun runHostGit(projectPath: String, args: String): com.agentisco.workspace.git.GitRunResult? =
+    withContext(Dispatchers.IO) {
+      try {
+        val dir = File(projectPath).takeIf { it.isDirectory } ?: return@withContext null
+        val pb = ProcessBuilder("sh", "-c", "cd \"${dir.absolutePath}\" && $args")
+        pb.redirectErrorStream(false)
+        val env = pb.environment()
+        env["GIT_TERMINAL_PROMPT"] = "0"
+        val process = pb.start()
+        val stdout = process.inputStream.bufferedReader().readText()
+        val stderr = process.errorStream.bufferedReader().readText()
+        val code = process.waitFor()
+        val combined = when {
+          stderr.isBlank() -> stdout
+          stdout.isBlank() -> stderr
+          else -> "$stdout\n$stderr"
+        }
+        com.agentisco.workspace.git.GitRunResult(code, combined)
+      } catch (e: Exception) {
+        null
+      }
+    }
 
   // (Terminal stack initialized above — the projects root depends on it.)
   private val prootSessionManager: ProotSessionManager? = context?.let { ctx ->
@@ -386,7 +416,7 @@ class WorkspaceRepository(
 
   // Currently Active File in Editor
   private val _activeFile = MutableStateFlow<ProjectFile>(
-    ProjectFile("src/components/Chat.tsx", "Chat.tsx", false)
+    ProjectFile("", "", false)
   )
   val activeFile: StateFlow<ProjectFile> = _activeFile.asStateFlow()
 
@@ -443,11 +473,47 @@ class WorkspaceRepository(
   private val _isGitRepository = MutableStateFlow<Boolean?>(null)
   val isGitRepository: StateFlow<Boolean?> = _isGitRepository.asStateFlow()
 
+  /** Rich repository status (branch, upstream, ahead/behind, operations, conflicts). */
+  private val _repoStatus = MutableStateFlow(GitRepoStatus(isRepo = false))
+  val repoStatus: StateFlow<GitRepoStatus> = _repoStatus.asStateFlow()
+
+  private val _branches = MutableStateFlow<List<GitBranch>>(emptyList())
+  val branches: StateFlow<List<GitBranch>> = _branches.asStateFlow()
+
+  private val _stashes = MutableStateFlow<List<GitStash>>(emptyList())
+  val stashes: StateFlow<List<GitStash>> = _stashes.asStateFlow()
+
+  private val _remotes = MutableStateFlow<List<GitRemote>>(emptyList())
+  val remotes: StateFlow<List<GitRemote>> = _remotes.asStateFlow()
+
+  private val _tags = MutableStateFlow<List<String>>(emptyList())
+  val tags: StateFlow<List<String>> = _tags.asStateFlow()
+
+  private val _activeGitOperationText = MutableStateFlow<String?>(null)
+  val activeGitOperationText: StateFlow<String?> = _activeGitOperationText.asStateFlow()
+
+  private val _gitOperationFeedback = MutableStateFlow<String?>(null)
+  val gitOperationFeedback: StateFlow<String?> = _gitOperationFeedback.asStateFlow()
+
+  fun clearGitOperationFeedback() {
+    _gitOperationFeedback.value = null
+  }
+
+  /** Real-time filesystem observer that watches project directory for changes. */
+  private val fileWatcher = WorkspaceFileWatcher(repositoryScope) {
+    refreshDiffsAndGit()
+    refreshFiles()
+  }
+
   /** Last git operation failure, surfaced in the Git tab for debugging. */
   private val _gitError = MutableStateFlow<String?>(null)
   val gitError: StateFlow<String?> = _gitError.asStateFlow()
 
   fun clearGitError() {
+    _gitError.value = null
+  }
+
+  fun dismissGitError() {
     _gitError.value = null
   }
 
@@ -710,6 +776,7 @@ class WorkspaceRepository(
     if (project.path.isBlank()) {
       _projectFiles.value = emptyList()
       _dirChildren.value = emptyMap()
+      _activeFile.value = ProjectFile("", "", false)
       _editorContent.value = ""
       _isEditorDirty.value = false
       _fileDiffs.value = emptyList()
@@ -764,6 +831,7 @@ class WorkspaceRepository(
       _activeTerminalSessionId.value = tabs.first().id
     }
 
+    fileWatcher.setRoot(File(project.path).takeIf { it.isDirectory })
     refreshDiffsAndGit()
   }
 
@@ -794,14 +862,19 @@ class WorkspaceRepository(
     refreshDiffsAndGit()
   }
 
-  /** Refreshes diffs/staging/history from real git, asynchronously. */
-  private fun refreshDiffsAndGit() {
+  /** Refreshes diffs/staging/history/status from real git, asynchronously. */
+  fun refreshDiffsAndGit() {
     val project = _activeProject.value
     if (project.path.isBlank()) {
       _fileDiffs.value = emptyList()
       _commitHistory.value = emptyList()
       _stagedFiles.value = emptySet()
       _isGitRepository.value = null
+      _repoStatus.value = GitRepoStatus(isRepo = false)
+      _branches.value = emptyList()
+      _stashes.value = emptyList()
+      _remotes.value = emptyList()
+      _tags.value = emptyList()
       return
     }
     repositoryScope.launch {
@@ -812,16 +885,30 @@ class WorkspaceRepository(
           _fileDiffs.value = emptyList()
           _commitHistory.value = emptyList()
           _stagedFiles.value = emptySet()
+          _repoStatus.value = GitRepoStatus(isRepo = false)
+          _branches.value = emptyList()
+          _stashes.value = emptyList()
+          _remotes.value = emptyList()
+          _tags.value = emptyList()
           _activeProject.update { it.copy(changedFilesCount = 0, isDirty = false) }
           return@launch
         }
+        val status = gitManager.getRepoStatus(project)
+        _repoStatus.value = status
+        _branches.value = gitManager.getBranches(project)
+        _stashes.value = gitManager.getStashes(project)
+        _remotes.value = status.remotes
+        _tags.value = status.tags
         _fileDiffs.value = gitManager.computeAllDiffs(project)
-        _stagedFiles.value = gitManager.getStagedFiles(project).toSet()
-        val changedFiles = gitManager.getChangedFiles(project)
+        _stagedFiles.value = status.stagedFiles.map { it.path }.toSet()
         _activeProject.update {
-          it.copy(changedFilesCount = changedFiles.size, isDirty = changedFiles.isNotEmpty())
+          it.copy(
+            branch = status.currentBranch,
+            changedFilesCount = status.totalChangedFiles,
+            isDirty = !status.isClean
+          )
         }
-        _commitHistory.value = gitManager.getCommitHistory(project)
+        _commitHistory.value = gitManager.getCommitHistory(project, limit = 30)
       } catch (e: Exception) {
         android.util.Log.e("ScoOS-Git", "git refresh failed", e)
       }
@@ -831,6 +918,9 @@ class WorkspaceRepository(
   // Navigation
   fun navigateTo(destination: AppDestination) {
     _currentDestination.value = destination
+    if (destination == AppDestination.DIFF || destination == AppDestination.GIT) {
+      refreshDiffsAndGit()
+    }
   }
 
   fun selectProject(project: Project) {
@@ -839,6 +929,10 @@ class WorkspaceRepository(
     // Persist the last opened project
     _rememberedLastProjectId.value = project.id
     saveRememberedLastProjectId(project.id)
+    fileWatcher.setRoot(File(project.path).takeIf { it.isDirectory })
+    if (File(project.path, "README.md").exists()) {
+      _activeFile.value = ProjectFile("README.md", "README.md", false)
+    }
     loadActiveProjectState(project)
   }
 
@@ -1436,24 +1530,545 @@ class WorkspaceRepository(
     }
   }
 
-  fun commitStagedChanges() {
-    val staged = _stagedFiles.value
-    val message = _commitMessage.value
+  fun commitStagedChanges(customMessage: String? = null, amend: Boolean = false) {
+    val message = customMessage ?: _commitMessage.value
+    if (message.isBlank() && !amend) {
+      _gitError.value = "Commit message cannot be empty."
+      return
+    }
     repositoryScope.launch {
+      _activeGitOperationText.value = if (amend) "Amending commit..." else "Committing..."
       try {
-        val commit = gitManager.commit(_activeProject.value, staged, message)
+        val commit = gitManager.commit(_activeProject.value, _stagedFiles.value, message, amend = amend)
         if (commit != null) {
           _gitError.value = null
+          _gitOperationFeedback.value = if (amend) "Amended commit: ${commit.hash}" else "Committed: ${commit.hash}"
           _stagedFiles.value = emptySet()
+          _commitMessage.value = ""
           refreshDiffsAndGit()
           maybeAutoSync(_activeProject.value)
         } else {
-          _gitError.value = "Commit failed. Is the folder a git repository (initialize it above) and is the commit message non-empty?"
+          _gitError.value = "Commit failed. Is the folder a git repository and are changes staged?"
         }
       } catch (e: Exception) {
         android.util.Log.e("ScoOS-Git", "commit failed", e)
         _gitError.value = "Commit failed: " + (e.message ?: e.javaClass.simpleName)
+      } finally {
+        _activeGitOperationText.value = null
       }
+    }
+  }
+
+  fun commitAndPush(customMessage: String? = null) {
+    val message = customMessage ?: _commitMessage.value
+    if (message.isBlank()) {
+      _gitError.value = "Commit message cannot be empty."
+      return
+    }
+    repositoryScope.launch {
+      _activeGitOperationText.value = "Committing & Pushing..."
+      try {
+        val commit = gitManager.commit(_activeProject.value, _stagedFiles.value, message)
+        if (commit != null) {
+          _stagedFiles.value = emptySet()
+          _commitMessage.value = ""
+          _gitOperationFeedback.value = "Committed: ${commit.hash}. Pushing..."
+          val pushRes = gitManager.push(_activeProject.value)
+          if (pushRes.success) {
+            _gitError.value = null
+            _gitOperationFeedback.value = "Committed and pushed successfully!"
+          } else {
+            _gitError.value = "Committed, but push failed: ${pushRes.output.ifBlank { "Unknown error" }}"
+          }
+          refreshDiffsAndGit()
+          maybeAutoSync(_activeProject.value)
+        } else {
+          _gitError.value = "Commit failed. Check staged changes."
+        }
+      } catch (e: Exception) {
+        _gitError.value = "Commit and push failed: ${e.message}"
+      } finally {
+        _activeGitOperationText.value = null
+      }
+    }
+  }
+
+  fun undoLastCommit(mode: UndoCommitMode = UndoCommitMode.KEEP_STAGED) {
+    repositoryScope.launch {
+      _activeGitOperationText.value = "Undoing last commit..."
+      val res = gitManager.undoLastCommit(_activeProject.value, mode)
+      if (res.success) {
+        _gitOperationFeedback.value = "Last commit undone successfully"
+        _gitError.value = null
+      } else {
+        _gitError.value = "Undo commit failed: ${res.output.ifBlank { "Unknown error" }}"
+      }
+      _activeGitOperationText.value = null
+      refreshDiffsAndGit()
+    }
+  }
+
+  fun loadMoreCommitHistory() {
+    val current = _commitHistory.value
+    repositoryScope.launch {
+      val more = gitManager.getCommitHistory(_activeProject.value, limit = 30, offset = current.size)
+      if (more.isNotEmpty()) {
+        _commitHistory.value = current + more
+      }
+    }
+  }
+
+  suspend fun getCommitDetail(hash: String): GitCommitDetail? {
+    return gitManager.getCommitDetail(_activeProject.value, hash)
+  }
+
+  suspend fun getCommitDiff(hash: String): String {
+    return gitManager.getCommitDetail(_activeProject.value, hash)?.diff ?: ""
+  }
+
+  fun revertCommit(hash: String) {
+    repositoryScope.launch {
+      _activeGitOperationText.value = "Reverting commit $hash..."
+      val res = gitManager.revertCommit(_activeProject.value, hash)
+      if (res.success) {
+        _gitOperationFeedback.value = "Commit $hash reverted"
+        _gitError.value = null
+      } else {
+        _gitError.value = "Revert failed: ${res.output.ifBlank { "Unknown error" }}"
+      }
+      _activeGitOperationText.value = null
+      refreshDiffsAndGit()
+    }
+  }
+
+  fun cherryPickCommit(hash: String) {
+    repositoryScope.launch {
+      _activeGitOperationText.value = "Cherry-picking $hash..."
+      val res = gitManager.cherryPick(_activeProject.value, hash)
+      if (res.success) {
+        _gitOperationFeedback.value = "Cherry-picked $hash successfully"
+        _gitError.value = null
+      } else {
+        _gitError.value = "Cherry-pick failed: ${res.output.ifBlank { "Unknown error" }}"
+      }
+      _activeGitOperationText.value = null
+      refreshDiffsAndGit()
+    }
+  }
+
+  fun resetToCommit(hash: String, mode: ResetMode) {
+    repositoryScope.launch {
+      _activeGitOperationText.value = "Resetting to $hash..."
+      val res = gitManager.resetToCommit(_activeProject.value, hash, mode)
+      if (res.success) {
+        _gitOperationFeedback.value = "Reset to $hash completed"
+        _gitError.value = null
+      } else {
+        _gitError.value = "Reset failed: ${res.output.ifBlank { "Unknown error" }}"
+      }
+      _activeGitOperationText.value = null
+      refreshDiffsAndGit()
+    }
+  }
+
+  fun checkoutBranch(name: String) {
+    repositoryScope.launch {
+      _activeGitOperationText.value = "Switching to branch $name..."
+      val res = gitManager.checkoutBranch(_activeProject.value, name)
+      if (res.success) {
+        _gitOperationFeedback.value = "Switched to branch $name"
+        _gitError.value = null
+      } else {
+        _gitError.value = "Checkout failed: ${res.output.ifBlank { "Unknown error" }}"
+      }
+      _activeGitOperationText.value = null
+      refreshDiffsAndGit()
+      refreshFiles()
+    }
+  }
+
+  fun createBranch(name: String, checkout: Boolean = true) {
+    repositoryScope.launch {
+      _activeGitOperationText.value = "Creating branch $name..."
+      val res = gitManager.createBranch(_activeProject.value, name, checkout)
+      if (res.success) {
+        _gitOperationFeedback.value = "Created branch $name"
+        _gitError.value = null
+      } else {
+        _gitError.value = "Create branch failed: ${res.output.ifBlank { "Unknown error" }}"
+      }
+      _activeGitOperationText.value = null
+      refreshDiffsAndGit()
+    }
+  }
+
+  fun deleteBranch(name: String, force: Boolean = false) {
+    repositoryScope.launch {
+      _activeGitOperationText.value = "Deleting branch $name..."
+      val res = gitManager.deleteBranch(_activeProject.value, name, force)
+      if (res.success) {
+        _gitOperationFeedback.value = "Deleted branch $name"
+        _gitError.value = null
+      } else {
+        _gitError.value = "Delete branch failed: ${res.output.ifBlank { "Unknown error" }}"
+      }
+      _activeGitOperationText.value = null
+      refreshDiffsAndGit()
+    }
+  }
+
+  fun renameBranch(oldName: String, newName: String) {
+    repositoryScope.launch {
+      _activeGitOperationText.value = "Renaming branch..."
+      val res = gitManager.renameBranch(_activeProject.value, oldName, newName)
+      if (res.success) {
+        _gitOperationFeedback.value = "Branch renamed to $newName"
+        _gitError.value = null
+      } else {
+        _gitError.value = "Rename branch failed: ${res.output.ifBlank { "Unknown error" }}"
+      }
+      _activeGitOperationText.value = null
+      refreshDiffsAndGit()
+    }
+  }
+
+  fun mergeBranch(name: String) {
+    repositoryScope.launch {
+      _activeGitOperationText.value = "Merging $name..."
+      val res = gitManager.mergeBranch(_activeProject.value, name)
+      if (res.success) {
+        _gitOperationFeedback.value = "Merged $name successfully"
+        _gitError.value = null
+      } else {
+        _gitError.value = "Merge failed: ${res.output.ifBlank { "Unknown error" }}"
+      }
+      _activeGitOperationText.value = null
+      refreshDiffsAndGit()
+      refreshFiles()
+    }
+  }
+
+  fun abortMerge() {
+    repositoryScope.launch {
+      val res = gitManager.abortMerge(_activeProject.value)
+      if (res.success) _gitOperationFeedback.value = "Merge aborted" else _gitError.value = res.output.ifBlank { "Abort merge failed" }
+      refreshDiffsAndGit()
+      refreshFiles()
+    }
+  }
+
+  fun continueMerge() {
+    repositoryScope.launch {
+      val res = gitManager.continueMerge(_activeProject.value)
+      if (res.success) _gitOperationFeedback.value = "Merge continued" else _gitError.value = res.output.ifBlank { "Continue merge failed" }
+      refreshDiffsAndGit()
+      refreshFiles()
+    }
+  }
+
+  fun rebaseBranch(name: String) {
+    repositoryScope.launch {
+      _activeGitOperationText.value = "Rebasing on $name..."
+      val res = gitManager.rebaseBranch(_activeProject.value, name)
+      if (res.success) {
+        _gitOperationFeedback.value = "Rebased on $name"
+        _gitError.value = null
+      } else {
+        _gitError.value = "Rebase failed: ${res.output.ifBlank { "Unknown error" }}"
+      }
+      _activeGitOperationText.value = null
+      refreshDiffsAndGit()
+      refreshFiles()
+    }
+  }
+
+  fun abortRebase() {
+    repositoryScope.launch {
+      val res = gitManager.abortRebase(_activeProject.value)
+      if (res.success) _gitOperationFeedback.value = "Rebase aborted" else _gitError.value = res.output.ifBlank { "Abort rebase failed" }
+      refreshDiffsAndGit()
+      refreshFiles()
+    }
+  }
+
+  fun continueRebase() {
+    repositoryScope.launch {
+      val res = gitManager.continueRebase(_activeProject.value)
+      if (res.success) _gitOperationFeedback.value = "Rebase continued" else _gitError.value = res.output.ifBlank { "Continue rebase failed" }
+      refreshDiffsAndGit()
+      refreshFiles()
+    }
+  }
+
+  fun abortCherryPick() {
+    repositoryScope.launch {
+      val res = gitManager.abortCherryPick(_activeProject.value)
+      if (res.success) _gitOperationFeedback.value = "Cherry-pick aborted" else _gitError.value = res.output.ifBlank { "Abort cherry-pick failed" }
+      refreshDiffsAndGit()
+      refreshFiles()
+    }
+  }
+
+  fun continueCherryPick() {
+    repositoryScope.launch {
+      val res = gitManager.continueCherryPick(_activeProject.value)
+      if (res.success) _gitOperationFeedback.value = "Cherry-pick continued" else _gitError.value = res.output.ifBlank { "Continue cherry-pick failed" }
+      refreshDiffsAndGit()
+      refreshFiles()
+    }
+  }
+
+  fun fetch(remote: String = "origin", prune: Boolean = false) {
+    repositoryScope.launch {
+      _activeGitOperationText.value = "Fetching from $remote..."
+      val res = gitManager.fetch(_activeProject.value, remote, prune)
+      if (res.success) {
+        _gitOperationFeedback.value = "Fetched from $remote"
+        _gitError.value = null
+      } else {
+        _gitError.value = "Fetch failed: ${res.output.ifBlank { "Unknown error" }}"
+      }
+      _activeGitOperationText.value = null
+      refreshDiffsAndGit()
+    }
+  }
+
+  fun pull(remote: String = "origin", branch: String? = null, rebase: Boolean = false) {
+    repositoryScope.launch {
+      _activeGitOperationText.value = "Pulling from $remote..."
+      val res = gitManager.pull(_activeProject.value, remote, branch, rebase)
+      if (res.success) {
+        _gitOperationFeedback.value = "Pulled successfully"
+        _gitError.value = null
+      } else {
+        _gitError.value = "Pull failed: ${res.output.ifBlank { "Unknown error" }}"
+      }
+      _activeGitOperationText.value = null
+      refreshDiffsAndGit()
+      refreshFiles()
+    }
+  }
+
+  fun push(remote: String = "origin", branch: String? = null, setUpstream: Boolean = false, force: Boolean = false) {
+    repositoryScope.launch {
+      _activeGitOperationText.value = "Pushing to $remote..."
+      val res = gitManager.push(_activeProject.value, remote, branch, setUpstream, force)
+      if (res.success) {
+        _gitOperationFeedback.value = "Pushed successfully"
+        _gitError.value = null
+      } else {
+        _gitError.value = "Push failed: ${res.output.ifBlank { "Unknown error" }}"
+      }
+      _activeGitOperationText.value = null
+      refreshDiffsAndGit()
+    }
+  }
+
+  fun sync() {
+    repositoryScope.launch {
+      _activeGitOperationText.value = "Syncing with remote..."
+      val pullRes = gitManager.pull(_activeProject.value)
+      if (!pullRes.success) {
+        _gitError.value = "Sync failed during pull: ${pullRes.output.ifBlank { "Unknown error" }}"
+        _activeGitOperationText.value = null
+        refreshDiffsAndGit()
+        return@launch
+      }
+      val pushRes = gitManager.push(_activeProject.value)
+      if (pushRes.success) {
+        _gitOperationFeedback.value = "Synced with remote successfully"
+        _gitError.value = null
+      } else {
+        _gitError.value = "Pulled changes, but push failed: ${pushRes.output.ifBlank { "Unknown error" }}"
+      }
+      _activeGitOperationText.value = null
+      refreshDiffsAndGit()
+      refreshFiles()
+    }
+  }
+
+  fun addRemote(name: String, url: String) {
+    repositoryScope.launch {
+      _activeGitOperationText.value = "Adding remote $name..."
+      val res = gitManager.addRemote(_activeProject.value, name, url)
+      if (res.success) {
+        _gitOperationFeedback.value = "Remote $name added"
+        _gitError.value = null
+      } else {
+        _gitError.value = "Add remote failed: ${res.output.ifBlank { "Unknown error" }}"
+      }
+      _activeGitOperationText.value = null
+      refreshDiffsAndGit()
+    }
+  }
+
+  fun removeRemote(name: String) {
+    repositoryScope.launch {
+      val res = gitManager.removeRemote(_activeProject.value, name)
+      if (res.success) _gitOperationFeedback.value = "Remote $name removed" else _gitError.value = res.output.ifBlank { "Remove remote failed" }
+      refreshDiffsAndGit()
+    }
+  }
+
+  fun setRemoteUrl(name: String, url: String) {
+    repositoryScope.launch {
+      val res = gitManager.setRemoteUrl(_activeProject.value, name, url)
+      if (res.success) _gitOperationFeedback.value = "Remote $name URL updated" else _gitError.value = res.output.ifBlank { "Update remote URL failed" }
+      refreshDiffsAndGit()
+    }
+  }
+
+  fun createTag(name: String, message: String = "", commitHash: String? = null) {
+    repositoryScope.launch {
+      _activeGitOperationText.value = "Creating tag $name..."
+      val res = gitManager.createTag(_activeProject.value, name, message, commitHash)
+      if (res.success) {
+        _gitOperationFeedback.value = "Tag $name created"
+        _gitError.value = null
+      } else {
+        _gitError.value = "Create tag failed: ${res.output.ifBlank { "Unknown error" }}"
+      }
+      _activeGitOperationText.value = null
+      refreshDiffsAndGit()
+    }
+  }
+
+  fun deleteTag(name: String) {
+    repositoryScope.launch {
+      val res = gitManager.deleteTag(_activeProject.value, name)
+      if (res.success) _gitOperationFeedback.value = "Tag $name deleted" else _gitError.value = res.output.ifBlank { "Delete tag failed" }
+      refreshDiffsAndGit()
+    }
+  }
+
+  fun saveStash(message: String = "", includeUntracked: Boolean = false) {
+    repositoryScope.launch {
+      _activeGitOperationText.value = "Saving stash..."
+      val res = gitManager.stashChanges(_activeProject.value, message, includeUntracked)
+      if (res.success) {
+        _gitOperationFeedback.value = "Stash saved"
+        _gitError.value = null
+      } else {
+        _gitError.value = "Stash failed: ${res.output.ifBlank { "Unknown error" }}"
+      }
+      _activeGitOperationText.value = null
+      refreshDiffsAndGit()
+      refreshFiles()
+    }
+  }
+
+  fun applyStash(index: Int) {
+    repositoryScope.launch {
+      _activeGitOperationText.value = "Applying stash@{$index}..."
+      val res = gitManager.stashApply(_activeProject.value, index)
+      if (res.success) {
+        _gitOperationFeedback.value = "Stash applied"
+        _gitError.value = null
+      } else {
+        _gitError.value = "Apply stash failed: ${res.output.ifBlank { "Unknown error" }}"
+      }
+      _activeGitOperationText.value = null
+      refreshDiffsAndGit()
+      refreshFiles()
+    }
+  }
+
+  fun popStash(index: Int) {
+    repositoryScope.launch {
+      _activeGitOperationText.value = "Popping stash@{$index}..."
+      val res = gitManager.stashPop(_activeProject.value, index)
+      if (res.success) {
+        _gitOperationFeedback.value = "Stash popped"
+        _gitError.value = null
+      } else {
+        _gitError.value = "Pop stash failed: ${res.output.ifBlank { "Unknown error" }}"
+      }
+      _activeGitOperationText.value = null
+      refreshDiffsAndGit()
+      refreshFiles()
+    }
+  }
+
+  fun dropStash(index: Int) {
+    repositoryScope.launch {
+      val res = gitManager.stashDrop(_activeProject.value, index)
+      if (res.success) _gitOperationFeedback.value = "Stash dropped" else _gitError.value = res.output.ifBlank { "Drop stash failed" }
+      refreshDiffsAndGit()
+    }
+  }
+
+  fun deleteUntrackedFile(filePath: String) {
+    repositoryScope.launch {
+      val res = gitManager.deleteUntrackedFile(_activeProject.value, filePath)
+      if (res) {
+        _gitOperationFeedback.value = "Deleted $filePath"
+        refreshFiles()
+      } else {
+        _gitError.value = "Could not delete $filePath"
+      }
+      refreshDiffsAndGit()
+    }
+  }
+
+  fun setFilesStaged(paths: Collection<String>, stage: Boolean) {
+    repositoryScope.launch {
+      val project = _activeProject.value
+      if (stage) {
+        gitManager.stageFiles(project, paths)
+      } else {
+        paths.forEach { gitManager.unstageFile(project, it) }
+      }
+      refreshDiffsAndGit()
+    }
+  }
+
+  suspend fun getFullDiffText(type: DiffCopyType, filePath: String? = null): String {
+    val project = _activeProject.value
+    return when (type) {
+      DiffCopyType.ALL -> gitManager.fullDiff(project)
+      DiffCopyType.STAGED -> gitManager.stagedDiff(project)
+      DiffCopyType.UNSTAGED -> gitManager.unstagedDiff(project)
+      DiffCopyType.FILE -> filePath?.let { gitManager.fileDiff(project, it) } ?: ""
+    }
+  }
+
+  suspend fun explainChangesWithAgent(diffText: String): String? {
+    if (diffText.isBlank()) return "No changes to explain."
+    return try {
+      requestLlmText(
+        system = "You are an expert code reviewer and software architect. Explain the git diff concisely to the developer, highlighting purpose, key logic changes, and any architectural implications.",
+        user = "Explain these git changes:\n\n" + diffText.take(12000),
+        maxTokens = 600
+      )
+    } catch (e: Exception) {
+      "Explanation unavailable: ${e.message}"
+    }
+  }
+
+  suspend fun reviewChangesWithAgent(diffText: String): String? {
+    if (diffText.isBlank()) return "No changes to review."
+    return try {
+      requestLlmText(
+        system = "You are a senior code reviewer. Review the following git diff for bugs, edge cases, security issues, performance pitfalls, and code style. Structure with concise bullet points.",
+        user = "Perform a code review on this diff:\n\n" + diffText.take(12000),
+        maxTokens = 800
+      )
+    } catch (e: Exception) {
+      "Code review unavailable: ${e.message}"
+    }
+  }
+
+  suspend fun explainCommitWithAgent(commit: GitCommit): String? {
+    return try {
+      val detail = getCommitDetail(commit.hash)
+      val diff = detail?.diff?.ifBlank { null } ?: getCommitDiff(commit.hash)
+      requestLlmText(
+        system = "You are an expert software engineer. Explain this git commit clearly and concisely, including what changed and why.",
+        user = "Commit: ${commit.hash} - ${commit.message}\nAuthor: ${commit.author}\nDate: ${commit.date}\n\nDiff:\n" + diff.take(10000),
+        maxTokens = 500
+      )
+    } catch (e: Exception) {
+      "Commit explanation unavailable: ${e.message}"
     }
   }
 

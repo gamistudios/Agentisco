@@ -57,10 +57,10 @@ fun EditorScreen(
   val hasClosedTabs by viewModel.hasClosedTabs.collectAsState()
   val editorSettings by viewModel.editorSettings.collectAsState()
 
-  // Active tab reference (fallback to activeFile if tabs not yet populated)
+  // Active tab reference (fallback to activeFile only if tabs exist)
   val currentTab = openTabs.getOrNull(activeTabIndex)
-  val activeFileName = currentTab?.file?.name ?: activeFile.name
-  val activeFilePath = currentTab?.file?.path ?: activeFile.path
+  val activeFileName = currentTab?.file?.name ?: if (openTabs.isNotEmpty()) activeFile.name else ""
+  val activeFilePath = currentTab?.file?.path ?: if (openTabs.isNotEmpty()) activeFile.path else ""
   val activeLanguage = currentTab?.effectiveLanguage ?: Language.fromFileName(activeFileName)
 
   val clipboardManager = LocalClipboardManager.current

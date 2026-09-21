@@ -135,7 +135,14 @@ data class GitCommit(
   val message: String,
   val author: String,
   val date: String,
-  val filesChanged: List<String>
+  val filesChanged: List<String> = emptyList(),
+  val relativeDate: String = "",
+  val fullHash: String = "",
+  val authorEmail: String = "",
+  val additions: Int = 0,
+  val deletions: Int = 0,
+  val refs: List<String> = emptyList(),
+  val body: String = ""
 )
 
 data class CommandPaletteItem(

@@ -151,51 +151,53 @@ fun EditorBreadcrumbsBar(
       Spacer(modifier = Modifier.width(8.dp))
 
       // Right: Language badge + Stats
-      Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp)
-      ) {
-        // Stats pill (lines, chars)
-        Text(
-          text = "${lineCount}L  ${charCount}C",
-          color = TextMuted,
-          fontSize = 10.sp,
-          fontFamily = FontFamily.Monospace
-        )
-
-        // Language selector badge
-        Box(
-          modifier = Modifier
-            .clip(RoundedCornerShape(4.dp))
-            .background(language.accentColor.copy(alpha = 0.15f))
-            .border(1.dp, language.accentColor.copy(alpha = 0.35f), RoundedCornerShape(4.dp))
-            .clickable(onClick = onOpenLanguageSelector)
-            .padding(horizontal = 6.dp, vertical = 2.dp)
-            .testTag("badge_language_selector")
+      if (filePath.isNotBlank()) {
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-          Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(3.dp)
+          // Stats pill (lines, chars)
+          Text(
+            text = "${lineCount}L  ${charCount}C",
+            color = TextMuted,
+            fontSize = 10.sp,
+            fontFamily = FontFamily.Monospace
+          )
+
+          // Language selector badge
+          Box(
+            modifier = Modifier
+              .clip(RoundedCornerShape(4.dp))
+              .background(language.accentColor.copy(alpha = 0.15f))
+              .border(1.dp, language.accentColor.copy(alpha = 0.35f), RoundedCornerShape(4.dp))
+              .clickable(onClick = onOpenLanguageSelector)
+              .padding(horizontal = 6.dp, vertical = 2.dp)
+              .testTag("badge_language_selector")
           ) {
-            Box(
-              modifier = Modifier
-                .size(6.dp)
-                .clip(CircleShape)
-                .background(language.accentColor)
-            )
-            Text(
-              text = language.displayName,
-              color = language.accentColor,
-              fontSize = 10.sp,
-              fontWeight = FontWeight.SemiBold,
-              fontFamily = FontFamily.Monospace
-            )
-            Icon(
-              imageVector = Icons.Default.ArrowDropDown,
-              contentDescription = "Change Language",
-              tint = language.accentColor,
-              modifier = Modifier.size(12.dp)
-            )
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(3.dp)
+            ) {
+              Box(
+                modifier = Modifier
+                  .size(6.dp)
+                  .clip(CircleShape)
+                  .background(language.accentColor)
+              )
+              Text(
+                text = language.displayName,
+                color = language.accentColor,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.SemiBold,
+                fontFamily = FontFamily.Monospace
+              )
+              Icon(
+                imageVector = Icons.Default.ArrowDropDown,
+                contentDescription = "Change Language",
+                tint = language.accentColor,
+                modifier = Modifier.size(12.dp)
+              )
+            }
           }
         }
       }
