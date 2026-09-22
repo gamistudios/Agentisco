@@ -383,6 +383,9 @@ fun EditorActionBar(
   onOpenGoToLine: () -> Unit,
   onOpenGoToSymbol: () -> Unit,
   onToggleMarkdownPreview: () -> Unit,
+  onToggleSvgRender: () -> Unit = {},
+  isSvgRenderActive: Boolean = false,
+  isSvgFile: Boolean = false,
   onOpenHtmlPreview: () -> Unit,
   onFormatJson: () -> Unit,
   onOpenSettings: () -> Unit,
@@ -510,6 +513,27 @@ fun EditorActionBar(
             Icon(Icons.Default.Language, contentDescription = null, tint = CyanAccent, modifier = Modifier.size(13.dp))
             Spacer(modifier = Modifier.width(4.dp))
             Text("Preview", color = CyanAccent, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+          }
+        } else if (isSvgFile) {
+          OutlinedButton(
+            onClick = onToggleSvgRender,
+            modifier = Modifier.height(28.dp).testTag(if (isSvgRenderActive) "btn_svg_source" else "btn_svg_render"),
+            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+            border = BorderStroke(1.dp, ElectricBlueGlow.copy(alpha = 0.7f))
+          ) {
+            Icon(
+              imageVector = if (isSvgRenderActive) Icons.Outlined.Code else Icons.Outlined.Visibility,
+              contentDescription = null,
+              tint = ElectricBlueGlow,
+              modifier = Modifier.size(13.dp)
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(
+              text = if (isSvgRenderActive) "Source" else "Render",
+              color = ElectricBlueGlow,
+              fontSize = 11.sp,
+              fontWeight = FontWeight.Medium
+            )
           }
         } else if (language == Language.MARKDOWN) {
           OutlinedButton(
@@ -1056,51 +1080,6 @@ fun MarkdownPreviewPane(
 }
 
 /**
- * Image Viewer for image files opened in the editor (.png, .jpg, .svg, etc.)
+ * Image viewer placeholder removed — real viewers live in FileViewers.kt
+ * (ImagePreviewPane / PdfPreviewPane / MediaPreviewPane / OtherFilePreviewPane).
  */
-@Composable
-fun ImagePreviewPane(
-  fileName: String,
-  fileSize: Long,
-  modifier: Modifier = Modifier
-) {
-  Box(
-    modifier = modifier
-      .fillMaxSize()
-      .background(DarkBackground)
-      .padding(24.dp),
-    contentAlignment = Alignment.Center
-  ) {
-    Surface(
-      color = DarkSurface,
-      shape = RoundedCornerShape(12.dp),
-      border = BorderStroke(1.dp, DarkBorder),
-      modifier = Modifier.padding(16.dp)
-    ) {
-      Column(
-        modifier = Modifier.padding(20.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(10.dp)
-      ) {
-        Icon(
-          imageVector = Icons.Default.Image,
-          contentDescription = "Image Preview",
-          tint = CyanAccent,
-          modifier = Modifier.size(56.dp)
-        )
-        Text(
-          text = fileName,
-          color = TextPrimary,
-          fontSize = 14.sp,
-          fontWeight = FontWeight.SemiBold,
-          fontFamily = FontFamily.Monospace
-        )
-        Text(
-          text = "Size: ${fileSize / 1024} KB  •  Image File",
-          color = TextMuted,
-          fontSize = 12.sp
-        )
-      }
-    }
-  }
-}

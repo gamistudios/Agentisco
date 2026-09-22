@@ -360,11 +360,26 @@ class ProjectFileSystem(private val baseDir: File) {
 
   fun readFile(project: Project, relativePath: String): String {
     val file = File(project.path, relativePath)
-    return if (file.exists() && file.isFile) {
-      file.readText()
-    } else {
-      ""
+    if (!file.exists() || !file.isFile) return ""
+    // Binary types are shown by dedicated viewers and must never be decoded
+    // as text (garble + OOM on big assets); the editor renders them from disk.
+    if (com.agentisco.editor.model.FileViewer.mustNotDecodeAsText(file.name)) return ""
+    val size = file.length()
+    if (size > com.agentisco.editor.model.FileViewer.TEXT_PREVIEW_LIMIT_BYTES) {
+      return "[File too large to preview (${"%.1f".format(size / 1_000_000.0)} MB) — open it with an external app.]"
     }
+    // Sniff the header so extensionless binaries don't decode into garbage.
+    val header = runCatching {
+      file.inputStream().use { input ->
+        val buf = ByteArray(4096)
+        val read = input.read(buf)
+        if (read <= 0) ByteArray(0) else buf.copyOf(read)
+      }
+    }.getOrNull() ?: ByteArray(0)
+    if (com.agentisco.editor.model.FileViewer.looksBinary(header)) {
+      return "[Binary file (${size} bytes) — no text preview available.]"
+    }
+    return runCatching { file.readText() }.getOrDefault("")
   }
 
   fun exists(project: Project, relativePath: String): Boolean {
@@ -382,8 +397,19 @@ class ProjectFileSystem(private val baseDir: File) {
     }
   }
 
-  fun createFile(project: Project, relativePath: String, initialContent: String = ""): Boolean {
-    return try {
+  /** Byte-for-byte copy — safe for binaries, unlike createFile(text). */
+  fun copyFile(project: Project, relativePath: String, newRelativePath: String): Boolean {
+    return runCatching {
+      val src = File(project.path, relativePath)
+      val dst = File(project.path, newRelativePath)
+      if (!src.isFile || dst.exists()) return false
+      dst.parentFile?.mkdirs()
+      src.inputStream().use { input -> dst.outputStream().use { output -> input.copyTo(output) } }
+      true
+    }.getOrDefault(false)
+  }
+
+  fun createFile(project: Project, relativePath: String, initialContent: String = ""): Boolean {    return try {
       val file = File(project.path, relativePath)
       file.parentFile?.mkdirs()
       if (!file.exists()) {

@@ -82,14 +82,31 @@ fun EditorScreen(
   val lines = remember(textFieldValue.text) { textFieldValue.text.lines() }
   val lineCount = lines.size
   val charCount = textFieldValue.text.length
-  val isImageFile = remember(activeFileName) {
-    listOf("png", "jpg", "jpeg", "webp", "gif", "ico").contains(activeFileName.substringAfterLast('.', "").lowercase())
+  val viewerKind = remember(activeFileName) {
+    com.agentisco.editor.model.FileViewer.kindOf(activeFileName)
+  }
+  val isSvgFile = remember(activeFileName) {
+    activeFileName.substringAfterLast('.', "").lowercase() in setOf("svg", "svgz")
+  }
+  val viewerFile = remember(activeProject, activeFilePath) {
+    if (activeFilePath.isBlank()) null
+    else java.io.File(activeProject.path, activeFilePath).takeIf { it.isFile }
   }
 
   // UI state toggles
   var isEditMode by remember { mutableStateOf(true) }
   var showAgentSplitPane by remember { mutableStateOf(false) }
   var isMarkdownPreviewActive by remember { mutableStateOf(false) }
+  // SVG opens rendered; flip to edit/view its XML source.
+  var isSvgRenderActive by remember { mutableStateOf(true) }
+
+  // Binary viewers render straight from disk — their text buffer stays empty
+  // and saving through it is disabled (except hand-edited SVG source).
+  val isViewerFile = viewerKind != com.agentisco.editor.model.FileViewerKind.TEXT
+  val isSvgSourceViewing = isSvgFile && (!isSvgRenderActive || viewerFile == null)
+  val sourceVisible = !isViewerFile || isSvgSourceViewing
+  val showSvgRendered = isSvgFile && isSvgRenderActive && viewerFile != null
+  val isDirtyNow = sourceVisible && (currentTab?.isDirty ?: isEditorDirty)
 
   // Dialog & sheet states
   var showGoToLineDialog by remember { mutableStateOf(false) }
@@ -141,6 +158,9 @@ fun EditorScreen(
   }
 
   fun saveCurrentFile() {
+    // Guarded again in WorkspaceRepository.saveActiveFile; bail out silently
+    // so the Save chip never flickers for rendered binaries.
+    if (!sourceVisible) return
     viewModel.updateTabContent(activeTabIndex, textFieldValue.text)
     viewModel.updateEditorContent(textFieldValue.text)
     viewModel.saveActiveFile()
@@ -422,7 +442,7 @@ fun EditorScreen(
       projectName = activeProject.name,
       filePath = activeFilePath,
       language = activeLanguage,
-      isDirty = currentTab?.isDirty ?: isEditorDirty,
+      isDirty = isDirtyNow,
       fileSize = currentTab?.file?.sizeBytes ?: 0L,
       lineCount = lineCount,
       charCount = charCount,
@@ -446,7 +466,7 @@ fun EditorScreen(
 
     // 3. Compact Editor Action Bar
     EditorActionBar(
-      isDirty = currentTab?.isDirty ?: isEditorDirty,
+      isDirty = isDirtyNow,
       canUndo = currentTab?.undoStack?.isNotEmpty() == true,
       canRedo = currentTab?.redoStack?.isNotEmpty() == true,
       isFindOpen = findReplaceState.isOpen,
@@ -459,6 +479,9 @@ fun EditorScreen(
       onOpenGoToLine = { showGoToLineDialog = true },
       onOpenGoToSymbol = { showGoToSymbolSheet = true },
       onToggleMarkdownPreview = { isMarkdownPreviewActive = !isMarkdownPreviewActive },
+      onToggleSvgRender = { isSvgRenderActive = !isSvgRenderActive },
+      isSvgRenderActive = isSvgRenderActive && viewerFile != null,
+      isSvgFile = isSvgFile,
       onOpenHtmlPreview = { showHtmlPreview = true },
       onFormatJson = { formatCurrentFile() },
       onOpenSettings = { showSettingsSheet = true },
@@ -556,9 +579,21 @@ fun EditorScreen(
             }
           }
         }
-      } else if (isImageFile) {
-        // Image Viewer
-        ImagePreviewPane(fileName = activeFileName, fileSize = currentTab?.file?.sizeBytes ?: 0L)
+      } else if (showSvgRendered ||
+        (viewerKind == com.agentisco.editor.model.FileViewerKind.IMAGE && !isSvgFile)
+      ) {
+        // Image Viewer (Coil-backed, pinch/zoom). SVG renders here too until
+        // the "Source" button switches it to the XML editor.
+        ImagePreviewPane(file = viewerFile, fileName = activeFileName, fileSize = currentTab?.file?.sizeBytes ?: 0L)
+      } else if (viewerKind == com.agentisco.editor.model.FileViewerKind.PDF) {
+        // PDF page viewer (built-in PdfRenderer)
+        PdfPreviewPane(file = viewerFile, fileName = activeFileName, fileSize = currentTab?.file?.sizeBytes ?: 0L)
+      } else if (viewerKind == com.agentisco.editor.model.FileViewerKind.MEDIA) {
+        // Audio / video player
+        MediaPreviewPane(file = viewerFile, fileName = activeFileName, fileSize = currentTab?.file?.sizeBytes ?: 0L)
+      } else if (viewerKind == com.agentisco.editor.model.FileViewerKind.OTHER_BINARY) {
+        // Unrenderable binary — metadata + open externally
+        OtherFilePreviewPane(file = viewerFile, fileName = activeFileName, fileSize = currentTab?.file?.sizeBytes ?: 0L)
       } else if (activeLanguage == Language.MARKDOWN && isMarkdownPreviewActive) {
         // Markdown Formatted Viewer
         MarkdownPreviewPane(content = textFieldValue.text)

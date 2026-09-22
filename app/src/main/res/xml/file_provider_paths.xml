@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- Workspace projects live under the app-specific external storage. -->
+    <external-files-path name="workspace" path="." />
+    <!-- Fallback for projects created on legacy external storage. -->
+    <external-path name="external" path="." />
+</paths>
