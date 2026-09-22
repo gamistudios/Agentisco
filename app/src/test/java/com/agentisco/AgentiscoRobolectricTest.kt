@@ -137,8 +137,29 @@ class ExampleRobolectricTest {
     return tokens
   }
 
+  /** A real POSIX shell, used to run git commands exactly like the app's guest shell does. */
+  private val testShell: String? by lazy {
+    listOf("bash", "sh").firstOrNull { sh ->
+      runCatching { ProcessBuilder(sh, "-c", "true").start().waitFor() == 0 }.getOrDefault(false)
+    }
+  }
+
   /** Runs a git command for tests using the real git binary. */
   private fun runGitForTest(gitExe: String, projectPath: String, args: String): com.agentisco.workspace.git.GitRunResult {
+    val shell = testShell
+    if (shell != null) {
+      // Go through a real shell so quoting and shell metacharacters (|, ;, >)
+      // behave exactly as they do on-device — token splitting would mask bugs
+      // like an unquoted '|' in a pretty-format string becoming a shell pipe.
+      val quotedGit = "'" + gitExe.replace('\\', '/').replace("'", "'\\''") + "'"
+      val cmd = if (args == "git" || args.startsWith("git ")) quotedGit + args.removePrefix("git") else args
+      val process = ProcessBuilder(shell, "-c", cmd)
+        .directory(File(projectPath))
+        .redirectErrorStream(true)
+        .start()
+      val output = process.inputStream.bufferedReader().readText()
+      return com.agentisco.workspace.git.GitRunResult(process.waitFor(), output)
+    }
     val tokens = shellSplit(args).filter { it != "2>/dev/null" && it != "true" }.toMutableList()
     if (tokens.firstOrNull() == "git") tokens[0] = gitExe
     val process = ProcessBuilder(tokens)

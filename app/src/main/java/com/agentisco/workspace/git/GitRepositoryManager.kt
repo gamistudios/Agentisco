@@ -106,8 +106,8 @@ class GitRepositoryManager(
       else -> GitActiveOperation.NONE
     }
 
-    // HEAD commit info
-    val headLog = git(project, "git log -1 --pretty=format:%h|%s 2>/dev/null").output.trim()
+    // HEAD commit info (format quoted: '|' would otherwise act as a shell pipe)
+    val headLog = git(project, "git log -1 --pretty=${shellQuote("format:%h|%s")} 2>/dev/null").output.trim()
     val headParts = if (headLog.contains("|")) headLog.split("|", limit = 2) else emptyList()
     val headSha = headParts.getOrNull(0)
     val headMsg = headParts.getOrNull(1)
@@ -489,7 +489,8 @@ class GitRepositoryManager(
     }
 
     // Log format: %h | %H | %an | %ae | %ci | %cr | %d | %s
-    val logCmd = "git log --pretty=format:%h|%H|%an|%ae|%ci|%cr|%d|%s -n $limit --skip $offset"
+    // The format must be shell-quoted — unquoted '|' turns into shell pipes.
+    val logCmd = "git log --pretty=${shellQuote("format:%h|%H|%an|%ae|%ci|%cr|%d|%s")} -n $limit --skip $offset"
     val logRes = git(project, logCmd)
     if (!logRes.success) return null
     val out = logRes.output
