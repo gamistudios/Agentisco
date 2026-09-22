@@ -102,8 +102,27 @@ jobs:
           ANDROID_KEY_PASSWORD: android
         run: ./gradlew assembleDebug --stacktrace
 
+      - name: Cache Robolectric android-all artifacts
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: robolectric-m2-${{ runner.os }}-${{ hashFiles('app/build.gradle.kts', 'gradle/libs.versions.toml') }}
+          restore-keys: |
+            robolectric-m2-${{ runner.os }}-
+
       - name: Run Tests
-        run: ./gradlew testDebugUnitTest --stacktrace
+        run: |
+          # Robolectric downloads its android-all jars into ~/.m2 during tests.
+          # Retry once so a transient Maven fetch failure never fails the build.
+          ./gradlew testDebugUnitTest --stacktrace || {
+            echo "::warning::testDebugUnitTest failed — retrying once (likely transient Robolectric artifact fetch)."
+            ./gradlew testDebugUnitTest --stacktrace --rerun-tasks
+          }
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ github.workspace }}/debug.keystore
+          ANDROID_KEYSTORE_PASSWORD: android
+          ANDROID_KEY_ALIAS: androiddebugkey
+          ANDROID_KEY_PASSWORD: android
 
       - name: Build Debug APK
         run: ./gradlew assembleDebug --stacktrace
