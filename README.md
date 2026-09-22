@@ -161,3 +161,7 @@ Prerequisites: JDK 21, Android SDK (platform 36), NDK 27.2.12479018 + CMake 3.22
 
 - API keys are stored separately from provider config in app-private storage and never committed; the release keystore and `GITHUB_SECRETS.txt` must stay out of version control — CI credentials belong in GitHub Actions secrets.
 - The agent's destructive-command guard plus per-mode approval policies are the safety boundary for autonomous file and shell operations; `delete_file` always requires explicit approval.
+
+# Developer
+
+Gemechis Chala
