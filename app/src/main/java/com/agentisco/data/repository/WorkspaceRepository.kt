@@ -904,7 +904,9 @@ class WorkspaceRepository(
   }
 
   private var gitRefreshJob: Job? = null
+  private var gitHistoryJob: Job? = null
   private var gitHistoryProjectPath: String = ""
+  private var lastHistoryLoadAt = 0L
 
   /** Refreshes diffs/staging/history/status from real git, asynchronously. */
   fun refreshDiffsAndGit() {
@@ -921,6 +923,19 @@ class WorkspaceRepository(
       _tags.value = emptyList()
       return
     }
+    // Commit history runs as its own job: file-watcher-triggered refreshes
+    // (every ~350ms during git ops) must not cancel it before it gets a turn.
+    if (gitHistoryProjectPath != project.path) {
+      gitHistoryJob?.cancel()
+      gitHistoryProjectPath = project.path
+      _commitHistory.value = emptyList()
+      lastHistoryLoadAt = 0L
+    }
+    val historyRecentlyLoaded =
+      System.currentTimeMillis() - lastHistoryLoadAt < HISTORY_MIN_RELOAD_INTERVAL_MS
+    if (gitHistoryJob?.isActive != true && !historyRecentlyLoaded) {
+      gitHistoryJob = repositoryScope.launch { loadCommitHistory(project) }
+    }
     gitRefreshJob?.cancel()
     gitRefreshJob = repositoryScope.launch {
       try {
@@ -928,7 +943,6 @@ class WorkspaceRepository(
         _isGitRepository.value = isRepo
         if (!isRepo) {
           _fileDiffs.value = emptyList()
-          _commitHistory.value = emptyList()
           _stagedFiles.value = emptySet()
           _repoStatus.value = GitRepoStatus(isRepo = false)
           _branches.value = emptyList()
@@ -939,6 +953,7 @@ class WorkspaceRepository(
           return@launch
         }
         val status = gitManager.getRepoStatus(project)
+        if (_activeProject.value.path != project.path) return@launch
         _repoStatus.value = status
         _branches.value = gitManager.getBranches(project)
         _stashes.value = gitManager.getStashes(project)
@@ -953,18 +968,35 @@ class WorkspaceRepository(
             isDirty = !status.isClean
           )
         }
-        // Keep the previous list when git could not answer (transient failure)
-        // so the History tab doesn't flicker empty during lock contention.
-        if (gitHistoryProjectPath != project.path) {
-          gitHistoryProjectPath = project.path
-          if (_commitHistory.value.isNotEmpty()) _commitHistory.value = emptyList()
-        }
-        val history = gitManager.getCommitHistory(project, limit = 30)
-        if (history != null) _commitHistory.value = history
       } catch (e: Exception) {
         if (e !is kotlinx.coroutines.CancellationException) {
           android.util.Log.e("ScoOS-Git", "git refresh failed", e)
         }
+      }
+    }
+  }
+
+  /** Loads the first page of commit history with retries; keeps the previous list on failure. */
+  private suspend fun loadCommitHistory(project: Project) {
+    try {
+      var attempts = 0
+      while (attempts < 4) {
+        val history = gitManager.getCommitHistory(project, limit = 30)
+        if (_activeProject.value.path != project.path) return
+        if (history != null) {
+          _commitHistory.value = history
+          lastHistoryLoadAt = System.currentTimeMillis()
+          return
+        }
+        attempts++
+        delay(1500)
+      }
+      lastHistoryLoadAt = System.currentTimeMillis()
+      android.util.Log.w("ScoOS-Git", "commit history unavailable after $attempts attempts")
+    } catch (e: Exception) {
+      lastHistoryLoadAt = System.currentTimeMillis()
+      if (e !is kotlinx.coroutines.CancellationException) {
+        android.util.Log.e("ScoOS-Git", "commit history load failed", e)
       }
     }
   }
@@ -2442,5 +2474,8 @@ class WorkspaceRepository(
     _isDevServerRunning.update { !it }
   }
 
-  companion object
+  companion object {
+    /** Minimum gap between full commit-history reloads triggered by file-watcher churn. */
+    private const val HISTORY_MIN_RELOAD_INTERVAL_MS = 1200L
+  }
 }
