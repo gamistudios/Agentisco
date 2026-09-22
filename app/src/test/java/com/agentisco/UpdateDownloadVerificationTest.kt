@@ -2,12 +2,15 @@ package com.agentisco
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import com.agentisco.data.repository.UpdateReleaseSource
 import com.agentisco.data.repository.UpdateRepository
 import com.agentisco.data.repository.UpdateStream
 import com.agentisco.data.repository.UpdateStreamSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
+import org.json.JSONArray
+import org.json.JSONObject
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -408,23 +411,83 @@ class UpdateDownloadVerificationTest {
         assertFalse("the completion marker must not outlive its file", markerFile.exists())
     }
 
-    // ——— deleting the downloaded file ———
+    // ——— a newer release discards what older ones left on disk ———
 
     @Test
-    fun `deleting the downloaded update removes the file and every sidecar`() = runTest {
-        val payload = apkPayload(4096)
-        val repository = repository(InMemoryStreamSource(payload))
-        repository.adoptAvailableUpdate(update(assetSize = payload.size.toLong()))
-        assertTrue(repository.downloadUpdate())
+    fun `a newer update deletes an old downloaded apk from disk`() = runTest {
+        // A previous run finished and verified an older release; its apk and its
+        // completion marker are still on disk when the next check finds v2.0.0.
+        updateFile.writeBytes(apkPayload(4096))
+        markerFile.writeText(
+            JSONObject()
+                .put("url", "https://github.com/gamistudios/Agentisco/releases/download/v1.0.0/agentisco-debug.apk")
+                .put("size", 4096)
+                .put("digest", "")
+                .put("versionCode", 10_000L) // what parseVersionCode("v1.0.0") wrote
+                .toString()
+        )
+        val repository = repository(
+            InMemoryStreamSource(ByteArray(0)),
+            releaseSource("v2.0.0")
+        )
 
-        repository.deleteDownloadedUpdate()
+        assertTrue(repository.checkForUpdates())
 
-        assertFalse(updateFile.exists())
-        assertFalse(markerFile.exists())
-        assertFalse(offsetSidecar.exists())
+        assertFalse("the stale apk must be deleted", updateFile.exists())
+        assertFalse("the stale marker must be deleted with it", markerFile.exists())
         assertFalse(repository.hasUpdateFileOnDisk())
         assertNull(repository.downloadedApkPath.value)
         assertEquals(UpdateRepository.UpdateState.AVAILABLE, repository.updateState.value)
+    }
+
+    @Test
+    fun `a stale download from a build that predates version markers is also deleted`() = runTest {
+        updateFile.writeBytes(apkPayload(4096))
+        // A marker written before versionCode was tracked has no versionCode field.
+        markerFile.writeText(
+            JSONObject()
+                .put("url", "https://github.com/gamistudios/Agentisco/releases/download/v1.0.0/agentisco-debug.apk")
+                .put("size", 4096)
+                .put("digest", "")
+                .toString()
+        )
+        val repository = repository(
+            InMemoryStreamSource(ByteArray(0)),
+            releaseSource("v2.0.0")
+        )
+
+        assertTrue(repository.checkForUpdates())
+
+        assertFalse(updateFile.exists())
+        assertFalse(markerFile.exists())
+    }
+
+    @Test
+    fun `an update check that finds the very release on disk keeps its finished download`() = runTest {
+        val payload = apkPayload(4096)
+        updateFile.writeBytes(payload)
+        markerFile.writeText(
+            JSONObject()
+                .put("url", "https://github.com/gamistudios/Agentisco/releases/download/v2.0.0/agentisco-debug.apk")
+                .put("size", 4096)
+                .put("digest", "")
+                .put("versionCode", 20_000L) // what parseVersionCode("v2.0.0") wrote
+                .toString()
+        )
+        val repository = repository(
+            InMemoryStreamSource(ByteArray(0)),
+            releaseSource("v2.0.0", assetSize = 4096L)
+        )
+
+        assertTrue(repository.checkForUpdates())
+
+        assertTrue(
+            "a finished download of the offered release must survive the check",
+            updateFile.exists()
+        )
+        assertTrue(markerFile.exists())
+        assertEquals(UpdateRepository.UpdateState.DOWNLOADED, repository.updateState.value)
+        assertEquals(updateFile.absolutePath, repository.downloadedApkPath.value)
     }
 
     @Test
@@ -445,8 +508,36 @@ class UpdateDownloadVerificationTest {
 
     // ——— helpers ———
 
-    private fun repository(source: UpdateStreamSource): UpdateRepository =
-        UpdateRepository(context, streamSource = source, retryDelayMs = 0L)
+    private fun repository(
+        source: UpdateStreamSource,
+        releaseSource: UpdateReleaseSource = UpdateReleaseSource {
+            error("test reached the network: inject a releaseSource when calling checkForUpdates")
+        }
+    ): UpdateRepository =
+        UpdateRepository(
+            context,
+            streamSource = source,
+            releaseSource = releaseSource,
+            retryDelayMs = 0L
+        )
+
+    /** Serves a crafted "latest release" payload to checkForUpdates — no network. */
+    private fun releaseSource(tagName: String, assetSize: Long = 0L): UpdateReleaseSource =
+        UpdateReleaseSource {
+            JSONObject()
+                .put("tag_name", tagName)
+                .put("name", tagName)
+                .put("body", "")
+                .put(
+                    "assets",
+                    JSONArray().put(
+                        JSONObject()
+                            .put("name", "agentisco-debug.apk")
+                            .put("size", assetSize)
+                            .put("digest", "")
+                    )
+                )
+        }
 
     private fun update(assetSize: Long, assetDigest: String? = null) = UpdateRepository.AvailableUpdate(
         tagName = "v9.9.9",

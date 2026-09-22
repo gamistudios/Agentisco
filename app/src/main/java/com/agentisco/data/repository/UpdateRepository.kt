@@ -10,7 +10,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
-import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -32,6 +31,7 @@ class UpdateRepository(
     private val context: Context,
     private val client: OkHttpClient = OkHttpClient(),
     private val streamSource: UpdateStreamSource = HttpUpdateStreamSource(client),
+    private val releaseSource: UpdateReleaseSource = HttpUpdateReleaseSource(client),
     /** Backoff between download attempts; overridable so tests don't wait. */
     private val retryDelayMs: Long = RETRY_DELAY_MS
 ) {
@@ -100,6 +100,7 @@ class UpdateRepository(
                     .put("url", update.downloadUrl)
                     .put("size", update.assetSize)
                     .put("digest", update.assetDigest ?: "")
+                    .put("versionCode", update.versionCode)
                     .toString()
             )
         }
@@ -119,85 +120,89 @@ class UpdateRepository(
         return true
     }
 
+    /**
+     * Fetches the latest release and, when its version is newer than the running
+     * app's, records it as [availableUpdate]. A download a previous run finished
+     * for an older release is deleted here — see the marker check below.
+     */
     suspend fun checkForUpdates(): Boolean = withContext(Dispatchers.IO) {
         _updateState.value = UpdateState.CHECKING
         _updateError.value = null
         try {
-            val request = Request.Builder()
-                .url(RELEASES_URL)
-                .header("Accept", "application/vnd.github.v3+json")
-                .build()
+            val json = releaseSource.fetchLatestRelease()
 
-            client.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) {
-                    throw Exception("Update check failed (HTTP ${response.code})")
-                }
-                val body = response.body?.string() ?: throw Exception("Empty response")
-                val json = JSONObject(body)
+            val tagName = json.optString("tag_name", "")
+            val versionName = json.optString("name").ifBlank { tagName }
+            val notes = json.optString("body", "")
 
-                val tagName = json.optString("tag_name", "")
-                val versionName = json.optString("name").ifBlank { tagName }
-                val notes = json.optString("body", "")
+            var apkName: String? = null
+            var apkSize = 0L
+            var apkDigest: String? = null
 
-                var apkName: String? = null
-                var apkSize = 0L
-                var apkDigest: String? = null
+            // Find the -debug.apk file from assets
+            val assets = json.getJSONArray("assets")
+            for (i in 0 until assets.length()) {
+                val assetJSON = assets.getJSONObject(i)
+                val name = assetJSON.optString("name", "")
 
-                // Find the -debug.apk file from assets
-                val assets = json.getJSONArray("assets")
-                for (i in 0 until assets.length()) {
-                    val assetJSON = assets.getJSONObject(i)
-                    val name = assetJSON.optString("name", "")
-
-                    when {
-                        name.contains("-debug.apk", ignoreCase = true) -> {
-                            apkName = name
-                            apkSize = assetJSON.optLong("size", 0L)
-                            apkDigest = UpdateDownloadVerifier.normalizeDigest(
-                                assetJSON.optString("digest", "")
-                            )
-                            break
-                        }
-                        name.endsWith(".apk", ignoreCase = true) && apkName == null -> {
-                            apkName = name
-                            apkSize = assetJSON.optLong("size", 0L)
-                            apkDigest = UpdateDownloadVerifier.normalizeDigest(
-                                assetJSON.optString("digest", "")
-                            )
-                        }
+                when {
+                    name.contains("-debug.apk", ignoreCase = true) -> {
+                        apkName = name
+                        apkSize = assetJSON.optLong("size", 0L)
+                        apkDigest = UpdateDownloadVerifier.normalizeDigest(
+                            assetJSON.optString("digest", "")
+                        )
+                        break
+                    }
+                    name.endsWith(".apk", ignoreCase = true) && apkName == null -> {
+                        apkName = name
+                        apkSize = assetJSON.optLong("size", 0L)
+                        apkDigest = UpdateDownloadVerifier.normalizeDigest(
+                            assetJSON.optString("digest", "")
+                        )
                     }
                 }
-                if (apkName == null) throw Exception("No -debug.apk asset in latest release")
-
-                // Construct direct download URL: https://github.com/{owner}/{repo}/releases/download/{tag}/{file}
-                val owner = "gamistudios"
-                val repo = "Agentisco"
-                val apkUrl = "https://github.com/$owner/$repo/releases/download/$tagName/$apkName"
-
-                val remoteCode = parseVersionCode(tagName.ifBlank { versionName })
-                val localCode = currentVersionCode()
-
-                val isNewer = remoteCode > localCode
-                if (isNewer) {
-                    adoptAvailableUpdate(
-                        AvailableUpdate(
-                            tagName = tagName,
-                            versionName = versionName,
-                            versionCode = remoteCode,
-                            downloadUrl = apkUrl,
-                            releaseNotes = notes,
-                            assetName = apkName,
-                            assetSize = apkSize,
-                            assetDigest = apkDigest
-                        )
-                    )
-                } else {
-                    _availableUpdate.value = null
-                    _downloadedApkPath.value = null
-                    _updateState.value = UpdateState.IDLE
-                }
-                isNewer
             }
+            if (apkName == null) throw Exception("No -debug.apk asset in latest release")
+
+            // Construct direct download URL: https://github.com/{owner}/{repo}/releases/download/{tag}/{file}
+            val owner = "gamistudios"
+            val repo = "Agentisco"
+            val apkUrl = "https://github.com/$owner/$repo/releases/download/$tagName/$apkName"
+
+            val remoteCode = parseVersionCode(tagName.ifBlank { versionName })
+            val localCode = currentVersionCode()
+
+            val isNewer = remoteCode > localCode
+            if (isNewer) {
+                val candidate = AvailableUpdate(
+                    tagName = tagName,
+                    versionName = versionName,
+                    versionCode = remoteCode,
+                    downloadUrl = apkUrl,
+                    releaseNotes = notes,
+                    assetName = apkName,
+                    assetSize = apkSize,
+                    assetDigest = apkDigest
+                )
+                // Whatever a previous run finished downloading belongs to an older
+                // release than the one just found, so throw it away instead of
+                // leaving a stale apk in filesDir. Only a marker that names this
+                // very release (the check ran again for an already-finished
+                // download) survives, so adoptAvailableUpdate can offer Install
+                // right away. A marker without a versionCode predates version
+                // tracking and is stale by definition.
+                val markerJson = runCatching { JSONObject(markerFile().readText()) }.getOrNull()
+                if (markerJson != null && markerJson.optLong("versionCode", -1L) != remoteCode) {
+                    deleteDownloadedUpdate()
+                }
+                adoptAvailableUpdate(candidate)
+            } else {
+                _availableUpdate.value = null
+                _downloadedApkPath.value = null
+                _updateState.value = UpdateState.IDLE
+            }
+            isNewer
         } catch (e: CancellationException) {
             _updateState.value = UpdateState.IDLE
             throw e
@@ -563,7 +568,6 @@ class UpdateRepository(
     }
 
     companion object {
-        private const val RELEASES_URL = "https://api.github.com/repos/gamistudios/Agentisco/releases/latest"
         private const val UPDATE_APK_NAME = "agentisco-update.apk"
         private const val UPDATE_META_NAME = "agentisco-update.meta.json"
         private const val MAX_ATTEMPTS = 5
