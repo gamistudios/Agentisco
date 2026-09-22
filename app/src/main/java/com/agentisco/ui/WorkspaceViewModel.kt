@@ -1066,6 +1066,10 @@ class WorkspaceViewModel(
     repository.dismissGitError()
   }
 
+  fun clearGitIndexLock() {
+    repository.clearGitIndexLock()
+  }
+
   fun clearGitOperationFeedback() {
     repository.clearGitOperationFeedback()
   }

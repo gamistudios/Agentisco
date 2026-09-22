@@ -172,7 +172,7 @@ class ExampleRobolectricTest {
       // Scaffold files are untracked on a fresh repo — create the initial commit.
       val scaffold = git.getChangedFiles(project).toSet()
       assertTrue(scaffold.isNotEmpty())
-      assertNotNull(git.commit(project, scaffold, "chore: initial commit"))
+      assertNotNull(git.commit(project, scaffold, "chore: initial commit").commit)
       // With everything committed, the working tree is clean.
       assertTrue(git.getChangedFiles(project).isEmpty())
 
@@ -183,10 +183,10 @@ class ExampleRobolectricTest {
       assertEquals("package.json", changedDiffs.first().filePath)
 
       // Commit changes
-      val commit = git.commit(project, setOf("package.json"), "Update package name")
+      val commit = git.commit(project, setOf("package.json"), "Update package name").commit
       assertNotNull(commit)
       assertEquals("Update package name", commit?.message)
-      assertTrue(git.getCommitHistory(project).any { it.message == "Update package name" })
+      assertTrue(git.getCommitHistory(project)?.any { it.message == "Update package name" } == true)
 
       // After commit, should be clean
       assertTrue(git.computeAllDiffs(project).isEmpty())

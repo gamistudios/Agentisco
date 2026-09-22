@@ -16,6 +16,9 @@ data class GitRunResult(val exitCode: Int, val output: String) {
   val success: Boolean get() = exitCode == 0
 }
 
+/** Result of a commit attempt: either the new commit, or git's failure output. */
+data class GitCommitResult(val commit: GitCommit?, val errorOutput: String?)
+
 /**
  * Real git manager, executed in the workspace context.
  * Provides complete VS Code-grade Source Control and Git operations.
@@ -416,14 +419,14 @@ class GitRepositoryManager(
     stagedFiles: Set<String>,
     message: String,
     amend: Boolean = false
-  ): GitCommit? {
-    if (message.isBlank()) return null
+  ): GitCommitResult {
+    if (message.isBlank()) return GitCommitResult(null, "Commit message is empty.")
     if (stagedFiles.isNotEmpty()) {
       stageFiles(project, stagedFiles)
     }
 
     val lines = message.trim().lines()
-    val subject = lines.firstOrNull { it.isNotBlank() }?.take(72) ?: return null
+    val subject = lines.firstOrNull { it.isNotBlank() }?.take(72) ?: return GitCommitResult(null, "Commit message is empty.")
     val body = lines.dropWhile { it.isBlank() }.drop(1)
       .dropWhile { it.isBlank() }.joinToString("\n").trim()
 
@@ -434,20 +437,28 @@ class GitRepositoryManager(
       git(project, "git commit $amendFlag -m ${shellQuote(subject)}")
     }
 
-    if (!commitResult.success && !commitResult.output.contains("nothing to commit")) return null
+    if (!commitResult.success && !commitResult.output.contains("nothing to commit")) {
+      return GitCommitResult(
+        null,
+        commitResult.output.ifBlank { "git commit failed (exit ${commitResult.exitCode})" }
+      )
+    }
 
     val hash = git(project, "git rev-parse --short HEAD").output.trim().ifBlank { "unknown" }
     val fullHash = git(project, "git rev-parse HEAD").output.trim()
 
-    return GitCommit(
-      hash = hash,
-      message = subject,
-      author = "Agentisco Developer",
-      date = SimpleDateFormat("MMM d, yyyy HH:mm", Locale.getDefault()).format(Date()),
-      filesChanged = stagedFiles.toList(),
-      relativeDate = "just now",
-      fullHash = fullHash,
-      body = body
+    return GitCommitResult(
+      GitCommit(
+        hash = hash,
+        message = subject,
+        author = "Agentisco Developer",
+        date = SimpleDateFormat("MMM d, yyyy HH:mm", Locale.getDefault()).format(Date()),
+        filesChanged = stagedFiles.toList(),
+        relativeDate = "just now",
+        fullHash = fullHash,
+        body = body
+      ),
+      null
     )
   }
 
@@ -461,15 +472,27 @@ class GitRepositoryManager(
 
   // ---- Commit History & Details ----
 
-  suspend fun getCommitHistory(project: Project, limit: Int = 30, offset: Int = 0): List<GitCommit> {
-    if (!isGitRepository(project)) return emptyList()
+  /**
+   * Loads commit history. Returns null when the history could not be determined
+   * (transient git failure — callers should keep their previous list), and an
+   * empty list when the repository genuinely has no commits yet.
+   */
+  suspend fun getCommitHistory(project: Project, limit: Int = 30, offset: Int = 0): List<GitCommit>? {
+    if (!isGitRepository(project)) return null
 
-    val checkHead = git(project, "git rev-parse --verify HEAD 2>/dev/null")
-    if (!checkHead.success) return emptyList()
+    val checkHead = git(project, "git rev-parse --verify HEAD")
+    if (!checkHead.success) {
+      val noCommits = checkHead.output.contains("ambiguous argument 'HEAD'") ||
+        checkHead.output.contains("bad revision") ||
+        checkHead.output.contains("does not have any commits")
+      return if (noCommits) emptyList() else null
+    }
 
     // Log format: %h | %H | %an | %ae | %ci | %cr | %d | %s
     val logCmd = "git log --pretty=format:%h|%H|%an|%ae|%ci|%cr|%d|%s -n $limit --skip $offset"
-    val out = git(project, logCmd).output
+    val logRes = git(project, logCmd)
+    if (!logRes.success) return null
+    val out = logRes.output
     if (out.isBlank()) return emptyList()
 
     return out.lines().filter { it.contains("|") }.map { line ->
@@ -818,6 +841,43 @@ class GitRepositoryManager(
   suspend fun stashDrop(project: Project, index: Int = 0): GitRunResult =
     git(project, "git stash drop stash@{$index}")
 
+  // ---- index.lock recovery ----
+
+  /** Resolves the real `.git` directory, following gitfiles (worktrees/submodules). */
+  private fun gitDirFor(projectPath: String): File? {
+    val dotGit = File(projectPath, ".git")
+    return when {
+      dotGit.isDirectory -> dotGit
+      dotGit.isFile -> runCatching {
+        val raw = dotGit.readText().trim().removePrefix("gitdir:").trim()
+        if (raw.isBlank()) null
+        else {
+          val dir = if (File(raw).isAbsolute) File(raw) else File(dotGit.parentFile, raw)
+          dir.takeIf { it.isDirectory }
+        }
+      }.getOrNull()
+      else -> null
+    }
+  }
+
+  fun indexLockFile(projectPath: String): File? =
+    gitDirFor(projectPath)?.let { File(it, "index.lock") }
+
+  fun hasIndexLock(projectPath: String): Boolean =
+    indexLockFile(projectPath)?.exists() == true
+
+  /** Deletes a stale `.git/index.lock`. True when no lock remains afterwards. */
+  fun removeIndexLock(projectPath: String): Boolean {
+    val lock = indexLockFile(projectPath) ?: return false
+    return !lock.exists() || lock.delete()
+  }
+
   private fun shellQuote(text: String): String =
     "'" + text.replace("'", "'\\''") + "'"
+
+  companion object {
+    /** True when git output indicates an index.lock conflict (live or crashed process). */
+    fun isIndexLockError(output: String): Boolean =
+      output.contains("index.lock", ignoreCase = true)
+  }
 }

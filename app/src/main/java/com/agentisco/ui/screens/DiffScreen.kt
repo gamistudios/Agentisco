@@ -483,6 +483,11 @@ fun DiffScreen(
             lineHeight = 15.sp,
             modifier = Modifier.weight(1f)
           )
+          if (gitError!!.contains("index.lock", ignoreCase = true)) {
+            TextButton(onClick = { viewModel.clearGitIndexLock() }) {
+              Text("Remove lock", fontSize = 11.sp, color = DangerRed)
+            }
+          }
           IconButton(
             onClick = { clipboard.setText(AnnotatedString(gitError!!)) },
             modifier = Modifier.size(26.dp)

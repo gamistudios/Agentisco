@@ -287,6 +287,11 @@ fun GitScreen(
           Icon(Icons.Outlined.Warning, contentDescription = null, tint = DangerRed, modifier = Modifier.size(16.dp))
           Spacer(modifier = Modifier.width(8.dp))
           Text(text = gitError!!, color = DangerRed, fontSize = 11.sp, lineHeight = 15.sp, modifier = Modifier.weight(1f))
+          if (gitError!!.contains("index.lock", ignoreCase = true)) {
+            TextButton(onClick = { viewModel.clearGitIndexLock() }) {
+              Text("Remove lock", fontSize = 11.sp, color = DangerRed)
+            }
+          }
           IconButton(onClick = { clipboard.setText(AnnotatedString(gitError!!)) }, modifier = Modifier.size(26.dp)) {
             Icon(Icons.Outlined.ContentCopy, contentDescription = "Copy", tint = TextMuted, modifier = Modifier.size(13.dp))
           }

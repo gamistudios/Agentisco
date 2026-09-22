@@ -468,8 +468,9 @@ class GitCommitTool(private val git: GitRepositoryManager, private val stagedFil
     if (!ctx.permissions().gitCommit) return ToolResult(false, error = "Blocked by permission policy: git commits are not allowed.")
     val staged = stagedFilesProvider()
     if (staged.isEmpty()) return ToolResult(false, error = "Nothing is staged. Stage changes with git_stage first.")
-    val commit = git.commit(ctx.project, staged, message)
+    val result = git.commit(ctx.project, staged, message)
+    val commit = result.commit
     return if (commit != null) ToolResult(true, output = "Committed ${staged.size} file(s): ${commit.hash} ${commit.message}", metadata = mapOf("hash" to commit.hash))
-    else ToolResult(false, error = "Commit failed")
+    else ToolResult(false, error = "Commit failed: ${result.errorOutput ?: "unknown error"}")
   }
 }

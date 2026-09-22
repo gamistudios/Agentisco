@@ -35,6 +35,8 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 
@@ -145,8 +147,17 @@ class WorkspaceRepository(
   /**
    * Executes a real `git` command inside the rootfs with the project folder
    * mounted as the workspace — the same environment the terminal uses.
+   * Runs are serialized per project so background status refreshes can never
+   * collide with long operations (pull/commit) over `.git/index.lock`.
    */
   private suspend fun runGitCommand(projectPath: String, args: String): com.agentisco.workspace.git.GitRunResult {
+    val mutex = gitRunMutexes.getOrPut(projectPath) { Mutex() }
+    return mutex.withLock { runGitCommandUnlocked(projectPath, args) }
+  }
+
+  private val gitRunMutexes = java.util.concurrent.ConcurrentHashMap<String, Mutex>()
+
+  private suspend fun runGitCommandUnlocked(projectPath: String, args: String): com.agentisco.workspace.git.GitRunResult {
     val out = StringBuilder()
     val runnerSession = TerminalSession(
       id = "git-runner-" + projectPath.hashCode(),
@@ -517,6 +528,35 @@ class WorkspaceRepository(
     _gitError.value = null
   }
 
+  /** One-click recovery from a stale `.git/index.lock`. */
+  fun clearGitIndexLock() {
+    val projectPath = _activeProject.value.path
+    if (projectPath.isBlank()) {
+      _gitError.value = "No project is open."
+      return
+    }
+    repositoryScope.launch {
+      val outcome = withContext(Dispatchers.IO) {
+        val existed = gitManager.hasIndexLock(projectPath)
+        val removed = gitManager.removeIndexLock(projectPath)
+        Triple(removed, existed, gitManager.indexLockFile(projectPath)?.absolutePath)
+      }
+      val (removed, existed, lockPath) = outcome
+      if (removed && existed) {
+        _gitError.value = null
+        _gitOperationFeedback.value = "Removed stale lock file ($lockPath). Retry the operation."
+        refreshDiffsAndGit()
+      } else if (removed && !existed) {
+        _gitError.value = null
+        _gitOperationFeedback.value = "No lock file present — it may have cleared itself. Retry the operation."
+        refreshDiffsAndGit()
+      } else {
+        _gitError.value = "Could not remove the lock file${lockPath?.let { " at $it" } ?: ""}. " +
+          "Another git process may still be running (check open terminals)."
+      }
+    }
+  }
+
   private fun reportGitError(operation: String, result: com.agentisco.workspace.git.GitRunResult?) {
     _gitError.value = when {
       result == null -> null
@@ -864,6 +904,7 @@ class WorkspaceRepository(
   }
 
   private var gitRefreshJob: Job? = null
+  private var gitHistoryProjectPath: String = ""
 
   /** Refreshes diffs/staging/history/status from real git, asynchronously. */
   fun refreshDiffsAndGit() {
@@ -912,7 +953,14 @@ class WorkspaceRepository(
             isDirty = !status.isClean
           )
         }
-        _commitHistory.value = gitManager.getCommitHistory(project, limit = 30)
+        // Keep the previous list when git could not answer (transient failure)
+        // so the History tab doesn't flicker empty during lock contention.
+        if (gitHistoryProjectPath != project.path) {
+          gitHistoryProjectPath = project.path
+          if (_commitHistory.value.isNotEmpty()) _commitHistory.value = emptyList()
+        }
+        val history = gitManager.getCommitHistory(project, limit = 30)
+        if (history != null) _commitHistory.value = history
       } catch (e: Exception) {
         if (e !is kotlinx.coroutines.CancellationException) {
           android.util.Log.e("ScoOS-Git", "git refresh failed", e)
@@ -1231,6 +1279,10 @@ class WorkspaceRepository(
 
   fun saveActiveFile() {
     val file = _activeFile.value
+    if (file.path.isEmpty()) return
+    // Binary viewer files are never round-tripped through the text editor —
+    // writing the (deliberately empty) editor buffer would destroy them.
+    if (com.agentisco.editor.model.FileViewer.mustNotDecodeAsText(file.name)) return
     val text = _editorContent.value
     fileSystem.writeFile(_activeProject.value, file.path, text)
     _activeFile.value = file.copy(content = text, sizeBytes = text.length.toLong())
@@ -1274,11 +1326,10 @@ class WorkspaceRepository(
 
   fun duplicateFile(relativePath: String): Boolean {
     val project = _activeProject.value
-    val content = fileSystem.readFile(project, relativePath)
     val ext = relativePath.substringAfterLast(".", "")
     val base = if (ext.isNotEmpty()) relativePath.substringBeforeLast(".") else relativePath
     val newPath = if (ext.isNotEmpty()) "${base}_copy.$ext" else "${base}_copy"
-    val success = fileSystem.createFile(project, newPath, content)
+    val success = fileSystem.copyFile(project, relativePath, newPath)
     if (success) {
       refreshFiles()
     }
@@ -1558,7 +1609,8 @@ class WorkspaceRepository(
     repositoryScope.launch {
       _activeGitOperationText.value = if (amend) "Amending commit..." else "Committing..."
       try {
-        val commit = gitManager.commit(_activeProject.value, _stagedFiles.value, message, amend = amend)
+        val result = gitManager.commit(_activeProject.value, _stagedFiles.value, message, amend = amend)
+        val commit = result.commit
         if (commit != null) {
           _gitError.value = null
           _gitOperationFeedback.value = if (amend) "Amended commit: ${commit.hash}" else "Committed: ${commit.hash}"
@@ -1567,7 +1619,7 @@ class WorkspaceRepository(
           refreshDiffsAndGit()
           maybeAutoSync(_activeProject.value)
         } else {
-          _gitError.value = "Commit failed. Is the folder a git repository and are changes staged?"
+          _gitError.value = "Commit failed: " + (result.errorOutput ?: "is the folder a git repository and are changes staged?")
         }
       } catch (e: Exception) {
         android.util.Log.e("ScoOS-Git", "commit failed", e)
@@ -1587,7 +1639,8 @@ class WorkspaceRepository(
     repositoryScope.launch {
       _activeGitOperationText.value = "Committing & Pushing..."
       try {
-        val commit = gitManager.commit(_activeProject.value, _stagedFiles.value, message)
+        val result = gitManager.commit(_activeProject.value, _stagedFiles.value, message)
+        val commit = result.commit
         if (commit != null) {
           _stagedFiles.value = emptySet()
           _commitMessage.value = ""
@@ -1602,7 +1655,7 @@ class WorkspaceRepository(
           refreshDiffsAndGit()
           maybeAutoSync(_activeProject.value)
         } else {
-          _gitError.value = "Commit failed. Check staged changes."
+          _gitError.value = "Commit failed: " + (result.errorOutput ?: "check staged changes.")
         }
       } catch (e: Exception) {
         _gitError.value = "Commit and push failed: ${e.message}"
@@ -1631,7 +1684,7 @@ class WorkspaceRepository(
     val current = _commitHistory.value
     repositoryScope.launch {
       val more = gitManager.getCommitHistory(_activeProject.value, limit = 30, offset = current.size)
-      if (more.isNotEmpty()) {
+      if (!more.isNullOrEmpty()) {
         _commitHistory.value = current + more
       }
     }
