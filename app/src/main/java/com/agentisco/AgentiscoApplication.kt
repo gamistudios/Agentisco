@@ -25,6 +25,17 @@ class AgentiscoApplication : Application() {
     installCrashCapture()
   }
 
+  /** Returns the previous run's captured crash log, or null if there was none. */
+  fun readLastCrashLog(): String? = runCatching {
+    val file = File(filesDir, CRASH_FILE)
+    if (!file.exists() || file.length() == 0L) null else file.readText()
+  }.getOrNull()
+
+  /** Deletes the captured crash log so it stops surfacing on every launch. */
+  fun clearLastCrashLog(): Boolean = runCatching {
+    File(filesDir, CRASH_FILE).delete()
+  }.getOrDefault(false)
+
   /**
    * Writes every uncaught exception to files/scoos-last-crash.txt before the
    * process dies, so a terminal crash can be diagnosed on-device (the file is

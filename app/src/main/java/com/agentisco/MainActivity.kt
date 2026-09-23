@@ -22,6 +22,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.agentisco.BuildConfig
 import com.agentisco.core.model.AppDestination
 import com.agentisco.data.repository.UpdateRepository
 import com.agentisco.data.repository.WorkspaceRepository
@@ -79,6 +80,10 @@ fun AgentIDEApp(
 
   // Auto-update state
   val updateUiState by updateViewModel.uiState.collectAsState()
+
+  // Debug builds surface the previous run's captured crash trace once per
+  // cold start, so a hard crash can be inspected without logcat.
+  var isCrashLogVisible by remember { mutableStateOf(BuildConfig.DEBUG) }
 
   // Kick off a background update check when the auto-update toggle allows it.
   LaunchedEffect(Unit) {
@@ -186,7 +191,8 @@ fun AgentIDEApp(
           AppDestination.SETTINGS -> SettingsScreen(
             viewModel = viewModel,
             updateViewModel = updateViewModel,
-            onNavigate = { viewModel.navigateTo(it) }
+            onNavigate = { viewModel.navigateTo(it) },
+            onShowCrashLog = { isCrashLogVisible = true }
           )
         }
       }
@@ -244,6 +250,12 @@ fun AgentIDEApp(
         viewModel.toggleModelSheet(false)
       },
       onDismiss = { viewModel.toggleModelSheet(false) }
+    )
+
+    // Debug crash inspector (no-op in release builds).
+    CrashLogDialog(
+      visible = isCrashLogVisible,
+      onDismiss = { isCrashLogVisible = false }
     )
   }
 }

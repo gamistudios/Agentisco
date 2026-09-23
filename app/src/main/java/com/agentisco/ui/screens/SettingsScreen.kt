@@ -10,6 +10,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.outlined.BugReport
+import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -23,6 +25,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.agentisco.BuildConfig
 import com.agentisco.core.model.AppDestination
 import com.agentisco.agent.model.PermissionMode
 import com.agentisco.agent.model.UNLIMITED_ITERATIONS
@@ -34,6 +37,7 @@ fun SettingsScreen(
   viewModel: WorkspaceViewModel,
   updateViewModel: com.agentisco.ui.UpdateViewModel,
   onNavigate: (AppDestination) -> Unit,
+  onShowCrashLog: () -> Unit = {},
   modifier: Modifier = Modifier
 ) {
   val permissions by viewModel.permissions.collectAsState()
@@ -446,8 +450,55 @@ fun SettingsScreen(
       ScanExclusionsCard(viewModel)
     }
 
+    // Debug diagnostics: the crash trace the app captured from its last run.
+    if (BuildConfig.DEBUG) {
+      item {
+        DebugDiagnosticsCard(onShowCrashLog = onShowCrashLog)
+      }
+    }
+
     item {
       Spacer(modifier = Modifier.height(24.dp))
+    }
+  }
+}
+
+/**
+ * Debug-only shortcut back to [com.agentisco.ui.components.CrashLogDialog], so
+ * a captured crash can be re-opened after dismissing the launch-time popup.
+ */
+@Composable
+private fun DebugDiagnosticsCard(onShowCrashLog: () -> Unit) {
+  Card(
+    modifier = Modifier
+      .fillMaxWidth()
+      .clip(RoundedCornerShape(12.dp))
+      .border(1.dp, DarkBorder, RoundedCornerShape(12.dp)),
+    colors = CardDefaults.cardColors(containerColor = DarkSurface)
+  ) {
+    Column(modifier = Modifier.padding(14.dp)) {
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(Icons.Outlined.BugReport, contentDescription = null, tint = DangerRed, modifier = Modifier.size(16.dp))
+        Spacer(modifier = Modifier.width(8.dp))
+        Text("Debug Diagnostics", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+      }
+      Spacer(modifier = Modifier.height(8.dp))
+      Text(
+        "The previous run's crash trace is stored on-device and can be copied or exported " +
+          "for inspection without logcat.",
+        color = TextMuted,
+        fontSize = 11.sp,
+        lineHeight = 15.sp
+      )
+      Spacer(modifier = Modifier.height(10.dp))
+      OutlinedButton(
+        onClick = onShowCrashLog,
+        border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder)
+      ) {
+        Icon(Icons.Outlined.Description, contentDescription = null, modifier = Modifier.size(14.dp), tint = TextSecondary)
+        Spacer(modifier = Modifier.width(6.dp))
+        Text("Show last crash log", fontSize = 12.sp, color = TextPrimary)
+      }
     }
   }
 }

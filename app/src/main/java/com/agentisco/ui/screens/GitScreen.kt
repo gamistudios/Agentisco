@@ -89,6 +89,7 @@ fun GitScreen(
   var selectedCommitDiff by remember { mutableStateOf<String?>(null) }
   var selectedCommitForAction by remember { mutableStateOf<GitCommit?>(null) }
   var isCommitDetailLoading by remember { mutableStateOf(false) }
+  var commitDetailError by remember { mutableStateOf<String?>(null) }
 
   // AI Explain Commit State
   var aiCommitExplanation by remember { mutableStateOf<String?>(null) }
@@ -409,10 +410,24 @@ fun GitScreen(
           onLoadMore = { viewModel.loadMoreCommitHistory() },
           onSelectCommit = { commit ->
             selectedCommitForAction = commit
+            selectedCommitDetail = null
+            selectedCommitDiff = null
+            commitDetailError = null
             isCommitDetailLoading = true
             coroutineScope.launch {
-              selectedCommitDetail = viewModel.getCommitDetail(commit.hash)
-              selectedCommitDiff = viewModel.getCommitDiff(commit.hash)
+              // getCommitDetail already runs `git show` for the full diff, so
+              // derive the preview from it instead of running the whole
+              // (potentially multi-megabyte) fetch a second time. Any failure
+              // here must surface in the sheet rather than escape the
+              // coroutine and kill the app.
+              val result = runCatching { viewModel.getCommitDetail(commit.hash) }
+              if (selectedCommitForAction != commit) return@launch
+              val detail = result.getOrNull()
+              selectedCommitDetail = detail
+              selectedCommitDiff = detail?.diff
+              commitDetailError = result.exceptionOrNull()?.let {
+                "Failed to load commit details: ${it.message ?: it.javaClass.simpleName}"
+              }
               isCommitDetailLoading = false
             }
           }
@@ -903,6 +918,7 @@ fun GitScreen(
         selectedCommitDetail = null
         selectedCommitDiff = null
         aiCommitExplanation = null
+        commitDetailError = null
       },
       containerColor = DarkSurface,
       shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
@@ -1121,6 +1137,24 @@ fun GitScreen(
                   lineHeight = 14.sp
                 )
               }
+            }
+          }
+        } else if (commitDetailError != null) {
+          Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(8.dp),
+            color = DangerRedBg.copy(alpha = 0.25f),
+            border = androidx.compose.foundation.BorderStroke(1.dp, DangerRed.copy(alpha = 0.5f))
+          ) {
+            Row(
+              modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              Icon(Icons.Outlined.Warning, contentDescription = null, tint = DangerRed, modifier = Modifier.size(15.dp))
+              Spacer(modifier = Modifier.width(8.dp))
+              Text(commitDetailError!!, color = DangerRed, fontSize = 11.sp, lineHeight = 15.sp, modifier = Modifier.weight(1f))
             }
           }
         } else {
