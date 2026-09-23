@@ -908,8 +908,17 @@ class WorkspaceRepository(
   private var gitHistoryProjectPath: String = ""
   private var lastHistoryLoadAt = 0L
 
-  /** Refreshes diffs/staging/history/status from real git, asynchronously. */
-  fun refreshDiffsAndGit() {
+  /**
+   * Refreshes diffs/staging/history/status from real git, asynchronously.
+   *
+   * [forceHistoryReload] cancels the throttle and any in-flight history load so
+   * the History tab reflects an operation immediately. It is meant for calls
+   * after an operation rewrites history (reset / revert / cherry-pick / commit
+   * / merge…): git is briefly unreadable while HEAD moves, so the normal
+   * throttled loader can hold a stale list — which looks exactly like the
+   * operation did nothing.
+   */
+  fun refreshDiffsAndGit(forceHistoryReload: Boolean = false) {
     val project = _activeProject.value
     if (project.path.isBlank()) {
       _fileDiffs.value = emptyList()
@@ -929,6 +938,12 @@ class WorkspaceRepository(
       gitHistoryJob?.cancel()
       gitHistoryProjectPath = project.path
       _commitHistory.value = emptyList()
+      lastHistoryLoadAt = 0L
+    }
+    if (forceHistoryReload) {
+      // The previous load may be stuck in its retry loop against a repo that
+      // was momentarily unreadable; start over so the new HEAD is fetched.
+      gitHistoryJob?.cancel()
       lastHistoryLoadAt = 0L
     }
     val historyRecentlyLoaded =
@@ -1684,7 +1699,7 @@ class WorkspaceRepository(
           } else {
             _gitError.value = "Committed, but push failed: ${pushRes.output.ifBlank { "Unknown error" }}"
           }
-          refreshDiffsAndGit()
+          refreshDiffsAndGit(forceHistoryReload = true)
           maybeAutoSync(_activeProject.value)
         } else {
           _gitError.value = "Commit failed: " + (result.errorOutput ?: "check staged changes.")
@@ -1708,7 +1723,7 @@ class WorkspaceRepository(
         _gitError.value = "Undo commit failed: ${res.output.ifBlank { "Unknown error" }}"
       }
       _activeGitOperationText.value = null
-      refreshDiffsAndGit()
+      refreshDiffsAndGit(forceHistoryReload = true)
     }
   }
 
@@ -1741,7 +1756,7 @@ class WorkspaceRepository(
         _gitError.value = "Revert failed: ${res.output.ifBlank { "Unknown error" }}"
       }
       _activeGitOperationText.value = null
-      refreshDiffsAndGit()
+      refreshDiffsAndGit(forceHistoryReload = true)
     }
   }
 
@@ -1756,7 +1771,7 @@ class WorkspaceRepository(
         _gitError.value = "Cherry-pick failed: ${res.output.ifBlank { "Unknown error" }}"
       }
       _activeGitOperationText.value = null
-      refreshDiffsAndGit()
+      refreshDiffsAndGit(forceHistoryReload = true)
     }
   }
 
@@ -1771,7 +1786,7 @@ class WorkspaceRepository(
         _gitError.value = "Reset failed: ${res.output.ifBlank { "Unknown error" }}"
       }
       _activeGitOperationText.value = null
-      refreshDiffsAndGit()
+      refreshDiffsAndGit(forceHistoryReload = true)
     }
   }
 
@@ -1786,7 +1801,7 @@ class WorkspaceRepository(
         _gitError.value = "Checkout failed: ${res.output.ifBlank { "Unknown error" }}"
       }
       _activeGitOperationText.value = null
-      refreshDiffsAndGit()
+      refreshDiffsAndGit(forceHistoryReload = true)
       refreshFiles()
     }
   }
@@ -1847,7 +1862,7 @@ class WorkspaceRepository(
         _gitError.value = "Merge failed: ${res.output.ifBlank { "Unknown error" }}"
       }
       _activeGitOperationText.value = null
-      refreshDiffsAndGit()
+      refreshDiffsAndGit(forceHistoryReload = true)
       refreshFiles()
     }
   }
@@ -1881,7 +1896,7 @@ class WorkspaceRepository(
         _gitError.value = "Rebase failed: ${res.output.ifBlank { "Unknown error" }}"
       }
       _activeGitOperationText.value = null
-      refreshDiffsAndGit()
+      refreshDiffsAndGit(forceHistoryReload = true)
       refreshFiles()
     }
   }
@@ -1948,7 +1963,7 @@ class WorkspaceRepository(
         _gitError.value = "Pull failed: ${res.output.ifBlank { "Unknown error" }}"
       }
       _activeGitOperationText.value = null
-      refreshDiffsAndGit()
+      refreshDiffsAndGit(forceHistoryReload = true)
       refreshFiles()
     }
   }
@@ -1986,7 +2001,7 @@ class WorkspaceRepository(
         _gitError.value = "Pulled changes, but push failed: ${pushRes.output.ifBlank { "Unknown error" }}"
       }
       _activeGitOperationText.value = null
-      refreshDiffsAndGit()
+      refreshDiffsAndGit(forceHistoryReload = true)
       refreshFiles()
     }
   }

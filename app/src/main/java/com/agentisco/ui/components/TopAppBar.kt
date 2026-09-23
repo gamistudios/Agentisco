@@ -48,7 +48,9 @@ fun AgentIDETopAppBar(
   updateState: UpdateRepository.UpdateState? = null,
   updateProgress: Float = 0f,
   hasNewUpdate: Boolean = false,
-  onUpdateClick: (() -> Unit)? = null
+  onUpdateClick: (() -> Unit)? = null,
+  /** Debug builds only: opens the last-run crash trace. Null hides the button. */
+  onShowCrashLog: (() -> Unit)? = null
 ) {
   Surface(
     modifier = modifier
@@ -75,6 +77,19 @@ fun AgentIDETopAppBar(
           )
 
           // One-handed reach strip: update · command palette · settings.
+          if (onShowCrashLog != null) {
+            HeaderIconButton(
+              icon = Icons.Outlined.BugReport,
+              contentDescription = "Crash log available — tap to inspect",
+              tint = DangerRed,
+              borderColor = DangerRed.copy(alpha = 0.65f),
+              background = DangerRed.copy(alpha = 0.10f),
+              onClick = onShowCrashLog,
+              showDot = true,
+              testTag = "top_crash_log"
+            )
+          }
+
           if (onUpdateClick != null) {
             HeaderIconButton(
               icon = Icons.Outlined.SystemUpdateAlt,

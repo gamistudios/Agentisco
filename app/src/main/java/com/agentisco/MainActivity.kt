@@ -32,6 +32,8 @@ import com.agentisco.ui.components.*
 import com.agentisco.ui.screens.*
 import com.agentisco.ui.theme.DarkBackground
 import com.agentisco.ui.theme.AgentiscoTheme
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
@@ -85,6 +87,14 @@ fun AgentIDEApp(
   // cold start, so a hard crash can be inspected without logcat.
   var isCrashLogVisible by remember { mutableStateOf(BuildConfig.DEBUG) }
 
+  // The header bug button appears on every screen once a crash has been
+  // captured, so the trace is reachable from wherever the crash happened.
+  val app = LocalContext.current.applicationContext as AgentiscoApplication
+  var hasCrashLog by remember { mutableStateOf(false) }
+  LaunchedEffect(Unit) {
+    hasCrashLog = withContext(Dispatchers.IO) { app.readLastCrashLog() != null }
+  }
+
   // Kick off a background update check when the auto-update toggle allows it.
   LaunchedEffect(Unit) {
     updateViewModel.checkForUpdates(isAuto = true)
@@ -135,7 +145,10 @@ fun AgentIDEApp(
             updateUiState.updateState == UpdateRepository.UpdateState.CHECKING -> Unit
             else -> updateViewModel.checkForUpdates(isAuto = false)
           }
-        }
+        },
+        onShowCrashLog = if (BuildConfig.DEBUG && hasCrashLog) {
+          { isCrashLogVisible = true }
+        } else null
       )
     },
     bottomBar = {

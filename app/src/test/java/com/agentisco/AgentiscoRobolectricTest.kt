@@ -222,6 +222,60 @@ class ExampleRobolectricTest {
   }
 
   @Test
+  fun `git reset soft mixed and hard move HEAD to the chosen commit`() {
+    kotlinx.coroutines.runBlocking {
+      val gitExe = resolveGitBinary()
+      org.junit.Assume.assumeTrue("git binary not available on this machine - skipping real-git test", gitExe != null)
+      val tempDir = File(System.getProperty("java.io.tmpdir"), "test_reset_${System.currentTimeMillis()}")
+      tempDir.deleteOnExit()
+      val fs = ProjectFileSystem(tempDir)
+      val project = fs.createProject("ResetTest", "reset testing")
+      val git = GitRepositoryManager(fs) { path, args -> runGitForTest(gitExe!!, path, args) }
+
+      assertTrue(git.initRepository(project))
+      runGitForTest(gitExe!!, project.path, "git config user.name Test")
+      runGitForTest(gitExe!!, project.path, "git config user.email test@test")
+      runGitForTest(gitExe!!, project.path, "git config core.autocrlf false")
+
+      git.commit(project, git.getChangedFiles(project).toSet(), "chore: first commit")
+      fs.writeFile(project, "package.json", "{\n  \"name\": \"v2\"\n}")
+      git.commit(project, setOf("package.json"), "second commit")
+
+      val history = git.getCommitHistory(project)!!
+      val first = history.last { it.message == "chore: first commit" }
+      val headBefore = runGitForTest(gitExe!!, project.path, "git rev-parse HEAD").output.trim()
+      assertEquals("second commit", history.first().message)
+
+      // --hard: HEAD moves back and the working tree change disappears.
+      val hard = git.resetToCommit(project, first.hash, com.agentisco.workspace.git.ResetMode.HARD)
+      assertTrue("reset --hard failed: ${hard.output}", hard.success)
+      val headAfterHard = runGitForTest(gitExe!!, project.path, "git rev-parse HEAD").output.trim()
+      assertEquals(first.fullHash.ifBlank { first.hash }, headAfterHard)
+      assertEquals("", runGitForTest(gitExe!!, project.path, "git status --porcelain").output.trim())
+
+      // Recommit so soft/mixed have something to move back from.
+      fs.writeFile(project, "package.json", "{\n  \"name\": \"v3\"\n}")
+      git.commit(project, setOf("package.json"), "third commit")
+
+      val soft = git.resetToCommit(project, first.hash, com.agentisco.workspace.git.ResetMode.SOFT)
+      assertTrue("reset --soft failed: ${soft.output}", soft.success)
+      assertEquals(
+        first.fullHash.ifBlank { first.hash },
+        runGitForTest(gitExe!!, project.path, "git rev-parse HEAD").output.trim()
+      )
+      // --soft leaves the changes staged.
+      assertTrue(runGitForTest(gitExe!!, project.path, "git status --porcelain").output.trim().isNotEmpty())
+
+      val mixed = git.resetToCommit(project, first.hash, com.agentisco.workspace.git.ResetMode.MIXED)
+      assertTrue("reset --mixed failed: ${mixed.output}", mixed.success)
+      assertEquals(
+        first.fullHash.ifBlank { first.hash },
+        runGitForTest(gitExe!!, project.path, "git rev-parse HEAD").output.trim()
+      )
+    }
+  }
+
+  @Test
   fun `workspace view model saves active file and detects dirty state`() {
     val viewModel = WorkspaceViewModel()
     
