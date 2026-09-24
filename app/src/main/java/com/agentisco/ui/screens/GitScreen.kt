@@ -912,6 +912,14 @@ fun GitScreen(
   // 10. Commit Detail Modal Bottom Sheet
   if (selectedCommitForAction != null) {
     val commit = selectedCommitForAction!!
+    // Capture into plain locals before the sheet content: a LazyColumn's item
+    // lambda is re-evaluated by Compose as derived state during snapshot apply,
+    // so reading the nullable state directly inside it NPEs when dismissal
+    // nulls it in the same snapshot (before this `if` removes the sheet).
+    val detail = selectedCommitDetail
+    val diffText = selectedCommitDiff
+    val explanation = aiCommitExplanation
+    val errorText = commitDetailError
     ModalBottomSheet(
       onDismissRequest = {
         selectedCommitForAction = null
@@ -1048,7 +1056,7 @@ fun GitScreen(
             Spacer(modifier = Modifier.width(8.dp))
             Text("AI is explaining commit changes…", color = TextMuted, fontSize = 12.sp)
           }
-        } else if (aiCommitExplanation != null) {
+        } else if (explanation != null) {
           Spacer(modifier = Modifier.height(12.dp))
           Surface(
             modifier = Modifier.fillMaxWidth(),
@@ -1057,7 +1065,7 @@ fun GitScreen(
             border = androidx.compose.foundation.BorderStroke(1.dp, IndigoAccent.copy(alpha = 0.4f))
           ) {
             Text(
-              text = aiCommitExplanation!!,
+              text = explanation,
               color = TextPrimary,
               fontSize = 12.sp,
               lineHeight = 17.sp,
@@ -1075,7 +1083,7 @@ fun GitScreen(
           Box(modifier = Modifier.fillMaxWidth().height(80.dp), contentAlignment = Alignment.Center) {
             CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = ElectricBlue)
           }
-        } else if (selectedCommitDetail != null && selectedCommitDetail!!.filesChanged.isNotEmpty()) {
+        } else if (detail != null && detail.filesChanged.isNotEmpty()) {
           Surface(
             modifier = Modifier
               .fillMaxWidth()
@@ -1085,7 +1093,7 @@ fun GitScreen(
             border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorderSubtle)
           ) {
             LazyColumn(modifier = Modifier.padding(8.dp)) {
-              items(selectedCommitDetail!!.filesChanged) { file ->
+              items(detail.filesChanged) { file ->
                 Row(
                   modifier = Modifier
                     .fillMaxWidth()
@@ -1117,7 +1125,7 @@ fun GitScreen(
               }
             }
           }
-        } else if (!selectedCommitDiff.isNullOrBlank()) {
+        } else if (!diffText.isNullOrBlank()) {
           // Fallback raw diff preview
           Surface(
             modifier = Modifier
@@ -1130,7 +1138,7 @@ fun GitScreen(
             LazyColumn(modifier = Modifier.padding(10.dp)) {
               item {
                 Text(
-                  text = selectedCommitDiff!!,
+                  text = diffText,
                   color = TextCode,
                   fontSize = 10.sp,
                   fontFamily = FontFamily.Monospace,
@@ -1139,7 +1147,7 @@ fun GitScreen(
               }
             }
           }
-        } else if (commitDetailError != null) {
+        } else if (errorText != null) {
           Surface(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(8.dp),
@@ -1154,7 +1162,7 @@ fun GitScreen(
             ) {
               Icon(Icons.Outlined.Warning, contentDescription = null, tint = DangerRed, modifier = Modifier.size(15.dp))
               Spacer(modifier = Modifier.width(8.dp))
-              Text(commitDetailError!!, color = DangerRed, fontSize = 11.sp, lineHeight = 15.sp, modifier = Modifier.weight(1f))
+              Text(errorText, color = DangerRed, fontSize = 11.sp, lineHeight = 15.sp, modifier = Modifier.weight(1f))
             }
           }
         } else {
