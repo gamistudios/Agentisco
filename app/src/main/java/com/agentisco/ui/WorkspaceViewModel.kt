@@ -877,8 +877,8 @@ class WorkspaceViewModel(
     repository.updateSearchQuery(query)
   }
 
-  fun refreshDiffsAndGit() {
-    repository.refreshDiffsAndGit()
+  fun refreshDiffsAndGit(forceHistoryReload: Boolean = false) {
+    repository.refreshDiffsAndGit(forceHistoryReload)
   }
 
   fun toggleFileStaged(filePath: String) {

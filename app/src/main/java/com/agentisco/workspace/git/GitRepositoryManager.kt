@@ -603,13 +603,46 @@ class GitRepositoryManager(
   suspend fun continueCherryPick(project: Project): GitRunResult =
     git(project, "git cherry-pick --continue")
 
+  /**
+   * Moves the current branch to [hash] in the requested mode.
+   *
+   * The result is verified against `git rev-parse HEAD` before and after: a
+   * reset that exits 0 without actually moving HEAD (wrong working directory,
+   * unresolved revision, a hook, …) is reported as a failure with the real
+   * hashes, instead of looking like a silent no-op in the UI.
+   */
   suspend fun resetToCommit(project: Project, hash: String, mode: ResetMode): GitRunResult {
     val flag = when (mode) {
       ResetMode.SOFT -> "--soft"
       ResetMode.MIXED -> "--mixed"
       ResetMode.HARD -> "--hard"
     }
-    return git(project, "git reset $flag $hash")
+    val target = hash.trim()
+    if (target.isBlank()) return GitRunResult(1, "Reset needs a commit hash.")
+
+    val headBefore = git(project, "git rev-parse --verify HEAD 2>/dev/null")
+      .output.trim().lineSequence().firstOrNull().orEmpty()
+    val resolved = git(project, "git rev-parse --verify ${shellQuote("$target^{commit}")} 2>/dev/null")
+      .output.trim().lineSequence().firstOrNull().orEmpty()
+    if (resolved.isBlank()) {
+      return GitRunResult(1, "Cannot resolve '$target' to a commit in this repository.")
+    }
+
+    val res = git(project, "git reset $flag ${shellQuote(target)}")
+    if (!res.success) return res
+
+    val headAfter = git(project, "git rev-parse --verify HEAD 2>/dev/null")
+      .output.trim().lineSequence().firstOrNull().orEmpty()
+    val detail = res.output.trim().takeIf { it.isNotBlank() }?.let { "\n$it" }.orEmpty()
+    return if (headAfter == resolved) {
+      GitRunResult(0, "HEAD is now at ${headAfter.take(7)} (was ${headBefore.take(7).ifBlank { "unknown" }})$detail")
+    } else {
+      GitRunResult(
+        1,
+        "git reset $flag exited 0 but HEAD did not move: still ${headAfter.take(7).ifBlank { "unknown" }}, " +
+          "expected ${resolved.take(7)}$detail"
+      )
+    }
   }
 
   suspend fun compareCommits(project: Project, baseHash: String, targetHash: String): String =

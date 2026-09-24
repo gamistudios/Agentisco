@@ -1780,7 +1780,8 @@ class WorkspaceRepository(
       _activeGitOperationText.value = "Resetting to $hash..."
       val res = gitManager.resetToCommit(_activeProject.value, hash, mode)
       if (res.success) {
-        _gitOperationFeedback.value = "Reset to $hash completed"
+        // The manager verifies HEAD actually moved and reports the new hash.
+        _gitOperationFeedback.value = res.output.ifBlank { "Reset to $hash completed" }
         _gitError.value = null
       } else {
         _gitError.value = "Reset failed: ${res.output.ifBlank { "Unknown error" }}"

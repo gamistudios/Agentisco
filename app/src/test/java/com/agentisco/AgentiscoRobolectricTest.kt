@@ -243,35 +243,47 @@ class ExampleRobolectricTest {
 
       val history = git.getCommitHistory(project)!!
       val first = history.last { it.message == "chore: first commit" }
-      val headBefore = runGitForTest(gitExe!!, project.path, "git rev-parse HEAD").output.trim()
+      val firstRef = first.fullHash.ifBlank { first.hash }
       assertEquals("second commit", history.first().message)
 
       // --hard: HEAD moves back and the working tree change disappears.
-      val hard = git.resetToCommit(project, first.hash, com.agentisco.workspace.git.ResetMode.HARD)
+      val hard = git.resetToCommit(project, firstRef, com.agentisco.workspace.git.ResetMode.HARD)
       assertTrue("reset --hard failed: ${hard.output}", hard.success)
+      // The result must prove HEAD actually moved — a bare exit-0 is not enough.
+      assertTrue("expected a verified HEAD report, got: ${hard.output}", hard.output.contains("HEAD is now at"))
       val headAfterHard = runGitForTest(gitExe!!, project.path, "git rev-parse HEAD").output.trim()
-      assertEquals(first.fullHash.ifBlank { first.hash }, headAfterHard)
+      assertEquals(firstRef, headAfterHard)
       assertEquals("", runGitForTest(gitExe!!, project.path, "git status --porcelain").output.trim())
 
       // Recommit so soft/mixed have something to move back from.
       fs.writeFile(project, "package.json", "{\n  \"name\": \"v3\"\n}")
       git.commit(project, setOf("package.json"), "third commit")
 
-      val soft = git.resetToCommit(project, first.hash, com.agentisco.workspace.git.ResetMode.SOFT)
+      val soft = git.resetToCommit(project, firstRef, com.agentisco.workspace.git.ResetMode.SOFT)
       assertTrue("reset --soft failed: ${soft.output}", soft.success)
       assertEquals(
-        first.fullHash.ifBlank { first.hash },
+        firstRef,
         runGitForTest(gitExe!!, project.path, "git rev-parse HEAD").output.trim()
       )
       // --soft leaves the changes staged.
       assertTrue(runGitForTest(gitExe!!, project.path, "git status --porcelain").output.trim().isNotEmpty())
 
-      val mixed = git.resetToCommit(project, first.hash, com.agentisco.workspace.git.ResetMode.MIXED)
+      val mixed = git.resetToCommit(project, firstRef, com.agentisco.workspace.git.ResetMode.MIXED)
       assertTrue("reset --mixed failed: ${mixed.output}", mixed.success)
       assertEquals(
-        first.fullHash.ifBlank { first.hash },
+        firstRef,
         runGitForTest(gitExe!!, project.path, "git rev-parse HEAD").output.trim()
       )
+
+      // A blank target used to run `git reset --hard` with no revision, which
+      // silently resets to HEAD and reports success. It must now be rejected.
+      val blank = git.resetToCommit(project, "   ", com.agentisco.workspace.git.ResetMode.HARD)
+      assertFalse("blank hash must be rejected, got: ${blank.output}", blank.success)
+
+      // An unresolvable revision must fail loudly rather than exiting 0.
+      val bogus = git.resetToCommit(project, "deadbeefdeadbeef", com.agentisco.workspace.git.ResetMode.SOFT)
+      assertFalse("unresolvable revision must fail, got: ${bogus.output}", bogus.success)
+      assertTrue(bogus.output.contains("Cannot resolve"))
     }
   }
 

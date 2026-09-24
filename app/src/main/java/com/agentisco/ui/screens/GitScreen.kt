@@ -69,6 +69,16 @@ fun GitScreen(
 
   var currentTab by remember { mutableStateOf(GitTab.OVERVIEW) }
 
+  // Re-read history whenever the History tab is shown: a reset / revert / commit
+  // may have moved HEAD while this list was off-screen, and the throttled
+  // background loader can otherwise keep serving the pre-reset list.
+  val repoReadyForHistory = isGitRepo == true || repoStatus.isRepo
+  LaunchedEffect(currentTab, repoReadyForHistory) {
+    if (repoReadyForHistory && currentTab == GitTab.COMMITS) {
+      viewModel.refreshDiffsAndGit(forceHistoryReload = true)
+    }
+  }
+
   // Dialog States
   var showCreateBranchDialog by remember { mutableStateOf(false) }
   var branchToDelete by remember { mutableStateOf<GitBranch?>(null) }
@@ -167,7 +177,7 @@ fun GitScreen(
             horizontalArrangement = Arrangement.spacedBy(6.dp)
           ) {
             IconButton(
-              onClick = { viewModel.refreshDiffsAndGit() },
+              onClick = { viewModel.refreshDiffsAndGit(forceHistoryReload = true) },
               modifier = Modifier
                 .size(32.dp)
                 .testTag("btn_refresh_git")
@@ -261,10 +271,16 @@ fun GitScreen(
           verticalAlignment = Alignment.CenterVertically,
           horizontalArrangement = Arrangement.SpaceBetween
         ) {
-          Row(verticalAlignment = Alignment.CenterVertically) {
+          Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
             Icon(Icons.Outlined.CheckCircle, contentDescription = null, tint = TerminalGreen, modifier = Modifier.size(15.dp))
             Spacer(modifier = Modifier.width(8.dp))
-            Text(text = gitFeedback!!, color = TerminalGreen, fontSize = 12.sp)
+            Text(
+              text = gitFeedback!!,
+              color = TerminalGreen,
+              fontSize = 12.sp,
+              lineHeight = 16.sp,
+              modifier = Modifier.weight(1f)
+            )
           }
           IconButton(onClick = { viewModel.clearGitOperationFeedback() }, modifier = Modifier.size(24.dp)) {
             Icon(Icons.Default.Close, contentDescription = "Dismiss", tint = TextMuted, modifier = Modifier.size(14.dp))
@@ -1256,7 +1272,9 @@ fun GitScreen(
       confirmButton = {
         Button(
           onClick = {
-            val h = commit.hash
+            // Prefer the full hash: an abbreviated one can be ambiguous in a
+            // large repository and is resolved by git at reset time.
+            val h = commit.fullHash.ifBlank { commit.hash }
             val m = resetMode
             commitToReset = null
             viewModel.resetToCommit(h, m)
