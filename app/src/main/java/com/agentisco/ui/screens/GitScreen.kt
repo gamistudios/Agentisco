@@ -424,6 +424,7 @@ fun GitScreen(
         GitCommitsTab(
           commits = commitHistory,
           onLoadMore = { viewModel.loadMoreCommitHistory() },
+          onUndoLastCommit = { viewModel.undoLastCommit() },
           onSelectCommit = { commit ->
             selectedCommitForAction = commit
             selectedCommitDetail = null
@@ -1956,7 +1957,8 @@ private fun BranchRowItem(
 private fun GitCommitsTab(
   commits: List<GitCommit>,
   onLoadMore: () -> Unit,
-  onSelectCommit: (GitCommit) -> Unit
+  onSelectCommit: (GitCommit) -> Unit,
+  onUndoLastCommit: () -> Unit
 ) {
   var searchQuery by remember { mutableStateOf("") }
 
@@ -1974,6 +1976,24 @@ private fun GitCommitsTab(
       .fillMaxSize()
       .padding(horizontal = 14.dp, vertical = 10.dp)
   ) {
+    // "Reset to a commit" only moves the branch onto an older commit; dropping
+    // the newest commit itself needs its own action, which previously had no UI.
+    OutlinedButton(
+      onClick = onUndoLastCommit,
+      modifier = Modifier
+        .fillMaxWidth()
+        .height(34.dp)
+        .testTag("btn_undo_last_commit"),
+      contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+      border = androidx.compose.foundation.BorderStroke(1.dp, WarningAmber.copy(alpha = 0.5f))
+    ) {
+      Icon(Icons.AutoMirrored.Outlined.Undo, contentDescription = null, tint = WarningAmber, modifier = Modifier.size(14.dp))
+      Spacer(modifier = Modifier.width(6.dp))
+      Text("Undo last commit (keeps changes staged)", fontSize = 11.sp, color = TextPrimary)
+    }
+
+    Spacer(modifier = Modifier.height(8.dp))
+
     // Search Bar
     OutlinedTextField(
       value = searchQuery,

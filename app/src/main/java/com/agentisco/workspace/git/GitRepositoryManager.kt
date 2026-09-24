@@ -636,22 +636,32 @@ class GitRepositoryManager(
     val subject = git(project, "git log -1 --pretty=%s ${shellQuote(resolved)} 2>/dev/null")
       .output.trim().lineSequence().firstOrNull().orEmpty()
     val targetLabel = "${resolved.take(7)}${if (subject.isBlank()) "" else " \"$subject\""}"
+    // The hash as the UI handed it over, so a mismatch between the tapped row
+    // and the targeted commit is visible instead of silently resetting HEAD.
+    val requestedLabel = target.take(12)
     val detail = res.output.trim().takeIf { it.isNotBlank() }?.let { "\n$it" }.orEmpty()
 
     return when {
       headBefore == resolved ->
         // Resetting onto HEAD is a legitimate no-op for --hard (discard local
         // changes), but calling it "HEAD is now at X (was X)" is misleading.
-        GitRunResult(0, "Target $targetLabel is already HEAD — the branch was not moved.$detail")
+        GitRunResult(
+          0,
+          "Reset requested $requestedLabel, which resolves to $targetLabel — that is already HEAD, " +
+            "so the branch was not moved.$detail"
+        )
 
       headAfter == resolved ->
-        GitRunResult(0, "HEAD moved to $targetLabel (was ${headBefore.take(7).ifBlank { "unknown" }})$detail")
+        GitRunResult(
+          0,
+          "HEAD moved to $targetLabel (was ${headBefore.take(7).ifBlank { "unknown" }}); requested $requestedLabel$detail"
+        )
 
       else ->
         GitRunResult(
           1,
           "git reset $flag exited 0 but HEAD did not move: still ${headAfter.take(7).ifBlank { "unknown" }}, " +
-            "expected $targetLabel$detail"
+            "expected $targetLabel (requested $requestedLabel)$detail"
         )
     }
   }
