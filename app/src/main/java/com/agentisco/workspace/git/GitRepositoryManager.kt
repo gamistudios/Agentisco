@@ -606,10 +606,10 @@ class GitRepositoryManager(
   /**
    * Moves the current branch to [hash] in the requested mode.
    *
-   * The result is verified against `git rev-parse HEAD` before and after: a
-   * reset that exits 0 without actually moving HEAD (wrong working directory,
-   * unresolved revision, a hook, …) is reported as a failure with the real
-   * hashes, instead of looking like a silent no-op in the UI.
+   * The result is verified against `git rev-parse HEAD` before and after, and
+   * the message always names the commit that was actually targeted — so a reset
+   * that did not move the branch can never be reported as an unqualified
+   * success, and a wrong target is visible in the UI instead of silent.
    */
   suspend fun resetToCommit(project: Project, hash: String, mode: ResetMode): GitRunResult {
     val flag = when (mode) {
@@ -633,15 +633,26 @@ class GitRepositoryManager(
 
     val headAfter = git(project, "git rev-parse --verify HEAD 2>/dev/null")
       .output.trim().lineSequence().firstOrNull().orEmpty()
+    val subject = git(project, "git log -1 --pretty=%s ${shellQuote(resolved)} 2>/dev/null")
+      .output.trim().lineSequence().firstOrNull().orEmpty()
+    val targetLabel = "${resolved.take(7)}${if (subject.isBlank()) "" else " \"$subject\""}"
     val detail = res.output.trim().takeIf { it.isNotBlank() }?.let { "\n$it" }.orEmpty()
-    return if (headAfter == resolved) {
-      GitRunResult(0, "HEAD is now at ${headAfter.take(7)} (was ${headBefore.take(7).ifBlank { "unknown" }})$detail")
-    } else {
-      GitRunResult(
-        1,
-        "git reset $flag exited 0 but HEAD did not move: still ${headAfter.take(7).ifBlank { "unknown" }}, " +
-          "expected ${resolved.take(7)}$detail"
-      )
+
+    return when {
+      headBefore == resolved ->
+        // Resetting onto HEAD is a legitimate no-op for --hard (discard local
+        // changes), but calling it "HEAD is now at X (was X)" is misleading.
+        GitRunResult(0, "Target $targetLabel is already HEAD — the branch was not moved.$detail")
+
+      headAfter == resolved ->
+        GitRunResult(0, "HEAD moved to $targetLabel (was ${headBefore.take(7).ifBlank { "unknown" }})$detail")
+
+      else ->
+        GitRunResult(
+          1,
+          "git reset $flag exited 0 but HEAD did not move: still ${headAfter.take(7).ifBlank { "unknown" }}, " +
+            "expected $targetLabel$detail"
+        )
     }
   }
 

@@ -249,11 +249,20 @@ class ExampleRobolectricTest {
       // --hard: HEAD moves back and the working tree change disappears.
       val hard = git.resetToCommit(project, firstRef, com.agentisco.workspace.git.ResetMode.HARD)
       assertTrue("reset --hard failed: ${hard.output}", hard.success)
-      // The result must prove HEAD actually moved — a bare exit-0 is not enough.
-      assertTrue("expected a verified HEAD report, got: ${hard.output}", hard.output.contains("HEAD is now at"))
+      // The result must prove HEAD actually moved and name the target commit.
+      assertTrue("expected a verified move, got: ${hard.output}", hard.output.contains("HEAD moved to"))
+      assertTrue("expected the target subject, got: ${hard.output}", hard.output.contains("chore: first commit"))
       val headAfterHard = runGitForTest(gitExe!!, project.path, "git rev-parse HEAD").output.trim()
       assertEquals(firstRef, headAfterHard)
       assertEquals("", runGitForTest(gitExe!!, project.path, "git status --porcelain").output.trim())
+
+      // Resetting onto the current HEAD must say so, not report a fake move.
+      val ontoHead = git.resetToCommit(project, headAfterHard, com.agentisco.workspace.git.ResetMode.HARD)
+      assertTrue("reset onto HEAD should succeed: ${ontoHead.output}", ontoHead.success)
+      assertTrue(
+        "an onto-HEAD reset must be reported as a no-op, got: ${ontoHead.output}",
+        ontoHead.output.contains("already HEAD")
+      )
 
       // Recommit so soft/mixed have something to move back from.
       fs.writeFile(project, "package.json", "{\n  \"name\": \"v3\"\n}")
