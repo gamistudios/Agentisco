@@ -17,6 +17,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.outlined.Article
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.InsertDriveFile
+import androidx.compose.material.icons.automirrored.outlined.Undo
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
@@ -843,7 +844,7 @@ fun FilesScreen(
 
             // Stage / Unstage
             FileOptionRowItem(
-              icon = if (isStaged) Icons.Outlined.Undo else Icons.Outlined.CheckCircleOutline,
+              icon = if (isStaged) Icons.AutoMirrored.Outlined.Undo else Icons.Outlined.CheckCircleOutline,
               title = if (isStaged) "Unstage File" else "Stage File with Git",
               subtitle = if (isStaged) "Remove from staging area" else "Stage changes for next commit",
               tint = TerminalGreen
@@ -1088,7 +1089,7 @@ fun FilesScreen(
       shape = RoundedCornerShape(12.dp),
       title = {
         Row(verticalAlignment = Alignment.CenterVertically) {
-          Icon(Icons.Outlined.Article, contentDescription = null, tint = ElectricBlueGlow, modifier = Modifier.size(18.dp))
+          Icon(Icons.AutoMirrored.Outlined.Article, contentDescription = null, tint = ElectricBlueGlow, modifier = Modifier.size(18.dp))
           Spacer(modifier = Modifier.width(8.dp))
           Text("Create New File", color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
         }

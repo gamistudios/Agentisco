@@ -695,6 +695,11 @@ public final class TerminalView extends View {
      * https://cs.android.com/android/platform/superproject/+/master:frameworks/base/services/core/java/com/android/server/input/InputManagerService.java;l=2158
      * https://cs.android.com/android/platform/superproject/+/android-11.0.0_r40:frameworks/base/services/core/jni/com_android_server_input_InputManagerService.cpp;l=616
      */
+    @SuppressWarnings("deprecation") // ACTION_MULTIPLE / getCharacters(): the legacy way an
+    // on-screen keyboard injects a whole string as one key event (Gboard on some devices,
+    // Hacker's Keyboard variants). API 29 deprecated it without an equivalent replacement, and
+    // dropping the branch would silently lose that text — IMEs that use commitText() are
+    // handled separately above.
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         if (TERMINAL_VIEW_KEY_LOGGING_ENABLED)

@@ -340,6 +340,14 @@ public final class TerminalSession extends TerminalOutput {
     @SuppressLint("HandlerLeak")
     class MainThreadHandler extends Handler {
 
+        MainThreadHandler() {
+            // All terminal emulation and callbacks run on the main thread, so bind
+            // to its Looper explicitly: the no-arg Handler() is deprecated because
+            // it silently uses whatever looper the constructing thread happens to
+            // have — and throws on a thread with none.
+            super(android.os.Looper.getMainLooper());
+        }
+
         final byte[] mReceiveBuffer = new byte[4 * 1024];
 
         @Override

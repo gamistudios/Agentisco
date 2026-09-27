@@ -18,6 +18,8 @@ import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -481,7 +483,7 @@ fun OtherFilePreviewPane(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(10.dp)
       ) {
-        Icon(Icons.Default.InsertDriveFile, null, tint = CyanAccent, modifier = Modifier.size(48.dp))
+        Icon(Icons.AutoMirrored.Filled.InsertDriveFile, null, tint = CyanAccent, modifier = Modifier.size(48.dp))
         Text(fileName, color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, fontFamily = FontFamily.Monospace)
         Text(title, color = TextSecondary, fontSize = 12.sp)
         if (file != null) {
@@ -519,7 +521,7 @@ fun OtherFilePreviewPane(
             colors = ButtonDefaults.buttonColors(containerColor = DarkSurfaceElevated),
             modifier = Modifier.height(32.dp)
           ) {
-            Icon(Icons.Default.OpenInNew, null, tint = CyanAccent, modifier = Modifier.size(14.dp))
+            Icon(Icons.AutoMirrored.Filled.OpenInNew, null, tint = CyanAccent, modifier = Modifier.size(14.dp))
             Spacer(modifier = Modifier.width(6.dp))
             Text("Open Externally", color = TextPrimary, fontSize = 12.sp)
           }
