@@ -226,6 +226,9 @@ interface ChatDao {
   @Query("UPDATE agent_blocks SET status = :status WHERE uuid = :uuid")
   suspend fun updateBlockStatus(uuid: String, status: String)
 
+  @Query("UPDATE agent_blocks SET status = :status, detail = :detail WHERE uuid = :uuid")
+  suspend fun updateBlockAnswer(uuid: String, status: String, detail: String)
+
   @Query("UPDATE agent_blocks SET summary = :text WHERE uuid = :uuid")
   suspend fun updateTextBlock(uuid: String, text: String)
 

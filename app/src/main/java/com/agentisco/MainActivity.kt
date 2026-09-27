@@ -241,7 +241,7 @@ fun AgentIDEApp(
     pendingApproval?.let { approval ->
       ApprovalDialog(
         approval = approval,
-        onResolve = { allowed -> viewModel.resolveApproval(allowed) }
+        onResolve = { allowed, answer -> viewModel.resolveApproval(allowed, answer) }
       )
     }
 

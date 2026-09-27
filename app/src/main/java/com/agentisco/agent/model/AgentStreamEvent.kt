@@ -32,15 +32,24 @@ sealed class AgentStreamEvent {
     val callId: String = ""
   ) : AgentStreamEvent()
 
-  /** A protected operation needs explicit user approval before it can run. */
+  /**
+   * A protected operation needs explicit user approval before it can run, or the
+   * agent is asking the user a question ([isQuestion] with [options]).
+   */
   data class ApprovalRequested(
     val approvalId: String,
     val command: String,
     val title: String,
-    val impact: String
+    val impact: String,
+    val options: List<String> = emptyList(),
+    val isQuestion: Boolean = false
   ) : AgentStreamEvent()
 
-  data class ApprovalResolved(val approvalId: String, val allowed: Boolean) : AgentStreamEvent()
+  data class ApprovalResolved(
+    val approvalId: String,
+    val allowed: Boolean,
+    val answer: String? = null
+  ) : AgentStreamEvent()
 
   data class Completed(val summary: String) : AgentStreamEvent()
 

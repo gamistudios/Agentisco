@@ -26,7 +26,13 @@ data class ToolParam(
   val name: String,
   val description: String,
   val type: String = "string",
-  val required: Boolean = true
+  val required: Boolean = true,
+  /**
+   * True when an explicitly supplied empty string is meaningful (e.g.
+   * edit_file's `new_string: ""` deletes the snippet). Required parameters are
+   * otherwise rejected when blank, because models emit `""` for "I don't know".
+   */
+  val allowBlank: Boolean = false
 )
 
 /**
@@ -80,7 +86,11 @@ interface AgentTool {
     }
     required.forEach { p ->
       val v = obj.opt(p.name)
-      if (v == null || v == JSONObject.NULL || (v is String && v.isBlank())) {
+      if (v == null || v == JSONObject.NULL) {
+        throw ToolArgumentError("Missing required argument \"${p.name}\": ${p.description}")
+      }
+      // A blank string is only a mistake when the argument has no empty meaning.
+      if (v is String && v.isBlank() && !p.allowBlank) {
         throw ToolArgumentError("Missing required argument \"${p.name}\": ${p.description}")
       }
     }
@@ -92,13 +102,21 @@ interface AgentTool {
 class ToolArgumentError(message: String) : Exception(message)
 
 /** Maps a tool name to the UI tool category used in activity streams. */
+private val EDITING_TOOLS = setOf(
+  "write_file", "create_file", "edit_file", "edit_files", "move_file", "copy_file",
+  "delete_file", "create_directory"
+)
+private val SEARCHING_TOOLS = setOf("search_files", "regex_search", "glob_files", "list_files", "directory_tree", "file_info")
+
 fun toolTypeFor(name: String): ToolType = when {
   name.startsWith("git_") -> ToolType.GIT
   name == "run_command" || name == "build" || name == "test" || name == "run" ||
-    name.startsWith("terminal") -> ToolType.TERMINAL
-  name == "write_file" || name == "create_file" || name == "edit_file" || name == "move_file" || name == "delete_file" -> ToolType.EDIT_FILE
-  name == "search_files" || name == "regex_search" || name == "glob_files" -> ToolType.SEARCH
+    name == "interrupt_terminal" || name.startsWith("terminal") -> ToolType.TERMINAL
+  name in EDITING_TOOLS -> ToolType.EDIT_FILE
+  name in SEARCHING_TOOLS -> ToolType.SEARCH
   name == "task_plan" -> ToolType.BUILD
+  name == "web_fetch" || name == "web_search" -> ToolType.WEB
+  name == "ask_user" -> ToolType.QUESTION
   else -> ToolType.READ_FILE
 }
 
@@ -114,5 +132,13 @@ class ToolContext(
   val requestApproval: suspend (PendingApproval) -> Boolean,
   val activeSessions: () -> List<TerminalSession>,
   /** The model's id for the call being executed (used for per-call cancellation). */
-  val toolCallId: String = ""
+  val toolCallId: String = "",
+  /**
+   * Asks the user a question and waits for the answer. Returns the answer text,
+   * or null when the user dismissed the question. Only [ask_user] needs it; the
+   * default keeps hand-built contexts (tests, tools that never ask) working.
+   */
+  val askUser: suspend (PendingApproval) -> String? = { approval ->
+    if (requestApproval(approval)) approval.options.firstOrNull() else null
+  }
 )

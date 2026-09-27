@@ -439,7 +439,9 @@ class WorkspaceViewModel(
         approvalBlocks[event.approvalId] = uuid
         chatStore.insertBlock(
           AgentBlockEntity(
-            uuid = uuid, messageUuid = turn, kind = "approval", name = event.approvalId,
+            uuid = uuid, messageUuid = turn,
+            kind = if (event.isQuestion) "question" else "approval",
+            name = event.approvalId,
             argsJson = event.command, status = "pending", summary = event.title,
             detail = event.impact, exitCode = null, createdAt = System.currentTimeMillis()
           )
@@ -447,7 +449,10 @@ class WorkspaceViewModel(
       }
       is AgentStreamEvent.ApprovalResolved -> {
         approvalBlocks.remove(event.approvalId)?.let { uuid ->
-          chatStore.updateBlockStatus(uuid, if (event.allowed) "allowed" else "denied")
+          val status = if (event.allowed) "allowed" else "denied"
+          val answer = event.answer
+          if (answer.isNullOrBlank()) chatStore.updateBlockStatus(uuid, status)
+          else chatStore.updateBlockAnswer(uuid, status, answer)
         }
       }
       is AgentStreamEvent.Completed -> {
@@ -1263,8 +1268,8 @@ class WorkspaceViewModel(
     repository.interruptTerminal(sessionId)
   }
 
-  fun resolveApproval(allowed: Boolean) {
-    repository.resolveApproval(allowed)
+  fun resolveApproval(allowed: Boolean, answer: String? = null) {
+    repository.resolveApproval(allowed, answer)
   }
 
   /** SIGKILLs a specific running tool call (process kill, task keeps going). */

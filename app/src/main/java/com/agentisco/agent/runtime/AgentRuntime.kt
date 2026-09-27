@@ -112,6 +112,60 @@ class AgentRuntime(
     const val MAX_PARALLEL_TOOLS = 4
     /** Streamed characters between two live context-usage updates. */
     const val USAGE_EMIT_INTERVAL_CHARS = 1_000
+
+    /**
+     * The tool playbook sent with every run. Models call what they have been
+     * shown: naming each tool and when to reach for it is what turns a tool
+     * list into a working method, and the editing rules below are the ones the
+     * file tools are built to enforce.
+     */
+    val TOOL_PLAYBOOK = """
+Tools available:
+  Explore   glob_files (names), search_files (fixed text), regex_search (patterns),
+           list_files, directory_tree, file_info, read_file, read_files
+  Change   edit_files (several exact-snippet edits, one call), edit_file,
+           write_file (a whole new or replaced file), create_file, create_directory,
+           move_file, copy_file, delete_file
+  Run      run_command (Linux shell in the workspace), terminal_output, interrupt_terminal,
+           build, test
+  Git      git_status, git_diff, git_log, git_show, git_stage, git_commit
+  Other    web_search (find documentation or an issue for an error), web_fetch (read a
+           URL as text), ask_user (let the user choose), task_plan (share a step-by-step plan)
+
+Method:
+  1. Locate before you edit: glob_files / search_files to find the file, then read_file
+     to see the current content. Never edit a file you have not read in this conversation.
+  2. Prefer edit_files for any change inside an existing file: pass every edit of one
+     related change in a single call. old_string must be copied verbatim from read_file
+     output, including indentation; it must be unique unless replace_all is true.
+     Use write_file only for new files or when the whole file genuinely changes —
+     a partial write_file silently deletes the rest of the file.
+  3. Verify after changing: build / test / run_command, then read the result. If a
+     command fails, fix it and run it again instead of reporting unfinished work.
+  4. Long commands (dev server, watch, big test suites): pass run_in_background true to
+     run_command, then poll with terminal_output and stop with interrupt_terminal.
+     A foreground command that hits its timeout is reported as stopped, not as failed.
+  5. Unknown library behaviour, an error message you cannot explain or a config option you
+     are not sure about: web_search for it, then web_fetch the page that looks authoritative.
+     Never present a URL you have not read, and never invent one.
+  6. Results may be truncated and always say so ("[…truncated: showing N of M
+     characters]", "lines x..y not shown"). Never assume you saw a whole file: re-read
+     the missing range with start_line / max_lines. Do not invent content for what was
+     cut off.
+  7. Paths are workspace-relative; you cannot read, write or delete outside the project.
+
+Habits:
+  - Batch every independent call into one response; wait only when a later call needs
+    an earlier result.
+  - Keep working until the task is done. If a real decision belongs to the user
+    (ambiguous requirement, destructive choice, two viable designs), call ask_user with
+    concrete options instead of guessing, and instead of writing a message asking.
+  - Anything the user must approve (protected commands, file deletion) shows a dialog;
+    a denial is the user's decision — adapt, do not retry the same refused action.
+  - Finish with a plain-text response and NO tool calls: what you did, which files
+    changed, and the verified outcome. That summary is the answer the user reads.
+
+    """.trimIndent()
   }
 
   /** Two-tier compaction over the in-memory transcript of the current run. */
@@ -122,7 +176,7 @@ class AgentRuntime(
 
   /** Serializes approval requests when tools run concurrently. */
   private val approvalMutex = Mutex()
-  private var pendingApprovalDeferred: CompletableDeferred<Boolean>? = null
+  private var pendingApprovalDeferred: CompletableDeferred<UserDecision>? = null
   private val toolParallelism = Semaphore(MAX_PARALLEL_TOOLS)
 
   /** Tool calls the user SIGKILLed; keyed by the model's call id. */
@@ -132,10 +186,16 @@ class AgentRuntime(
   private val toolCancelDecisions =
     java.util.concurrent.ConcurrentHashMap<String, CompletableDeferred<Boolean>>()
 
-  fun resolvePendingApproval(allowed: Boolean) {
+  /**
+   * What the user answered: permission granted or refused, plus the free-text or
+   * chosen option for a question.
+   */
+  data class UserDecision(val allowed: Boolean, val answer: String? = null)
+
+  fun resolvePendingApproval(allowed: Boolean, answer: String? = null) {
     val deferred = pendingApprovalDeferred
     pendingApprovalDeferred = null
-    deferred?.complete(allowed)
+    deferred?.complete(UserDecision(allowed, answer))
   }
 
   /** SIGKILLs a specific running tool call; the loop then awaits user guidance. */
@@ -690,7 +750,8 @@ class AgentRuntime(
     )
     // summarizeRounds explains a no-op itself: only an on-demand pass reports.
     emitUsage(meter, force = true)
-    boundary  }
+    boundary
+  }
 
   /** Pushes the meter's current snapshot to the UI, throttled by the caller. */
   private fun emitUsage(meter: CompactTokenMeter, force: Boolean = false) {
@@ -777,9 +838,9 @@ class AgentRuntime(
       Log.d(TAG, "tool ${tool.name} success=${result.success} exitCode=${result.exitCode}")
 
       val summary = when {
-      !result.success -> result.error?.take(180) ?: "Failed"
-      else -> result.output.lineSequence().firstOrNull()?.take(140)?.ifBlank { null }
-        ?: result.exitCode?.let { "exit code $it" } ?: "Done"
+        !result.success -> result.error?.take(180) ?: "Failed"
+        else -> result.output.lineSequence().firstOrNull()?.take(140)?.ifBlank { null }
+          ?: result.exitCode?.let { "exit code $it" } ?: "Done"
       }
       val detail = listOfNotNull(
         result.output.takeIf { it.isNotBlank() },
@@ -809,27 +870,50 @@ class AgentRuntime(
     toolCallId = callId,
     permissions = { permissions }, // Dynamic: reads current permissions at tool execution time
     terminalSession = terminalSession,
-    requestApproval = { approval ->
-      // Concurrent tools queue here; approvals resolve strictly one at a time.
-      approvalMutex.withLock {
-        onEvent(
-          AgentStreamEvent.ApprovalRequested(
-            approvalId = approval.id,
-            command = approval.command,
-            title = approval.title,
-            impact = approval.impactDescription
-          )
-        )
-        val deferred = CompletableDeferred<Boolean>()
-        pendingApprovalDeferred = deferred
-        onRequestApproval(approval)
-        val allowed = deferred.await()
-        onEvent(AgentStreamEvent.ApprovalResolved(approval.id, allowed))
-        allowed
-      }
+    requestApproval = { approval -> awaitUserDecision(approval, onRequestApproval, onEvent).allowed },
+    askUser = { approval ->
+      val decision = awaitUserDecision(approval, onRequestApproval, onEvent)
+      // A refusal (or a dismissed dialog) is not an answer: the tool must be able
+      // to tell "the user said no" from "the user chose this".
+      if (!decision.allowed) null else decision.answer
     },
     activeSessions = { listOf(terminalSession) }
   )
+
+  /**
+   * Shows one user-facing request at a time and waits for the answer. Concurrent
+   * tools queue here: the UI only ever holds a single dialog, and an answer must
+   * not be able to resolve the wrong request.
+   */
+  private suspend fun awaitUserDecision(
+    approval: PendingApproval,
+    onRequestApproval: (PendingApproval) -> Unit,
+    onEvent: (AgentStreamEvent) -> Unit
+  ): UserDecision = approvalMutex.withLock {
+    onEvent(
+      AgentStreamEvent.ApprovalRequested(
+        approvalId = approval.id,
+        command = approval.command,
+        title = approval.title,
+        impact = approval.impactDescription,
+        options = approval.options,
+        isQuestion = approval.isQuestion
+      )
+    )
+    val deferred = CompletableDeferred<UserDecision>()
+    pendingApprovalDeferred = deferred
+    onRequestApproval(approval)
+    val decision = try {
+      deferred.await()
+    } catch (e: CancellationException) {
+      // The turn ended while the request was open: drop it and propagate.
+      pendingApprovalDeferred = null
+      throw e
+    }
+    pendingApprovalDeferred = null
+    onEvent(AgentStreamEvent.ApprovalResolved(approval.id, decision.allowed, decision.answer))
+    decision
+  }
 
   private fun buildSystemPrompt(project: Project, toolsAvailable: Boolean): String {
     val files = fileSystem.getFileTree(project, maxDepth = 3)
@@ -850,17 +934,7 @@ class AgentRuntime(
       appendLine(paths.toString().take(4000))
       if (toolsAvailable) {
         appendLine()
-        appendLine("You can request tools (read_file, write_file, run_command, git_*, ...) to inspect and modify this workspace.")
-        appendLine("Use tools to do real work instead of describing changes. The user must approve protected operations.")
-        appendLine()
-        appendLine("IMPORTANT - batching: request ALL independent tool calls together in ONE response")
-        appendLine("(e.g. every file you need to read, several searches, multiple commands).")
-        appendLine("All results are returned together in a single round trip; do not request one tool per response.")
-        appendLine("Only wait for a result when a later call depends on it.")
-        appendLine()
-        appendLine("IMPORTANT - finishing: once the work is done, ALWAYS end with a final plain-text")
-        appendLine("response (no tool calls): a concise summary of what you did, the files you changed,")
-        appendLine("and the results/outcome. The user reads that summary as the answer.")
+        append(TOOL_PLAYBOOK)
       } else {
         appendLine()
         appendLine("This model cannot call tools. Answer with descriptions/snippets only.")

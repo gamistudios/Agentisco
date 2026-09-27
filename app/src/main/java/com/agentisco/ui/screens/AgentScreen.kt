@@ -39,11 +39,13 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.outlined.Build
 import androidx.compose.material.icons.outlined.Calculate
+import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.Commit
 import androidx.compose.material.icons.outlined.Compress
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.QuestionAnswer
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.*
@@ -68,6 +70,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import com.agentisco.agent.model.PermissionMode
 import com.agentisco.agent.model.ToolType
+import com.agentisco.agent.tool.toolTypeFor
 import com.agentisco.core.model.AppDestination
 import com.agentisco.data.local.chat.AgentSessionEntity
 import com.agentisco.ui.AgentTurnItem
@@ -1130,12 +1133,13 @@ private fun ToolCallRow(
 
 @Composable
 private fun ApprovalCard(item: ApprovalBlock, onAllow: () -> Unit, onDeny: () -> Unit) {
+  val accent = if (item.isQuestion) ElectricBlueGlow else WarningAmber
   Column(
     modifier = Modifier
       .fillMaxWidth()
       .clip(RoundedCornerShape(10.dp))
-      .background(WarningAmber.copy(alpha = 0.08f))
-      .border(1.dp, WarningAmber, RoundedCornerShape(10.dp))
+      .background(accent.copy(alpha = 0.08f))
+      .border(1.dp, accent, RoundedCornerShape(10.dp))
       .padding(12.dp)
       .testTag("stream_approval")
   ) {
@@ -1144,25 +1148,44 @@ private fun ApprovalCard(item: ApprovalBlock, onAllow: () -> Unit, onDeny: () ->
         modifier = Modifier
           .size(7.dp)
           .clip(CircleShape)
-          .background(WarningAmber)
+          .background(accent)
       )
       Spacer(modifier = Modifier.width(6.dp))
-      Text(item.title, color = WarningAmber, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+      Text(item.title, color = accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
     }
     Spacer(modifier = Modifier.height(6.dp))
     Text(item.command, color = TextCode, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
-    Spacer(modifier = Modifier.height(4.dp))
-    Text(item.impact, color = TextSecondary, fontSize = 11.sp, lineHeight = 15.sp)
+    if (item.impact.isNotBlank() && item.impact != item.command) {
+      Spacer(modifier = Modifier.height(4.dp))
+      Text(item.impact, color = TextSecondary, fontSize = 11.sp, lineHeight = 15.sp)
+    }
     Spacer(modifier = Modifier.height(8.dp))
-    if (item.resolved) {
-      Text(
+    when {
+      item.resolved && item.answer.isNotBlank() -> Text(
+        "Answered: ${item.answer}",
+        color = TerminalGreen,
+        fontSize = 11.sp,
+        fontWeight = FontWeight.SemiBold
+      )
+      item.resolved && item.isQuestion -> Text(
+        "Not answered",
+        color = TextMuted,
+        fontSize = 11.sp,
+        fontWeight = FontWeight.SemiBold
+      )
+      item.resolved -> Text(
         if (item.allowed) "✓ Allowed" else "✗ Denied",
         color = if (item.allowed) TerminalGreen else DangerRed,
         fontSize = 11.sp,
         fontWeight = FontWeight.SemiBold
       )
-    } else {
-      Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+      // A question is answered in the dialog the agent opened, not here.
+      item.isQuestion -> Text(
+        "Pick an answer in the dialog above.",
+        color = TextMuted,
+        fontSize = 11.sp
+      )
+      else -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Button(
           onClick = onAllow,
           colors = ButtonDefaults.buttonColors(containerColor = TerminalGreen),
@@ -1633,52 +1656,55 @@ private fun friendlyToolLabel(name: String, argsJson: String): Pair<String, Stri
     "task_plan" -> "Planning" to ""
     "write_file" -> "Writing" to arg("path")
     "edit_file" -> "Editing" to arg("path")
+    "edit_files" -> "Editing files" to "${args?.optJSONArray("edits")?.length() ?: 0} change(s)"
     "create_file" -> "Creating" to arg("path")
+    "create_directory" -> "Creating folder" to arg("path")
     "delete_file" -> "Deleting" to arg("path")
     "move_file" -> "Moving" to arg("new_path")
+    "copy_file" -> "Copying" to arg("new_path")
     "list_files" -> "Listing" to arg("path").ifBlank { "workspace" }
     "search_files" -> "Searching" to arg("query")
     "run_command" -> "Running" to arg("command")
+    "terminal_output" -> "Reading output" to arg("runner_id")
     "write_terminal_input" -> "Terminal input" to ""
     "interrupt_terminal" -> "Interrupting" to ""
     "git_status" -> "Git status" to ""
     "git_diff" -> "Git diff" to arg("path")
+    "git_log" -> "Commit history" to ""
+    "git_show" -> "Showing commit" to arg("hash")
     "git_stage" -> "Staging" to arg("path").ifBlank { "all changes" }
     "git_unstage" -> "Unstaging" to ""
     "git_commit" -> "Committing" to arg("message")
     "build" -> "Building" to arg("args")
     "test" -> "Testing" to arg("args")
     "run" -> "Starting" to "dev server"
+    "web_fetch" -> "Fetching" to arg("url")
+    "web_search" -> "Web search" to arg("query")
+    "ask_user" -> "Asking" to arg("question")
     else -> name to ""
   }
 }
 
-private fun toolIcon(name: String): ImageVector = when (toolTypeForUi(name)) {
+private fun toolIcon(name: String): ImageVector = when (toolTypeFor(name)) {
   ToolType.READ_FILE -> Icons.Outlined.Description
   ToolType.SEARCH -> Icons.Outlined.Search
   ToolType.TERMINAL -> Icons.Outlined.Terminal
   ToolType.EDIT_FILE -> Icons.Outlined.Edit
   ToolType.GIT -> Icons.Outlined.Commit
   ToolType.BUILD -> Icons.Outlined.Build
+  ToolType.WEB -> Icons.Outlined.Cloud
+  ToolType.QUESTION -> Icons.Outlined.QuestionAnswer
 }
 
-private fun toolColor(name: String): Color = when (toolTypeForUi(name)) {
+private fun toolColor(name: String): Color = when (toolTypeFor(name)) {
   ToolType.READ_FILE -> CyanAccent
   ToolType.SEARCH -> WarningAmber
   ToolType.TERMINAL -> TerminalGreen
   ToolType.EDIT_FILE -> ElectricBlueGlow
   ToolType.GIT -> IndigoAccent
   ToolType.BUILD -> WarningAmber
-}
-
-private fun toolTypeForUi(name: String): ToolType = when {
-  name.startsWith("git_") -> ToolType.GIT
-  name == "run_command" || name == "build" || name == "test" || name == "run" ||
-    name.startsWith("terminal") -> ToolType.TERMINAL
-  name == "write_file" || name == "create_file" || name == "move_file" || name == "delete_file" -> ToolType.EDIT_FILE
-  name == "search_files" -> ToolType.SEARCH
-  name == "build" -> ToolType.BUILD
-  else -> ToolType.READ_FILE
+  ToolType.WEB -> ElectricBlueGlow
+  ToolType.QUESTION -> TerminalGreen
 }
 
 private fun prettyJson(raw: String): String = runCatching {

@@ -64,7 +64,11 @@ data class ApprovalBlock(
   val title: String,
   val impact: String,
   val resolved: Boolean,
-  val allowed: Boolean
+  val allowed: Boolean,
+  /** The agent asked the user to choose instead of approving a command. */
+  val isQuestion: Boolean = false,
+  /** What the user picked/typed, once answered. */
+  val answer: String = ""
 ) : TurnBlock()
 
 /** Streamed model reasoning ("thinking"), rendered as a collapsible box. */
@@ -122,14 +126,18 @@ fun MessageWithBlocks.toChatItem(): ChatItem {
 private fun AgentBlockEntity.toTurnBlock(): TurnBlock? = when (kind) {
   "text" -> TextBlock(uuid, summary, status == "streaming")
   "reasoning" -> ReasoningBlock(uuid, summary, status == "streaming")
-  "approval" -> ApprovalBlock(
+  "approval", "question" -> ApprovalBlock(
     id = uuid,
     approvalId = name, // approval runtime id stored in `name`
     command = argsJson,
     title = summary,
     impact = detail,
     resolved = status != "pending",
-    allowed = status == "allowed"
+    allowed = status != "pending" && status != "denied",
+    isQuestion = kind == "question",
+    // A question stores the user's pick in `detail` (its impact text is the
+    // question itself, which already lives in `argsJson`).
+    answer = if (kind == "question" && status != "pending") detail else ""
   )
   "tool" -> ActionBlock(
     id = uuid,

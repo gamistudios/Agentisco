@@ -182,6 +182,10 @@ class AgentChatStore(context: Context?) {
   fun updateBlockStatus(uuid: String, status: String) =
     enqueue { dao!!.updateBlockStatus(uuid, status) }
 
+  /** Records the user's answer to an agent question without touching its title. */
+  fun updateBlockAnswer(uuid: String, status: String, answer: String) =
+    enqueue { dao!!.updateBlockAnswer(uuid, status, answer) }
+
   // ---- full conversation reconstruction (for LLM requests & retries) ----
 
   /**
@@ -241,6 +245,9 @@ class AgentChatStore(context: Context?) {
                 )
               )
             }
+            // An ask_user question: the answer is already recorded in the tool
+            // block for that call, so the transcript only needs the text flushed.
+            "question" -> flushText()
             "approval" -> {
               flushText()
               // Only denied approvals need explaining to the model.

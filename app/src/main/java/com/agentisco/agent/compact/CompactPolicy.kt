@@ -122,10 +122,15 @@ data class CompactPolicyConfig(
       "glob_files",
       "file_info",
       "run_command",
+      "terminal_output",
       "build",
       "test",
       "git_status",
-      "git_diff"
+      "git_diff",
+      "git_log",
+      "git_show",
+      "web_fetch",
+      "web_search"
     )
 
     /** Builds the policy for a model, honouring its declared limits. */

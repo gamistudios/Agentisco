@@ -2472,9 +2472,9 @@ class WorkspaceRepository(
     _pendingApproval.value = approval
   }
 
-  fun resolveApproval(allowed: Boolean) {
+  fun resolveApproval(allowed: Boolean, answer: String? = null) {
     _pendingApproval.value = null
-    agentRuntime.resolvePendingApproval(allowed)
+    agentRuntime.resolvePendingApproval(allowed, answer)
   }
 
   // Run Real Agent Task Workflow. `sessionId` ties the run to a persisted chat

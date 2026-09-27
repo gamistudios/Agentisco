@@ -22,7 +22,9 @@ enum class ToolType {
   TERMINAL,
   EDIT_FILE,
   GIT,
-  BUILD
+  BUILD,
+  WEB,
+  QUESTION
 }
 
 data class ToolExecution(
@@ -41,7 +43,13 @@ data class PendingApproval(
   val command: String,
   val title: String = "Agent wants to run",
   val impactDescription: String = "This will modify project dependencies and lockfiles.",
-  val isDestructive: Boolean = false
+  val isDestructive: Boolean = false,
+  /** True when the agent is asking a question rather than asking permission. */
+  val isQuestion: Boolean = false,
+  /** Suggested answers for a question; empty for a free-text-only question. */
+  val options: List<String> = emptyList(),
+  /** Let the user type an answer instead of picking one of [options]. */
+  val allowFreeText: Boolean = true
 )
 
 enum class PermissionMode {
