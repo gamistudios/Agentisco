@@ -3,6 +3,7 @@ package com.agentisco.data.repository
 import android.content.Context
 import androidx.room.Room
 import com.agentisco.data.local.chat.AgentBlockEntity
+import com.agentisco.data.local.chat.AgentCompactionEntity
 import com.agentisco.data.local.chat.AgentMessageEntity
 import com.agentisco.data.local.chat.AgentSessionEntity
 import com.agentisco.data.local.chat.ChatDatabase
@@ -22,13 +23,39 @@ import java.util.UUID
  * One reconstructed conversation message for LLM requests, built from the
  * persisted session: user prompts, assistant responses, tool calls with their
  * arguments, and tool results (including failures).
+ *
+ * [cleared] marks a tool result whose payload was dropped locally by
+ * microcompaction: the UI still shows the full output, but only this
+ * placeholder travels to the provider.
  */
 data class ChatHistoryMessage(
   val role: String, // user | assistant | assistant_tool_call | tool
   val content: String,
   val toolName: String? = null,
   val toolArgs: String? = null,
-  val toolCallId: String? = null
+  val toolCallId: String? = null,
+  /** Persisted row of the message that produced this entry (0 when unknown). */
+  val rowId: Long = 0,
+  val cleared: Boolean = false
+)
+
+/**
+ * A recorded compaction of a session: which messages no longer travel to the
+ * provider, and the summary that replaced them.
+ */
+data class SessionCompaction(
+  val uuid: String,
+  val summary: String,
+  val summarizedThroughRowId: Long,
+  val keptFromRowId: Long,
+  val tokensBefore: Int,
+  val tokensAfter: Int,
+  val contextWindow: Int,
+  val summarizedMessages: Int,
+  val keptMessages: Int,
+  val clearedToolResults: Int,
+  val trigger: String,
+  val createdAt: Long
 )
 
 /**
@@ -44,7 +71,8 @@ class AgentChatStore(context: Context?) {
         ChatDatabase.MIGRATION_1_2,
         ChatDatabase.MIGRATION_2_3,
         ChatDatabase.MIGRATION_3_4,
-        ChatDatabase.MIGRATION_4_5
+        ChatDatabase.MIGRATION_4_5,
+        ChatDatabase.MIGRATION_5_6
       )
       .build()
   }
@@ -160,6 +188,10 @@ class AgentChatStore(context: Context?) {
    * Rebuilds the complete LLM conversation for [sessionId] from SQLite: user
    * messages, assistant text, tool calls + real results, and denial outcomes.
    *
+   * The returned entries carry their `rowId`, so the caller can tell which
+   * messages a recorded compaction already summarized and therefore must not
+   * send again (see [compactConversationMessages]).
+   *
    * @param excludeLastUser skip the newest user message (a fresh prompt the
    *   runtime appends itself).
    * @param currentTurnUuid for a failed turn being retried: include only its
@@ -179,7 +211,7 @@ class AgentChatStore(context: Context?) {
       messages.forEachIndexed { index, m ->
         if (m.role == "user") {
           if (!(excludeLastUser && index == lastUserIndex) && m.content.isNotBlank()) {
-            result.add(ChatHistoryMessage("user", m.content))
+            result.add(ChatHistoryMessage("user", m.content, rowId = m.rowId))
           }
           return@forEachIndexed
         }
@@ -189,7 +221,7 @@ class AgentChatStore(context: Context?) {
         val pendingText = StringBuilder()
         fun flushText() {
           val text = pendingText.toString().trim()
-          if (text.isNotEmpty()) result.add(ChatHistoryMessage("assistant", text))
+          if (text.isNotEmpty()) result.add(ChatHistoryMessage("assistant", text, rowId = m.rowId))
           pendingText.setLength(0)
         }
         blocks.forEach { b ->
@@ -200,12 +232,12 @@ class AgentChatStore(context: Context?) {
             "tool" -> {
               flushText()
               val callId = "call_" + b.uuid.take(12)
-              result.add(ChatHistoryMessage("assistant_tool_call", "", toolName = b.name, toolArgs = b.argsJson, toolCallId = callId))
+              result.add(ChatHistoryMessage("assistant_tool_call", "", toolName = b.name, toolArgs = b.argsJson, toolCallId = callId, rowId = m.rowId))
               result.add(
                 ChatHistoryMessage(
                   "tool",
                   b.detail.ifBlank { b.summary.ifBlank { "(no output)" } },
-                  toolName = b.name, toolCallId = callId
+                  toolName = b.name, toolCallId = callId, rowId = m.rowId
                 )
               )
             }
@@ -219,11 +251,11 @@ class AgentChatStore(context: Context?) {
                 result.add(
                   ChatHistoryMessage(
                     "assistant_tool_call", "", toolName = "run_command",
-                    toolArgs = "{\"command\": \"$escaped\"}", toolCallId = callId
+                    toolArgs = "{\"command\": \"$escaped\"}", toolCallId = callId, rowId = m.rowId
                   )
                 )
                 result.add(
-                  ChatHistoryMessage("tool", "User denied permission to run: $command", toolName = "run_command", toolCallId = callId)
+                  ChatHistoryMessage("tool", "User denied permission to run: $command", toolName = "run_command", toolCallId = callId, rowId = m.rowId)
                 )
               }
             }
@@ -235,6 +267,48 @@ class AgentChatStore(context: Context?) {
       result
     }.getOrDefault(emptyList())
   }
+
+  // ---- compaction ledger ----
+
+  fun recordCompaction(
+    sessionId: String,
+    summary: String,
+    summarizedThroughRowId: Long,
+    keptFromRowId: Long,
+    tokensBefore: Int,
+    tokensAfter: Int,
+    contextWindow: Int,
+    summarizedMessages: Int,
+    keptMessages: Int,
+    clearedToolResults: Int,
+    trigger: String
+  ) = enqueue {
+    dao!!.insertCompaction(
+      AgentCompactionEntity(
+        uuid = newId(), sessionId = sessionId, summary = summary,
+        summarizedThroughRowId = summarizedThroughRowId, keptFromRowId = keptFromRowId,
+        tokensBefore = tokensBefore, tokensAfter = tokensAfter, contextWindow = contextWindow,
+        summarizedMessages = summarizedMessages, keptMessages = keptMessages,
+        clearedToolResults = clearedToolResults, trigger = trigger,
+        createdAt = System.currentTimeMillis()
+      )
+    )
+  }
+
+  suspend fun latestCompactionBlocking(sessionId: String): SessionCompaction? =
+    dao?.let { runCatching { it.latestCompaction(sessionId) }.getOrNull() }?.toModel()
+
+  suspend fun compactionHistoryBlocking(sessionId: String): List<SessionCompaction> =
+    dao?.let { runCatching { it.compactionsForSession(sessionId) }.getOrNull() }
+      ?.map { it.toModel() } ?: emptyList()
+
+  private fun AgentCompactionEntity.toModel() = SessionCompaction(
+    uuid = uuid, summary = summary,
+    summarizedThroughRowId = summarizedThroughRowId, keptFromRowId = keptFromRowId,
+    tokensBefore = tokensBefore, tokensAfter = tokensAfter, contextWindow = contextWindow,
+    summarizedMessages = summarizedMessages, keptMessages = keptMessages,
+    clearedToolResults = clearedToolResults, trigger = trigger, createdAt = createdAt
+  )
 
   /** Re-keys a project's chat sessions after the project folder moved. */
   suspend fun remapProjectSessionsBlocking(oldProjectId: String, newProjectId: String) = await {

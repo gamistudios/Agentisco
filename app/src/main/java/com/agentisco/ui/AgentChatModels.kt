@@ -80,6 +80,22 @@ data class ErrorBlock(
   val message: String
 ) : TurnBlock()
 
+/**
+ * A compaction note in a turn: the transcript the provider received was
+ * summarized. The chat keeps every message; this only explains the model's
+ * narrower view and carries the summary for inspection.
+ */
+data class CompactionBlock(
+  override val id: String,
+  /** One-line "compacted 42.1k → 6.2k tokens (85% of a 128k window)". */
+  val summary: String,
+  /** The full summary that replaced the older turns. */
+  val summaryText: String,
+  val tokensBefore: Int,
+  val tokensAfter: Int,
+  val contextWindow: Int
+) : TurnBlock()
+
 fun MessageWithBlocks.toChatItem(): ChatItem {
   val message = message
   return if (message.role == "user") {
@@ -132,5 +148,15 @@ private fun AgentBlockEntity.toTurnBlock(): TurnBlock? = when (kind) {
     cancelled = status == "cancelled"
   )
   "error" -> ErrorBlock(uuid, summary)
+  // Compaction only changes what is sent to the provider; the chat above
+  // keeps every message and tool result this card refers to.
+  "compaction" -> CompactionBlock(
+    id = uuid,
+    summary = summary,
+    summaryText = detail,
+    tokensBefore = 0,
+    tokensAfter = 0,
+    contextWindow = 0
+  )
   else -> null
 }

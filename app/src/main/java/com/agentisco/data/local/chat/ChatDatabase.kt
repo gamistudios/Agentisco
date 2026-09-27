@@ -102,6 +102,47 @@ data class AgentBlockEntity(
   val callId: String? = null
 )
 
+/**
+ * One compaction of a session's context.
+ *
+ * The summarized messages are **not** deleted: the chat keeps showing every
+ * message and tool card. This row only records which messages no longer travel
+ * to the provider, plus the summary that replaced them, so the next turn
+ * rebuilds the compressed history from SQLite.
+ */
+@Entity(
+  tableName = "agent_compactions",
+  indices = [Index(value = ["sessionId", "createdAt"])],
+  foreignKeys = [
+    ForeignKey(
+      entity = AgentSessionEntity::class,
+      parentColumns = ["id"],
+      childColumns = ["sessionId"],
+      onDelete = ForeignKey.CASCADE
+    )
+  ]
+)
+data class AgentCompactionEntity(
+  @PrimaryKey(autoGenerate = true) val rowId: Long = 0,
+  val uuid: String,
+  val sessionId: String,
+  /** The cleaned summary that now stands in for the older turns. */
+  val summary: String,
+  /** Last summarized message rowId (inclusive); 0 when nothing was summarized. */
+  val summarizedThroughRowId: Long,
+  /** First message kept verbatim after the summary. */
+  val keptFromRowId: Long,
+  val tokensBefore: Int,
+  val tokensAfter: Int,
+  val contextWindow: Int,
+  val summarizedMessages: Int,
+  val keptMessages: Int,
+  val clearedToolResults: Int,
+  /** manual | auto (see CompactReason) */
+  val trigger: String,
+  val createdAt: Long
+)
+
 data class MessageWithBlocks(
   @Embedded val message: AgentMessageEntity,
   @Relation(parentColumn = "uuid", entityColumn = "messageUuid")
@@ -212,11 +253,27 @@ interface ChatDao {
     """
   )
   fun recentBlocksForProject(projectId: String, limit: Int): Flow<List<AgentBlockEntity>>
+
+  // ---- compactions ----
+
+  @Insert(onConflict = androidx.room.OnConflictStrategy.REPLACE)
+  suspend fun insertCompaction(compaction: AgentCompactionEntity)
+
+  @Query("SELECT * FROM agent_compactions WHERE sessionId = :sessionId ORDER BY createdAt DESC")
+  suspend fun compactionsForSession(sessionId: String): List<AgentCompactionEntity>
+
+  @Query("SELECT * FROM agent_compactions WHERE sessionId = :sessionId ORDER BY createdAt DESC LIMIT 1")
+  suspend fun latestCompaction(sessionId: String): AgentCompactionEntity?
 }
 
 @Database(
-  entities = [AgentSessionEntity::class, AgentMessageEntity::class, AgentBlockEntity::class],
-  version = 5,
+  entities = [
+    AgentSessionEntity::class,
+    AgentMessageEntity::class,
+    AgentBlockEntity::class,
+    AgentCompactionEntity::class
+  ],
+  version = 6,
   exportSchema = false
 )
 abstract class ChatDatabase : RoomDatabase() {
@@ -295,6 +352,30 @@ abstract class ChatDatabase : RoomDatabase() {
         db.execSQL("INSERT OR IGNORE INTO `agent_blocks` SELECT * FROM `_sessions_v4_blocks`")
         db.execSQL("DROP TABLE `_sessions_v4_messages`")
         db.execSQL("DROP TABLE `_sessions_v4_blocks`")
+      }
+    }
+
+    /**
+     * Adds the compaction ledger. A pure addition: the chat transcript is
+     * untouched, because compaction only changes what is *sent* to the model.
+     */
+    val MIGRATION_5_6 = object : androidx.room.migration.Migration(5, 6) {
+      override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+        db.execSQL(
+          "CREATE TABLE IF NOT EXISTS `agent_compactions` (" +
+            "`rowId` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+            "`uuid` TEXT NOT NULL, `sessionId` TEXT NOT NULL, `summary` TEXT NOT NULL, " +
+            "`summarizedThroughRowId` INTEGER NOT NULL, `keptFromRowId` INTEGER NOT NULL, " +
+            "`tokensBefore` INTEGER NOT NULL, `tokensAfter` INTEGER NOT NULL, " +
+            "`contextWindow` INTEGER NOT NULL, `summarizedMessages` INTEGER NOT NULL, " +
+            "`keptMessages` INTEGER NOT NULL, `clearedToolResults` INTEGER NOT NULL, " +
+            "`trigger` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, " +
+            "FOREIGN KEY(`sessionId`) REFERENCES `agent_sessions`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE)"
+        )
+        db.execSQL(
+          "CREATE INDEX IF NOT EXISTS `index_agent_compactions_sessionId_createdAt` " +
+            "ON `agent_compactions` (`sessionId`, `createdAt`)"
+        )
       }
     }
   }

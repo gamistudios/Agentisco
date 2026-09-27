@@ -5,12 +5,17 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.RoundedCornerShape/**
+ * How agent tool activity is rendered in chat: structured cards (command,
+ * git-style diff, plain output) by default, with raw request JSON optional.
+ */
+@Composable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.BugReport
+import androidx.compose.material.icons.outlined.Calculate
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material3.*
@@ -18,6 +23,13 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -445,6 +457,11 @@ fun SettingsScreen(
       ChatToolActivityCard(viewModel)
     }
 
+    // Context & compaction card
+    item {
+      ContextCompactionCard(viewModel)
+    }
+
     // Codebase Scanning Performance Card (bottom: affects every project)
     item {
       ScanExclusionsCard(viewModel)
@@ -500,6 +517,268 @@ private fun DebugDiagnosticsCard(onShowCrashLog: () -> Unit) {
         Text("Show last crash log", fontSize = 12.sp, color = TextPrimary)
       }
     }
+  }
+}
+
+/**
+ * When and how the agent's context window is compressed.
+ *
+ * The transcript the user reads is never shortened: compaction only changes
+ * what is *sent* to the provider, so every message and tool result stays in
+ * the chat. This card tunes that behaviour.
+ */
+@Composable
+private fun ContextCompactionCard(viewModel: WorkspaceViewModel) {
+  val settings by viewModel.compactSettings.collectAsState()
+  val usage by viewModel.contextUsage.collectAsState()
+  val model by viewModel.selectedModel.collectAsState()
+
+  Card(
+    modifier = Modifier
+      .fillMaxWidth()
+      .clip(RoundedCornerShape(12.dp))
+      .border(1.dp, DarkBorder, RoundedCornerShape(12.dp))
+      .testTag("card_context_compaction"),
+    colors = CardDefaults.cardColors(containerColor = DarkSurface)
+  ) {
+    Column(modifier = Modifier.padding(14.dp)) {
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(Icons.Outlined.Calculate, contentDescription = null, tint = ElectricBlue, modifier = Modifier.size(16.dp))
+        Spacer(modifier = Modifier.width(8.dp))
+        Text("Context & Compaction", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+      }
+      Spacer(modifier = Modifier.height(6.dp))
+      Text(
+        "Long conversations are compressed before they overflow the model's context window: old tool " +
+          "results are cleared locally, then the earlier turns are replaced with a structured summary the " +
+          "agent continues from. Nothing is deleted — the chat above keeps every message and tool output.",
+        color = TextMuted,
+        fontSize = 11.sp,
+        lineHeight = 15.sp
+      )
+      Spacer(modifier = Modifier.height(10.dp))
+
+      // Current occupancy, measured from the live transcript.
+      ContextUsageRow(usage, model?.contextWindow)
+
+      Spacer(modifier = Modifier.height(10.dp))
+
+      ToggleRow(
+        title = "Auto-compaction",
+        subtitle = if (settings.autoCompactEnabled)
+          "Summarizes earlier turns before the context window fills up"
+        else
+          "Off — the conversation grows until the provider rejects it",
+        checked = settings.autoCompactEnabled,
+        tag = "switch_autocompact"
+      ) { viewModel.setAutoCompactEnabled(it) }
+
+      ToggleRow(
+        title = "Clear old tool results locally",
+        subtitle = if (settings.microcompactEnabled)
+          "Cheap first pass: drops payloads of old read/command results, no extra model call"
+        else
+          "Only the full summary pass runs",
+        checked = settings.microcompactEnabled,
+        tag = "switch_microcompact"
+      ) { viewModel.setMicrocompactEnabled(it) }
+
+      ToggleRow(
+        title = "Show context percentage in the composer",
+        subtitle = "Live share of the model's context window, next to the model dropdown",
+        checked = settings.showContextUsage,
+        tag = "switch_show_context_usage"
+      ) { viewModel.setContextUsageVisible(it) }
+
+      Spacer(modifier = Modifier.height(10.dp))
+
+      // Compact threshold: 100 % means "as late as safely possible".
+      Column {
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Text("Compact threshold", color = TextPrimary, fontSize = 13.sp)
+          Text(
+            "${settings.thresholdPercent}%",
+            color = ElectricBlue,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            modifier = Modifier.testTag("compact_threshold_value")
+          )
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+          "Share of the available window at which the conversation is summarized. Lower compacts earlier " +
+            "and keeps more headroom; 100% waits until the safety buffer is reached.",
+          color = TextMuted,
+          fontSize = 11.sp,
+          lineHeight = 14.sp
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Slider(
+          value = settings.thresholdPercent.toFloat(),
+          onValueChange = { viewModel.setCompactThresholdPercent(it.toInt()) },
+          valueRange = 25f..150f,
+          steps = 24,
+          colors = SliderDefaults.colors(
+            thumbColor = ElectricBlue,
+            activeTrackColor = ElectricBlue,
+            inactiveTrackColor = DarkSurfaceHighlight
+          ),
+          modifier = Modifier
+            .fillMaxWidth()
+            .testTag("slider_compact_threshold")
+        )
+      }
+
+      Spacer(modifier = Modifier.height(10.dp))
+
+      // Kept rounds: how much recent context survives a summary verbatim.
+      Column {
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Text("Keep recent turns", color = TextPrimary, fontSize = 13.sp)
+          Text(
+            "${settings.keepRecentRounds} turn${if (settings.keepRecentRounds == 1) "" else "s"}",
+            color = ElectricBlue,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold
+          )
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+          "Assistant turns held verbatim after a summary, so the tool results the model is currently " +
+            "working with are never summarized away.",
+          color = TextMuted,
+          fontSize = 11.sp,
+          lineHeight = 14.sp
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(10.dp),
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          StepperButton("-", enabled = settings.keepRecentRounds > 0) {
+            viewModel.setCompactKeepRecentRounds(settings.keepRecentRounds - 1)
+          }
+          Slider(
+            value = settings.keepRecentRounds.toFloat(),
+            onValueChange = { viewModel.setCompactKeepRecentRounds(it.toInt()) },
+            valueRange = 0f..8f,
+            steps = 7,
+            colors = SliderDefaults.colors(
+              thumbColor = ElectricBlue,
+              activeTrackColor = ElectricBlue,
+              inactiveTrackColor = DarkSurfaceHighlight
+            ),
+            modifier = Modifier
+              .weight(1f)
+              .testTag("slider_keep_recent_rounds")
+          )
+          StepperButton("+", enabled = settings.keepRecentRounds < 8) {
+            viewModel.setCompactKeepRecentRounds(settings.keepRecentRounds + 1)
+          }
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun ContextUsageRow(usage: com.agentisco.agent.compact.ContextTokenUsage, contextWindow: Int?) {
+  val tint = when {
+    usage.isAboveThreshold -> DangerRed
+    usage.pressurePercent >= 85 -> WarningAmber
+    usage.pressurePercent >= 60 -> ElectricBlueGlow
+    else -> TextSecondary
+  }
+  Column {
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      verticalAlignment = Alignment.CenterVertically
+    ) {
+      Text(
+        text = usage.label(),
+        color = tint,
+        fontSize = 13.sp,
+        fontWeight = FontWeight.SemiBold,
+        modifier = Modifier.testTag("context_usage_percent")
+      )
+      Spacer(modifier = Modifier.width(8.dp))
+      Text(
+        text = usage.detail() + (contextWindow?.let { " · model window $it" } ?: ""),
+        color = TextMuted,
+        fontSize = 10.sp,
+        maxLines = 1
+      )
+    }
+    Spacer(modifier = Modifier.height(6.dp))
+    LinearProgressIndicator(
+      progress = { (usage.percent / 100f).coerceIn(0f, 1f) },
+      color = tint,
+      trackColor = DarkSurfaceHighlight,
+      modifier = Modifier
+        .fillMaxWidth()
+        .height(4.dp)
+        .clip(RoundedCornerShape(2.dp))
+    )
+  }
+}
+
+@Composable
+private fun ToggleRow(
+  title: String,
+  subtitle: String,
+  checked: Boolean,
+  tag: String,
+  onCheckedChange: (Boolean) -> Unit
+) {
+  Row(
+    modifier = Modifier
+      .fillMaxWidth()
+      .padding(vertical = 6.dp),
+    horizontalArrangement = Arrangement.SpaceBetween,
+    verticalAlignment = Alignment.CenterVertically
+  ) {
+    Column(modifier = Modifier.weight(1f)) {
+      Text(title, color = TextPrimary, fontSize = 13.sp)
+      Text(subtitle, color = TextMuted, fontSize = 11.sp, lineHeight = 14.sp)
+    }
+    Spacer(modifier = Modifier.width(8.dp))
+    Switch(
+      checked = checked,
+      onCheckedChange = onCheckedChange,
+      colors = SwitchDefaults.colors(
+        checkedThumbColor = ElectricBlue,
+        checkedTrackColor = ElectricBlue.copy(alpha = 0.35f),
+        checkedBorderColor = ElectricBlue,
+        uncheckedThumbColor = TextSecondary,
+        uncheckedTrackColor = DarkSurfaceHighlight,
+        uncheckedBorderColor = DarkBorder
+      ),
+      modifier = Modifier.testTag(tag)
+    )
+  }
+}
+
+@Composable
+private fun StepperButton(label: String, enabled: Boolean, onClick: () -> Unit) {
+  Box(
+    modifier = Modifier
+      .size(26.dp)
+      .clip(RoundedCornerShape(6.dp))
+      .background(if (enabled) DarkSurfaceElevated else DarkSurface.copy(alpha = 0.5f))
+      .border(1.dp, DarkBorder, RoundedCornerShape(6.dp))
+      .clickable(enabled = enabled) { onClick() },
+    contentAlignment = Alignment.Center
+  ) {
+    Text(label, color = if (enabled) TextPrimary else TextMuted, fontSize = 14.sp, fontWeight = FontWeight.Bold)
   }
 }
 

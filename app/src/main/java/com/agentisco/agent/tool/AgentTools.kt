@@ -28,7 +28,9 @@ class AgentToolRegistry(
   private val stagedFilesProvider: () -> Set<String>,
   private val onStageFile: (String) -> Unit,
   private val onStageAll: () -> Unit,
-  private val onUnstageAll: () -> Unit
+  private val onUnstageAll: () -> Unit,
+  /** Extra tools appended to the built-in set (used by tests). */
+  private val extraTools: List<AgentTool> = emptyList()
 ) {
 
   val tools: List<AgentTool> = listOf(
@@ -54,7 +56,7 @@ class AgentToolRegistry(
     GitCommitTool(gitManager, stagedFilesProvider),
     BuildTool(terminalManager),
     TestTool(terminalManager)
-  )
+  ) + extraTools
 
   private val byName = tools.associateBy { it.name }
 

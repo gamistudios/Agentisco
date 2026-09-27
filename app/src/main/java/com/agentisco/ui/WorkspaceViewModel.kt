@@ -15,6 +15,7 @@ import com.agentisco.data.local.chat.AgentMessageEntity
 import com.agentisco.data.local.chat.AgentSessionEntity
 import com.agentisco.data.model.*
 import com.agentisco.data.repository.AgentChatStore
+import com.agentisco.data.repository.ChatHistoryMessage as AgentHistoryMessage
 import com.agentisco.data.repository.WorkspaceRepository
 import com.agentisco.editor.model.EditorSettings
 import com.agentisco.editor.model.EditorTab
@@ -27,6 +28,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
@@ -102,6 +104,27 @@ class WorkspaceViewModel(
   val selectedModel: StateFlow<AIModel?> = repository.selectedModel
   val connectionTests: StateFlow<Map<String, WorkspaceRepository.ConnectionTestState>> = repository.connectionTests
   val agentResponse: StateFlow<String> = repository.agentResponse
+
+  // ---- Context usage & compaction ----
+  /** Live share of the model's context window the current conversation uses. */
+  val contextUsage: StateFlow<com.agentisco.agent.compact.ContextTokenUsage> = repository.contextUsage
+  val compactSettings: StateFlow<com.agentisco.data.local.CompactSettings> = repository.compactSettings
+  val compactionLog: StateFlow<List<com.agentisco.agent.compact.CompactBoundary>> = repository.compactionLog
+
+  fun setAutoCompactEnabled(enabled: Boolean) =
+    repository.updateCompactSettings { it.copy(autoCompactEnabled = enabled) }
+
+  fun setMicrocompactEnabled(enabled: Boolean) =
+    repository.updateCompactSettings { it.copy(microcompactEnabled = enabled) }
+
+  fun setContextUsageVisible(visible: Boolean) =
+    repository.updateCompactSettings { it.copy(showContextUsage = visible) }
+
+  fun setCompactThresholdPercent(percent: Int) =
+    repository.updateCompactSettings { it.copy(thresholdPercent = percent.coerceIn(10, 200)) }
+
+  fun setCompactKeepRecentRounds(rounds: Int) =
+    repository.updateCompactSettings { it.copy(keepRecentRounds = rounds.coerceIn(0, 10)) }
 
   // ---- Persistent agent chat (sessions → messages → turn blocks) ----
   // The UI list is derived entirely from SQLite; runtime events are written
@@ -189,6 +212,17 @@ class WorkspaceViewModel(
     }
     // Turns/blocks left "running" by a previous process become interrupted.
     viewModelScope.launch { chatStore.recoverInterrupted() }
+    // Keep the context percentage correct even when nothing is running: every
+    // recorded message and compaction of the open session feeds the estimate,
+    // so opening a session shows the size the next request would have.
+    viewModelScope.launch {
+      combine(_activeSessionId, chatItems, isAgentWorking) { id, items, working -> Triple(id, items, working) }
+        .collect { (id, items, working) ->
+          if (id == null || working) return@collect
+          refreshContextUsage(id, items)
+          refreshLatestCompaction(id)
+        }
+    }
     // Follow project switches: restore that project's most recent session.
     viewModelScope.launch {
       var lastProjectPath: String? = null
@@ -238,10 +272,54 @@ class WorkspaceViewModel(
     }
   }
 
+  /**
+   * Re-estimates the context usage of an idle conversation from the persisted
+   * transcript, honouring any recorded compaction (the older messages are
+   * represented by the summary, so they are not counted twice).
+   */
+  private suspend fun refreshContextUsage(sessionId: String, items: List<ChatItem>) {
+    val model = selectedModel.value
+    val window = model?.contextWindow ?: com.agentisco.agent.compact.CompactPolicyConfig.DEFAULT_CONTEXT_WINDOW
+    val policy = repository.compactSettings.value.toPolicyConfig(model?.contextWindow, model?.maxOutputTokens)
+    val compaction = chatStore.latestCompactionBlocking(sessionId)
+    val summaryMessages = chatStore.buildConversationMessages(sessionId)
+      .filter { it.rowId == 0L || it.rowId > (compaction?.summarizedThroughRowId ?: 0L) }
+      .map { historyToLlmMessage(it) }
+    val systemTokens = com.agentisco.agent.compact.estimateTokens(
+      "You are the Agentisco coding agent operating inside the mobile IDE \"Agentisco\"."
+    )
+    val total = systemTokens + com.agentisco.agent.compact.estimateMessageTokens(summaryMessages) +
+      (compaction?.let { com.agentisco.agent.compact.estimateTokens(it.summary) } ?: 0)
+    publishContextUsage(
+      com.agentisco.agent.compact.ContextTokenUsage(
+        usedTokens = total,
+        contextWindow = window,
+        thresholdTokens = policy.thresholdTokens,
+        source = com.agentisco.agent.compact.TokenUsageSource.ESTIMATED,
+        clearedToolResults = compaction?.clearedToolResults ?: 0
+      )
+    )
+  }
+
+  /** Converts a persisted history row into the message shape the meter counts. */
+  private fun historyToLlmMessage(m: AgentHistoryMessage): com.agentisco.agent.llm.LlmMessage = when (m.role) {
+    "assistant_tool_call" -> com.agentisco.agent.llm.LlmMessage(
+      com.agentisco.agent.llm.LlmRole.ASSISTANT, m.content,
+      toolCalls = listOf(
+        com.agentisco.agent.llm.LlmToolCall(m.toolCallId ?: "call", m.toolName ?: "unknown", m.toolArgs ?: "{}")
+      )
+    )
+    "tool" -> com.agentisco.agent.llm.LlmMessage(
+      com.agentisco.agent.llm.LlmRole.TOOL, m.content,
+      toolCallId = m.toolCallId, toolName = m.toolName
+    )
+    "assistant" -> com.agentisco.agent.llm.LlmMessage(com.agentisco.agent.llm.LlmRole.ASSISTANT, m.content)
+    else -> com.agentisco.agent.llm.LlmMessage(com.agentisco.agent.llm.LlmRole.USER, m.content)
+  }
+
   private fun onAgentEvent(event: AgentStreamEvent) {
     val turn = currentTurnUuid ?: return
-    val session = _activeSessionId.value
-    when (event) {
+    val session = _activeSessionId.value    when (event) {
       // The user message + turn rows are already persisted at send time.
       is AgentStreamEvent.TaskStarted -> Unit
       is AgentStreamEvent.Status ->
@@ -349,6 +427,20 @@ class WorkspaceViewModel(
         _isAgentPaused.value = false
         finalizeTurn(turn, session, status, event.message)
       }
+      // The provider's context was compacted: record a one-line note in the
+      // turn so the user can see why the model's memory starts from a summary.
+      // No message is deleted — the transcript above stays complete.
+      is AgentStreamEvent.ContextCompacted -> {
+        chatStore.insertBlock(
+          AgentBlockEntity(
+            uuid = AgentChatStore.newId(), messageUuid = turn, kind = "compaction",
+            name = "compaction", argsJson = "", status = "done",
+            summary = event.boundary.describe(),
+            detail = event.summary,
+            exitCode = null, createdAt = System.currentTimeMillis()
+          )
+        )
+      }
     }
   }
 
@@ -447,6 +539,11 @@ class WorkspaceViewModel(
     repository.selectProject(project)
     _activeSessionId.value = sessionId
     repository.navigateTo(com.agentisco.core.model.AppDestination.AGENT)
+  }
+
+  /** Re-reads the open session's latest compaction so the chat can surface it. */
+  fun refreshLatestCompaction(sessionId: String) {
+    viewModelScope.launch { repository.loadLatestCompaction(sessionId) }
   }
 
   fun archiveChatSession(id: String) {

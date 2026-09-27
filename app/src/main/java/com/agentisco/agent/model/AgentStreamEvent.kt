@@ -53,4 +53,16 @@ sealed class AgentStreamEvent {
 
   /** The user cancelled a specific running tool call (SIGKILL); awaits a retry/continue decision. */
   data class ToolCancelled(val callId: String, val name: String) : AgentStreamEvent()
+
+  /**
+   * The transcript sent to the provider was compacted: older turns (through
+   * [summarizedThroughRowId]) are now represented by [summary] instead of
+   * their full text. The persisted chat is untouched — this only explains why
+   * the model's context changed, and carries the summary for inspection.
+   */
+  data class ContextCompacted(
+    val boundary: com.agentisco.agent.compact.CompactBoundary,
+    val summarizedThroughRowId: Long,
+    val summary: String = ""
+  ) : AgentStreamEvent()
 }

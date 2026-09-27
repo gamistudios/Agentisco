@@ -25,6 +25,12 @@ data class LlmMessage(
   val toolCalls: List<LlmToolCall> = emptyList(),
   val toolCallId: String? = null,
   val toolName: String? = null,
+  /**
+   * A tool result that reports a failure. Only Anthropic's wire format has a
+   * field for this ("is_error"), but it is tracked for every protocol so the
+   * local compaction pass can tell a cheap error apart from a large dump.
+   */
+  val isError: Boolean = false,
   val inlineData: List<LlmInlineData> = emptyList(),
   val finishReason: LlmFinishReason? = null,
   val usage: LlmUsage? = null

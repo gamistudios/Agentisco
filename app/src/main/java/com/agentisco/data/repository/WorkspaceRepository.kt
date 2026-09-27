@@ -130,6 +130,56 @@ class WorkspaceRepository(
     _chatDisplay.value = chatDisplayStore.update { it.copy(showToolJson = visible) }
   }
 
+  // ---- Context & compaction (Settings → Context) ----
+  val compactSettingsStore = com.agentisco.data.local.CompactSettingsStore(context)
+  private val _compactSettings = MutableStateFlow(compactSettingsStore.get())
+  val compactSettings: StateFlow<com.agentisco.data.local.CompactSettings> =
+    _compactSettings.asStateFlow()
+
+  fun updateCompactSettings(transform: (com.agentisco.data.local.CompactSettings) -> com.agentisco.data.local.CompactSettings) {
+    _compactSettings.value = compactSettingsStore.update(transform)
+    // A change to the budget must be reflected immediately, even idle.
+    _contextUsage.value = _contextUsage.value.copy(
+      contextWindow = _contextUsage.value.contextWindow,
+      thresholdTokens = _compactSettings.value
+        .toPolicyConfig(_selectedModel.value?.contextWindow, _selectedModel.value?.maxOutputTokens)
+        .thresholdTokens
+    )
+  }
+
+  /**
+   * Live context occupancy of the conversation being answered: drives the
+   * percentage chip next to the composer's dropdowns.
+   */
+  private val _contextUsage = MutableStateFlow(com.agentisco.agent.compact.ContextTokenUsage.empty())
+  val contextUsage: StateFlow<com.agentisco.agent.compact.ContextTokenUsage> = _contextUsage.asStateFlow()
+
+  /** Set true once a turn has actually measured something, so the chip can hide. */
+  private val _hasContextUsage = MutableStateFlow(false)
+  val hasContextUsage: StateFlow<Boolean> = _hasContextUsage.asStateFlow()
+
+  /** Recent compaction logs of the open session, newest last. */
+  private val _compactionLog = MutableStateFlow<List<com.agentisco.agent.compact.CompactBoundary>>(emptyList())
+  val compactionLog: StateFlow<List<com.agentisco.agent.compact.CompactBoundary>> = _compactionLog.asStateFlow()
+
+  /** Clears the context meter when the chat switches to another conversation. */
+  fun resetContextUsage() {
+    _contextUsage.value = com.agentisco.agent.compact.ContextTokenUsage.empty(
+      _selectedModel.value?.contextWindow ?: com.agentisco.agent.compact.CompactPolicyConfig.DEFAULT_CONTEXT_WINDOW
+    )
+    _hasContextUsage.value = false
+  }
+
+  /**
+   * Publishes a context-usage snapshot. Called by the runtime while a turn
+   * streams, and by the chat when it re-estimates an idle conversation so the
+   * percentage chip is already correct when a session is opened.
+   */
+  fun publishContextUsage(usage: com.agentisco.agent.compact.ContextTokenUsage) {
+    _contextUsage.value = usage
+    _hasContextUsage.value = usage.usedTokens > 0
+  }
+
   val gitManager = GitRepositoryManager(fileSystem) { projectPath, args ->
     runGitCommand(projectPath, args)
   }
@@ -228,7 +278,50 @@ class WorkspaceRepository(
     onStageAll = { stageAll() },
     onUnstageAll = { unstageAll() }
   )
-  val agentRuntime = AgentRuntime(fileSystem, terminalManager, gitManager, llmService, toolRegistry)
+
+  /**
+   * Where the agent runtime records compaction: the summary and the boundary
+   * land in SQLite, while the chat keeps every original message.
+   */
+  private val compactSink = object : AgentRuntime.CompactSink {
+    override suspend fun onCompacted(
+      sessionId: String,
+      summary: String,
+      boundary: com.agentisco.agent.compact.CompactBoundary,
+      summarizedThroughRowId: Long,
+      keptFromRowId: Long
+    ) {
+      chatStore.recordCompaction(
+        sessionId = sessionId,
+        summary = summary,
+        summarizedThroughRowId = summarizedThroughRowId,
+        keptFromRowId = keptFromRowId,
+        tokensBefore = boundary.tokensBefore,
+        tokensAfter = boundary.tokensAfter,
+        contextWindow = boundary.contextWindow,
+        summarizedMessages = boundary.summarizedMessages,
+        keptMessages = boundary.keptMessages,
+        clearedToolResults = boundary.clearedToolResults,
+        trigger = boundary.trigger.name
+      )
+      _compactionLog.update { (it + boundary).takeLast(8) }
+      loadLatestCompaction(sessionId)
+    }
+
+    override suspend fun latestCompaction(sessionId: String): SessionCompaction? =
+      chatStore.latestCompactionBlocking(sessionId)
+  }
+
+  /** Most recent compaction of the session currently being discussed. */
+  private val _latestCompaction = MutableStateFlow<SessionCompaction?>(null)
+  val latestCompaction: StateFlow<SessionCompaction?> = _latestCompaction.asStateFlow()
+
+  /** Re-reads a session's compaction so the chat can show its summary. */
+  suspend fun loadLatestCompaction(sessionId: String) {
+    _latestCompaction.value = chatStore.latestCompactionBlocking(sessionId)
+  }
+
+  val agentRuntime = AgentRuntime(fileSystem, terminalManager, gitManager, llmService, toolRegistry) { compactSink }
 
   // Current Projects. The registry (projects.json) is the source of truth for
   // each project's real root folder; legacy projects found on disk under the
@@ -2429,6 +2522,7 @@ class WorkspaceRepository(
     _agentStatusText.value = "Starting agent task..."
     _agentResponse.value = ""
     _agentWorkingDurationSeconds.value = 0
+    resetContextUsage()
 
     val currentSession = _terminalSessions.value.firstOrNull { it.id == _activeTerminalSessionId.value }
       ?: _terminalSessions.value.first()
@@ -2445,12 +2539,16 @@ class WorkspaceRepository(
         sessionId = sessionId,
         history = history,
         resume = resume,
+        compactPolicy = _compactSettings.value.toPolicyConfig(model.contextWindow, model.maxOutputTokens),
+        onTokenUsage = { usage -> publishContextUsage(usage) },
         onRequestApproval = { approval -> _pendingApproval.value = approval },
       onEvent = { event ->
         _agentEvents.tryEmit(event)
         when (event) {
           is com.agentisco.agent.model.AgentStreamEvent.Status -> _agentStatusText.value = event.text
           is com.agentisco.agent.model.AgentStreamEvent.Token -> _agentResponse.value += event.text
+          is com.agentisco.agent.model.AgentStreamEvent.ContextCompacted ->
+            _agentStatusText.value = event.boundary.describe()
           is com.agentisco.agent.model.AgentStreamEvent.ToolFinished -> _toolExecutions.update { list ->
             listOf(
               ToolExecution(

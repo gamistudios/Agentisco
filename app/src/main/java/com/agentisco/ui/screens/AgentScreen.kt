@@ -13,18 +13,21 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Calculate
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Closeimport androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.MoreVert
@@ -34,7 +37,9 @@ import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.outlined.Build
+import androidx.compose.material.icons.outlined.Calculate
 import androidx.compose.material.icons.outlined.Commit
+import androidx.compose.material.icons.outlined.Compress
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Edit
@@ -68,6 +73,7 @@ import com.agentisco.ui.AgentTurnItem
 import com.agentisco.ui.ActionBlock
 import com.agentisco.ui.ApprovalBlock
 import com.agentisco.ui.ChatItem
+import com.agentisco.ui.CompactionBlock
 import com.agentisco.ui.ErrorBlock
 import com.agentisco.ui.ReasoningBlock
 import com.agentisco.ui.TextBlock
@@ -102,6 +108,8 @@ fun AgentScreen(
   val activeSession by viewModel.activeChatSession.collectAsState()
   val activeSessionId by viewModel.activeSessionId.collectAsState()
   val chatDisplay by viewModel.chatDisplay.collectAsState()
+  val compactSettings by viewModel.compactSettings.collectAsState()
+  val contextUsage by viewModel.contextUsage.collectAsState()
 
   var promptText by remember { mutableStateOf("") }
   var showSessionSheet by remember { mutableStateOf(false) }
@@ -314,6 +322,7 @@ fun AgentScreen(
       providers = providers,
       models = allModels,
       permissions = permissions,
+      contextUsage = if (compactSettings.showContextUsage) contextUsage else null,
       promptText = promptText,
       onPromptChange = { promptText = it },
       isWorking = isWorking,
@@ -712,6 +721,7 @@ private fun AgentTurnCard(
         )
         is ApprovalBlock -> ApprovalCard(block, onAllow, onDeny)
         is ErrorBlock -> ErrorCard(block, showRetry = item.status == TurnStatus.FAILED, onRetry = onRetry)
+        is CompactionBlock -> CompactionCard(block)
       }
     }
 
@@ -804,6 +814,54 @@ private fun AgentEmptyState(project: com.agentisco.data.model.Project, hasHistor
 }
 
 @OptIn(ExperimentalFoundationApi::class)
+/**
+ * A compaction note: the transcript sent to the provider was summarized.
+ * Nothing above it was deleted; it explains why the model's memory starts at
+ * a summary and carries that summary for inspection.
+ */
+@Composable
+private fun CompactionCard(block: CompactionBlock) {
+  var expanded by remember { mutableStateOf(false) }
+  Column(
+    modifier = Modifier
+      .fillMaxWidth()
+      .clip(RoundedCornerShape(10.dp))
+      .background(ElectricBlue.copy(alpha = 0.08f))
+      .border(1.dp, ElectricBlue.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
+      .clickable { expanded = !expanded }
+      .padding(horizontal = 10.dp, vertical = 8.dp)
+      .testTag("stream_compaction")
+  ) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+      Icon(Icons.Outlined.Compress, contentDescription = null, tint = ElectricBlueGlow, modifier = Modifier.size(14.dp))
+      Spacer(modifier = Modifier.width(8.dp))
+      Column(modifier = Modifier.weight(1f)) {
+        Text("Context compacted", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        Text(block.summary, color = TextSecondary, fontSize = 11.sp, lineHeight = 14.sp)
+      }
+      Icon(
+        Icons.Default.KeyboardArrowDown,
+        contentDescription = if (expanded) "Hide summary" else "Show summary",
+        tint = TextMuted,
+        modifier = Modifier.size(14.dp)
+      )
+    }
+    if (expanded && block.summaryText.isNotBlank()) {
+      Spacer(modifier = Modifier.height(8.dp))
+      Text(
+        block.summaryText,
+        color = TextSecondary,
+        fontSize = 11.sp,
+        lineHeight = 15.sp,
+        modifier = Modifier
+          .fillMaxWidth()
+          .verticalScroll(rememberScrollState())
+          .heightIn(max = 220.dp)
+      )
+    }
+  }
+}
+
 @Composable
 private fun ToolCallRow(
   item: ActionBlock,
@@ -1275,6 +1333,7 @@ private fun AgentComposer(
   providers: List<com.agentisco.settings.model.AIProvider>,
   models: List<com.agentisco.settings.model.AIModel>,
   permissions: com.agentisco.agent.model.AgentPermissions,
+  contextUsage: com.agentisco.agent.compact.ContextTokenUsage?,
   promptText: String,
   onPromptChange: (String) -> Unit,
   isWorking: Boolean,
@@ -1422,6 +1481,11 @@ private fun AgentComposer(
             }
           }
         )
+
+        // Live context occupancy: how much of the model's window the next
+        // request will consume. It moves while the agent streams, and turns
+        // amber once the conversation is close to the compact threshold.
+        contextUsage?.let { usage -> ContextUsageChip(usage) }
       }
     }
   }
@@ -1434,6 +1498,46 @@ data class DropdownOption(
   val header: Boolean = false,
   val configure: Boolean = false
 )
+
+/**
+ * Context-percentage chip: a fixed-width read-out of how much of the model's
+ * context window the running conversation occupies, so the user can see the
+ * pressure build while the agent works — not when the context runs out.
+ */
+@Composable
+private fun ContextUsageChip(usage: com.agentisco.agent.compact.ContextTokenUsage) {
+  if (usage.contextWindow <= 0) return
+  val tint = when {
+    usage.isAboveThreshold -> DangerRed
+    usage.pressurePercent >= 85 -> WarningAmber
+    usage.pressurePercent >= 60 -> ElectricBlueGlow
+    else -> TextMuted
+  }
+  Box(
+    modifier = Modifier
+      .clip(RoundedCornerShape(6.dp))
+      .background(DarkSurface.copy(alpha = 0.6f))
+      .border(1.dp, tint.copy(alpha = 0.35f), RoundedCornerShape(6.dp))
+      .padding(horizontal = 6.dp, vertical = 4.dp)
+      .testTag("context_usage_chip")
+  ) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+      Icon(
+        imageVector = Icons.Outlined.Calculate,
+        contentDescription = null,
+        tint = tint,
+        modifier = Modifier.size(11.dp)
+      )      Spacer(modifier = Modifier.width(3.dp))
+      Text(
+        text = usage.label(),
+        color = tint,
+        fontSize = 10.sp,
+        fontWeight = FontWeight.SemiBold,
+        maxLines = 1
+      )
+    }
+  }
+}
 
 @Composable
 private fun ConfigDropdown(

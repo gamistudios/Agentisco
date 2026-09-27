@@ -1,5 +1,18 @@
 package com.agentisco.agent.runtime
 
+import com.agentisco.agent.compact.CLEARED_TOOL_RESULT_PLACEHOLDER
+import com.agentisco.agent.compact.CompactBoundary
+import com.agentisco.agent.compact.CompactCoordinator
+import com.agentisco.agent.compact.CompactPolicy
+import com.agentisco.agent.compact.CompactPolicyConfig
+import com.agentisco.agent.compact.CompactReason
+import com.agentisco.agent.compact.CompactSummaryContext
+import com.agentisco.agent.compact.CompactTokenMeter
+import com.agentisco.agent.compact.ContextTokenUsage
+import com.agentisco.agent.compact.ManualCompact
+import com.agentisco.agent.compact.buildCompactSummaryMessage
+import com.agentisco.agent.compact.estimateMessageTokens
+import com.agentisco.agent.compact.groupByAssistantStartedRounds
 import com.agentisco.agent.llm.LlmErrorKind
 import com.agentisco.agent.llm.LlmException
 import com.agentisco.agent.llm.LlmMessage
@@ -8,6 +21,7 @@ import com.agentisco.agent.llm.LlmRole
 import com.agentisco.agent.llm.LlmService
 import com.agentisco.agent.llm.LlmStreamEvent
 import com.agentisco.agent.llm.LlmToolCall
+import com.agentisco.agent.llm.LlmUsage
 import com.agentisco.agent.model.AgentPermissions
 import com.agentisco.agent.model.AgentStreamEvent
 import com.agentisco.agent.model.PendingApproval
@@ -18,6 +32,8 @@ import com.agentisco.agent.tool.ToolResult
 import com.agentisco.data.model.Project
 import com.agentisco.data.model.ProjectFile
 import com.agentisco.data.model.TerminalSession
+import com.agentisco.data.repository.ChatHistoryMessage
+import com.agentisco.data.repository.SessionCompaction
 import com.agentisco.settings.model.AIModel
 import com.agentisco.settings.model.AIProvider
 import kotlinx.coroutines.CancellationException
@@ -51,20 +67,59 @@ import android.util.Log
  *   request rather than restarting the task.
  * - The model may batch several tool calls in one response; they execute
  *   concurrently (bounded) and all results are sent back in a single round trip.
+ * - The transcript sent to the provider is compressed by the two-tier
+ *   [CompactCoordinator] (local tool-result clearing, then an LLM summary)
+ *   while the persisted chat keeps every message the user has seen.
  */
 class AgentRuntime(
   private val fileSystem: com.agentisco.workspace.filesystem.ProjectFileSystem,
   private val terminalManager: com.agentisco.workspace.terminal.TerminalProcessManager,
   private val gitManager: com.agentisco.workspace.git.GitRepositoryManager,
   private val llmService: LlmService,
-  private val toolRegistry: AgentToolRegistry
+  private val toolRegistry: AgentToolRegistry,
+  /**
+   * Compaction sink for the run in progress. Null (the default, and what unit
+   * tests use) disables compaction entirely, so the runtime behaves exactly as
+   * it did before the two-tier system existed.
+   */
+  private val compactSinkProvider: () -> CompactSink? = { null }
 ) {
+
+  /**
+   * Where the runtime reports compaction back to. Implemented by the chat
+   * store; the runtime itself never touches persistence.
+   */
+  interface CompactSink {
+    /**
+     * Records a compaction. [summarizedThroughRowId] is the last persisted
+     * message rowId folded into the summary: its text stays in the chat, but
+     * from now on the session sends the summary instead of those messages.
+     */
+    suspend fun onCompacted(
+      sessionId: String,
+      summary: String,
+      boundary: CompactBoundary,
+      summarizedThroughRowId: Long,
+      keptFromRowId: Long
+    )
+
+    /** The session's most recent compaction, when one exists. */
+    suspend fun latestCompaction(sessionId: String): SessionCompaction?
+  }
 
   private companion object {
     const val TAG = "AgentiscoAgent"
     const val MAX_LLM_ATTEMPTS = 5
     const val MAX_PARALLEL_TOOLS = 4
+    /** Streamed characters between two live context-usage updates. */
+    const val USAGE_EMIT_INTERVAL_CHARS = 1_000
   }
+
+  /** Two-tier compaction over the in-memory transcript of the current run. */
+  private val compactor = CompactCoordinator(llmService) { activePolicy }
+  private var activePolicy: CompactPolicyConfig = CompactPolicyConfig()
+  private var usageListener: ((ContextTokenUsage) -> Unit)? = null
+  private var usageCharsSinceEmit = 0
 
   /** Serializes approval requests when tools run concurrently. */
   private val approvalMutex = Mutex()
@@ -110,8 +165,15 @@ class AgentRuntime(
      * across turns and app restarts; stateless protocols ignore it.
      */
     sessionId: String? = null,
-    history: List<com.agentisco.data.repository.ChatHistoryMessage> = emptyList(),
+    history: List<ChatHistoryMessage> = emptyList(),
     resume: Boolean = false,
+    /**
+     * Compaction budget for this run: the selected model's real context window
+     * plus the user's Settings choices. Null derives it from the model.
+     */
+    compactPolicy: CompactPolicyConfig? = null,
+    /** Fresh context-usage snapshots, for the composer's percent chip. */
+    onTokenUsage: ((ContextTokenUsage) -> Unit)? = null,
     onRequestApproval: (PendingApproval) -> Unit,
     onEvent: (AgentStreamEvent) -> Unit
   ): AgentTaskResult = withContext(Dispatchers.IO) {
@@ -123,32 +185,123 @@ class AgentRuntime(
       onEvent(AgentStreamEvent.Status("Selected model does not support tool calling — running in text-only mode."))
     }
 
-    val systemPrompt = buildSystemPrompt(project, useTools)
-    val messages = mutableListOf<LlmMessage>()
-    messages.add(LlmMessage(LlmRole.SYSTEM, systemPrompt))
-    // Prior conversation of the persisted session: user prompts, assistant
-    // responses, tool calls and their real results — so follow-up prompts and
-    // resumed turns know exactly where the work stopped.
-    for (m in history) {
-      when (m.role) {
-        "user" -> messages.add(LlmMessage(LlmRole.USER, m.content))
-        "assistant" -> messages.add(LlmMessage(LlmRole.ASSISTANT, m.content))
-        "assistant_tool_call" -> messages.add(
-          LlmMessage(
-            LlmRole.ASSISTANT, m.content,
-            toolCalls = listOf(LlmToolCall(m.toolCallId ?: "call_resumed", m.toolName ?: "unknown", m.toolArgs ?: "{}"))
-          )
-        )
-        "tool" -> messages.add(LlmMessage(LlmRole.TOOL, m.content, toolCallId = m.toolCallId, toolName = m.toolName))
-      }
+    activePolicy = compactPolicy ?: CompactPolicyConfig.forModel(model.contextWindow, model.maxOutputTokens)
+    usageListener = onTokenUsage
+    usageCharsSinceEmit = 0
+    compactor.resetCircuitBreaker()
+    val sink = compactSinkProvider()
+    val meter = CompactTokenMeter(activePolicy.contextWindow, activePolicy)
+
+    val transcript = buildTranscript(
+      project = project,
+      useTools = useTools,
+      sessionId = sessionId,
+      history = history,
+      sink = sink,
+      prompt = prompt,
+      resume = resume
+    )
+    val messages = transcript.messages
+    val rowIds = transcript.rowIds
+    val compactedThrough = transcript.compactedThrough
+    var lastUsage: LlmUsage? = null
+
+    /**
+     * Replaces the transcript with a compressed one, keeping [rowIds] aligned.
+     */
+    fun replaceAll(newMessages: List<LlmMessage>, newRowIds: List<Long>) {
+      messages.clear(); messages.addAll(newMessages)
+      rowIds.clear(); rowIds.addAll(newRowIds)
     }
-    // A resumed turn already ends with tool results / prior context in history;
-    // only a fresh user prompt is appended here.
-    if (!resume && prompt.isNotBlank()) {
-      messages.add(LlmMessage(LlmRole.USER, prompt))
-    }
+
+    meter.setBase(messages)
+    emitUsage(meter, force = true)
+
     val modifiedFiles = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
     val maxIterations = permissions().maxToolIterations.coerceAtLeast(1)
+
+    /**
+     * Compresses the transcript before the next request.
+     *
+     * 1. Local tier: old tool-result payloads are replaced with a placeholder —
+     *    no model call. The medata in SQLite is untouched, so the chat keeps
+     *    showing the real output.
+     * 2. Model tier: when the transcript is still above the threshold, the
+     *    older assistant-started rounds are summarized and replaced by that
+     *    summary, keeping the newest rounds verbatim.
+     */
+    suspend fun compactTranscript(): Unit {
+      lastUsage?.let { meter.onResponseCompleted(it) }
+      lastUsage = null
+
+      val micro = compactor.microcompact(messages, meter.snapshot().usedTokens)
+      if (micro.applied) {
+        replaceAll(micro.messages, rowIds.toList())
+        meter.onMicrocompacted(micro.clearedResults, micro.savedTokens)
+        onEvent(
+          AgentStreamEvent.Status(
+            "Cleared ${micro.clearedResults} old tool result(s) locally (saved ${micro.savedTokens} tokens); the chat still shows them in full."
+          )
+        )
+        emitUsage(meter, force = true)
+      }
+
+      if (sink == null || sessionId == null) return
+      val decision = CompactPolicy.evaluate(
+        messages = messages,
+        rounds = groupByAssistantStartedRounds(messages),
+        config = activePolicy
+      )
+      if (!decision.shouldCompact) {
+        hintIfClose(decision)
+        return
+      }
+
+      val plan = ManualCompact.plan(messages, activePolicy)
+      if (plan.summarizedRoundCount == 0) return
+      val systemCount = messages.count { it.role == LlmRole.SYSTEM }
+      // The plan keeps the trailing non-system messages of [messages] as-is.
+      val keptTailCount = plan.keepRounds.sumOf { it.messages.size }
+      val keepStart = (messages.size - keptTailCount).coerceIn(systemCount, messages.size)
+      val summarizedThrough = rowIds.subList(0, keepStart).filter { it > 0L }.maxOrNull() ?: compactedThrough
+      val keptFrom = rowIds.getOrNull(keepStart)?.takeIf { it > 0L } ?: summarizedThrough
+      if (summarizedThrough <= compactedThrough) return // nothing new to summarize
+
+      val result = compactor.compactWithModel(
+        plan = plan,
+        provider = provider,
+        model = model,
+        apiKey = apiKey,
+        tokensBefore = meter.snapshot().usedTokens,
+        clearedToolResults = meter.snapshot().clearedToolResults,
+        trigger = decision.reason,
+        onProgress = { onEvent(AgentStreamEvent.Status(it)) }
+      ) ?: run {
+        emitUsage(meter, force = true)
+        return
+      }
+
+      // Rebuild the parallel row map: the preserved tail still points at the
+      // rows it was built from (system prompt and summary were never rows).
+      val newRowIds = MutableList(result.messages.size) { 0L }
+      for (offset in 0 until keptTailCount) {
+        val source = keepStart + offset
+        val target = systemCount + 1 + offset
+        if (source < rowIds.size && target < newRowIds.size) newRowIds[target] = rowIds[source]
+      }
+      replaceAll(result.messages, newRowIds)
+      meter.onCompacted(
+        ContextTokenUsage(
+          usedTokens = estimateMessageTokens(result.messages),
+          contextWindow = activePolicy.contextWindow,
+          thresholdTokens = activePolicy.thresholdTokens,
+          clearedToolResults = result.boundary.clearedToolResults
+        )
+      )
+      onEvent(AgentStreamEvent.ContextCompacted(result.boundary, summarizedThrough, result.summary))
+      sink.onCompacted(sessionId, result.summary, result.boundary, summarizedThrough, keptFrom)
+      emitUsage(meter, force = true)
+    }
 
     try {
       var finalText = ""
@@ -157,6 +310,10 @@ class AgentRuntime(
         while (true) {
           attempt++
           if (!currentCoroutineContext().isActive) throw CancellationException("Agent task cancelled")
+
+          // Compress before sending: the previous iteration's tool results are
+          // the biggest thing the transcript just gained.
+          compactTranscript()
 
           val assistantText = StringBuilder()
           var completedMessage: LlmMessage? = null
@@ -179,10 +336,18 @@ class AgentRuntime(
                 is LlmStreamEvent.Token -> {
                   assistantText.append(event.text)
                   onEvent(AgentStreamEvent.Token(event.text))
+                  // The context chip must move with the stream, not only when a
+                  // response finishes — that is the number the user watches.
+                  meter.appendAssistantText(event.text)
+                  usageCharsSinceEmit += event.text.length
+                  if (usageCharsSinceEmit >= USAGE_EMIT_INTERVAL_CHARS) emitUsage(meter, force = true)
                 }
                 is LlmStreamEvent.ReasoningToken -> onEvent(AgentStreamEvent.ReasoningToken(event.text))
                 is LlmStreamEvent.ToolCallRequested -> onEvent(AgentStreamEvent.Status("Model requested ${event.call.name}"))
-                is LlmStreamEvent.Completed -> completedMessage = event.message
+                is LlmStreamEvent.Completed -> {
+                  completedMessage = event.message
+                  lastUsage = event.message.usage
+                }
                 is LlmStreamEvent.Interrupted -> failure = LlmException("Response stream was interrupted.", LlmErrorKind.CANCELLED)
                 is LlmStreamEvent.Failed -> failure = event.error
               }
@@ -229,6 +394,7 @@ class AgentRuntime(
             )
           }
           messages.add(message.copy(toolCalls = canonicalCalls))
+          rowIds.add(0L)
 
           // Announce every call up front, in the model's own order, so the UI
           // shows the batch in a deterministic order (not execution order).
@@ -263,9 +429,11 @@ class AgentRuntime(
                   result.exitCode?.let { "exit code: $it" }
                 ).joinToString("\n").ifBlank { "(no output)" },
                 toolCallId = call.id,
-                toolName = call.name
+                toolName = call.name,
+                isError = !result.success
               )
             )
+            rowIds.add(0L)
           }
           if (iteration == maxIterations) {
             finalText = message.content.ifBlank { "Stopped after $maxIterations tool iterations." }
@@ -297,6 +465,114 @@ class AgentRuntime(
       onEvent(AgentStreamEvent.Failed(reason))
       AgentTaskResult(success = false, summary = reason, modifiedFiles = modifiedFiles.toList())
     }
+  }
+
+  /**
+   * Builds the transcript the provider will receive: the static system prompt,
+   * a summary of any earlier compaction, the persisted rows that compaction
+   * did not fold in, and finally the new user prompt.
+   *
+   * Compaction is deliberately invisible in the chat database — it only
+   * removes messages from the *request*, so the conversation the user reads
+   * stays complete.
+   */
+  private suspend fun buildTranscript(
+    project: Project,
+    useTools: Boolean,
+    sessionId: String?,
+    history: List<ChatHistoryMessage>,
+    sink: CompactSink?,
+    prompt: String,
+    resume: Boolean
+  ): Transcript {
+    val messages = mutableListOf<LlmMessage>()
+    // Persisted rowId each message came from (0 = produced by this run), so a
+    // compaction can record exactly which stored messages it folded in.
+    val rowIds = mutableListOf<Long>()
+    fun add(message: LlmMessage, rowId: Long = 0L) {
+      messages.add(message)
+      rowIds.add(rowId)
+    }
+
+    add(buildSystemPrompt(project, useTools))
+
+    val priorCompaction = sessionId?.let { sink?.latestCompaction(it) }
+    val compactedThrough = priorCompaction?.summarizedThroughRowId ?: 0L
+    if (priorCompaction != null) {
+      add(
+        LlmMessage(
+          LlmRole.USER,
+          buildCompactSummaryMessage(
+            priorCompaction.summary,
+            CompactSummaryContext(
+              preservedRecentCount = priorCompaction.keptMessages,
+              tokensBefore = priorCompaction.tokensBefore,
+              tokensAfter = priorCompaction.tokensAfter,
+              trigger = CompactReason.entries.firstOrNull {
+                it.name.equals(priorCompaction.trigger, true)
+              } ?: CompactReason.MANUAL,
+              clearedToolResults = priorCompaction.clearedToolResults
+            )
+          )
+        )
+      )
+    }
+    for (m in history) {
+      // Rows a previous compaction already summarized are represented by that
+      // summary; re-sending them would undo the saving.
+      if (m.rowId != 0L && m.rowId <= compactedThrough) continue
+      when (m.role) {
+        "user" -> add(LlmMessage(LlmRole.USER, m.content), m.rowId)
+        "assistant" -> add(LlmMessage(LlmRole.ASSISTANT, m.content), m.rowId)
+        "assistant_tool_call" -> add(
+          LlmMessage(
+            LlmRole.ASSISTANT, m.content,
+            toolCalls = listOf(LlmToolCall(m.toolCallId ?: "call_resumed", m.toolName ?: "unknown", m.toolArgs ?: "{}"))
+          ),
+          m.rowId
+        )
+        "tool" -> add(
+          LlmMessage(
+            LlmRole.TOOL,
+            if (m.cleared) CLEARED_TOOL_RESULT_PLACEHOLDER else m.content,
+            toolCallId = m.toolCallId,
+            toolName = m.toolName,
+            isError = m.content.startsWith("ERROR:") || m.content.contains("User denied")
+          ),
+          m.rowId
+        )
+      }
+    }
+    // A resumed turn already ends with tool results / prior context in history;
+    // only a fresh user prompt is appended here.
+    if (!resume && prompt.isNotBlank()) {
+      add(LlmMessage(LlmRole.USER, prompt))
+    }
+    return Transcript(messages, rowIds, compactedThrough)
+  }
+
+  /**
+   * Mutable transcript, the persisted row each message came from, and the
+   * rowId through which an earlier compaction already summarized.
+   */
+  private class Transcript(
+    val messages: MutableList<LlmMessage>,
+    val rowIds: MutableList<Long>,
+    val compactedThrough: Long
+  )
+
+  /** Pushes the meter's current snapshot to the UI, throttled by the caller. */
+  private fun emitUsage(meter: CompactTokenMeter, force: Boolean = false) {    val listener = usageListener ?: return
+    if (!force && usageCharsSinceEmit < USAGE_EMIT_INTERVAL_CHARS) return
+    usageCharsSinceEmit = 0
+    runCatching { listener(meter.snapshot()) }
+  }
+
+  /** Warns once the transcript is nearly at the compact threshold. */
+  private fun hintIfClose(decision: com.agentisco.agent.compact.CompactDecision) {
+    if (decision.reason != CompactReason.BELOW_THRESHOLD) return
+    if (decision.pressurePercent < 90) return
+    Log.i(TAG, "context at ${decision.pressurePercent}% of the compact threshold")
   }
 
   /** Validates, permission-checks, and executes one tool call; emits its events. */
