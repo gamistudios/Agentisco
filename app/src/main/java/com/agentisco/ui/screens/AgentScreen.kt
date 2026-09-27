@@ -27,7 +27,8 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Calculate
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Closeimport androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.MoreVert
@@ -1527,7 +1528,8 @@ private fun ContextUsageChip(usage: com.agentisco.agent.compact.ContextTokenUsag
         contentDescription = null,
         tint = tint,
         modifier = Modifier.size(11.dp)
-      )      Spacer(modifier = Modifier.width(3.dp))
+      )
+      Spacer(modifier = Modifier.width(3.dp))
       Text(
         text = usage.label(),
         color = tint,

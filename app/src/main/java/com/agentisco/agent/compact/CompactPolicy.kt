@@ -79,11 +79,20 @@ data class CompactPolicyConfig(
   val effectiveContextWindow: Int
     get() = max(MIN_EFFECTIVE_WINDOW, contextWindow - outputReserve.coerceAtMost(MAX_OUTPUT_RESERVE))
 
-  /** The token count at which the transcript is summarized. */
+  /**
+   * The token count at which the transcript is summarized.
+   *
+   * Capped by the model's real window: on a small model the floors above can
+   * mathematically exceed it, and a threshold outside the window is never
+   * reached — the request would be rejected before compaction ever ran.
+   */
   val thresholdTokens: Int
-    get() = max(
-      MIN_THRESHOLD,
-      ((effectiveContextWindow - buffer) * thresholdPercent.coerceIn(10, 200)) / 100
+    get() = minOf(
+      contextWindow.coerceAtLeast(1),
+      max(
+        MIN_THRESHOLD,
+        ((effectiveContextWindow - buffer) * thresholdPercent.coerceIn(10, 200)) / 100
+      )
     )
 
   companion object {
@@ -175,7 +184,7 @@ object CompactPolicy {
     usage: LlmUsage? = null,
     consecutiveFailures: Int = 0
   ): CompactDecision {
-    val estimated = usage?.let(::reportedTokens) ?: estimateMessageTokens(messages)
+    val estimated = tokenCount(usage, messages)
     val threshold = config.thresholdTokens
     val hasAssistant = messages.any { it.role == LlmRole.ASSISTANT }
     fun decide(reason: CompactReason) = CompactDecision(
@@ -206,7 +215,7 @@ object CompactPolicy {
   ): CompactDecision = CompactDecision(
     shouldCompact = true,
     reason = CompactReason.MANUAL,
-    estimatedTokens = usage?.let(::reportedTokens) ?: estimateMessageTokens(messages),
+    estimatedTokens = tokenCount(usage, messages),
     thresholdTokens = config.thresholdTokens,
     contextWindow = config.contextWindow,
     roundCount = rounds.size,
@@ -236,4 +245,12 @@ object CompactPolicy {
   /** 90 % of the threshold — compact locally before paying for a summary. */
   private const val MICROCOMPACT_TRIGGER_PERCENT = 90
   private const val MICROCOMPACT_TRIGGER_BUFFER = 2_000
+
+  /**
+   * The provider's own number whenever it reported a readable one; otherwise
+   * the local estimate. A usage object whose counters are all absent must not
+   * become "0 tokens", which would read as an empty conversation.
+   */
+  private fun tokenCount(usage: LlmUsage?, messages: List<LlmMessage>): Int =
+    usage?.let(::reportedTokens)?.takeIf { it > 0 } ?: estimateMessageTokens(messages)
 }

@@ -30,6 +30,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -125,6 +126,39 @@ class WorkspaceViewModel(
 
   fun setCompactKeepRecentRounds(rounds: Int) =
     repository.updateCompactSettings { it.copy(keepRecentRounds = rounds.coerceIn(0, 10)) }
+
+  fun setManualCompactEnabled(enabled: Boolean) =
+    repository.updateCompactSettings { it.copy(manualCompactEnabled = enabled) }
+
+  /**
+   * Summarizes the open conversation now, without asking the model for a turn.
+   * The chat keeps every message on screen; only what the next request sends is
+   * compressed.
+   */
+  fun compactNow() {
+    if (repository.isAgentWorking.value) return
+    val session = _activeSessionId.value ?: return
+    viewModelScope.launch {
+      var compacted: AgentStreamEvent.ContextCompacted? = null
+      repository.compactConversationNow(session) { event ->
+        if (event is AgentStreamEvent.ContextCompacted) compacted = event
+      }
+      val result = compacted ?: return@launch
+      // The card belongs under the newest answer: a manual compaction starts no
+      // turn of its own, so an invented message would render as an empty bubble.
+      val turnUuid = chatStore.messagesWithBlocks(session).first()
+        .lastOrNull { it.message.role == "assistant_turn" }?.message?.uuid ?: return@launch
+      chatStore.insertBlock(
+        AgentBlockEntity(
+          uuid = AgentChatStore.newId(), messageUuid = turnUuid, kind = "compaction",
+          name = "compaction", argsJson = "", status = "done",
+          summary = result.boundary.describe(),
+          detail = result.summary,
+          exitCode = null, createdAt = System.currentTimeMillis()
+        )
+      )
+    }
+  }
 
   // ---- Persistent agent chat (sessions → messages → turn blocks) ----
   // The UI list is derived entirely from SQLite; runtime events are written
@@ -290,7 +324,7 @@ class WorkspaceViewModel(
     )
     val total = systemTokens + com.agentisco.agent.compact.estimateMessageTokens(summaryMessages) +
       (compaction?.let { com.agentisco.agent.compact.estimateTokens(it.summary) } ?: 0)
-    publishContextUsage(
+    repository.publishContextUsage(
       com.agentisco.agent.compact.ContextTokenUsage(
         usedTokens = total,
         contextWindow = window,
@@ -319,7 +353,8 @@ class WorkspaceViewModel(
 
   private fun onAgentEvent(event: AgentStreamEvent) {
     val turn = currentTurnUuid ?: return
-    val session = _activeSessionId.value    when (event) {
+    val session = _activeSessionId.value
+    when (event) {
       // The user message + turn rows are already persisted at send time.
       is AgentStreamEvent.TaskStarted -> Unit
       is AgentStreamEvent.Status ->

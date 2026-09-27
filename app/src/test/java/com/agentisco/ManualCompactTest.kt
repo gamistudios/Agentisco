@@ -46,10 +46,15 @@ class ManualCompactTest {
 
     assertEquals(3, plan.summarizedRoundCount)
     assertEquals(2, plan.keptRoundCount)
-    assertEquals(9, plan.transcript().size) // 3 rounds x (user, assistant, tool)
+    // Rounds are assistant-started (see groupByAssistantStartedRounds): the
+    // opening group carries the first user prompt too, so three summarized
+    // rounds are 4 + 3 + 3 messages.
+    assertEquals(10, plan.transcript().size)
+    // Nothing is lost or duplicated across the split.
+    assertEquals(messages.size, plan.transcript().size + plan.preservedMessageCount)
     // The system prompt is kept out of the summary and survives in the tail.
     assertTrue(plan.preservedMessages.first().role == LlmRole.SYSTEM)
-    assertEquals(7, plan.preservedMessageCount) // system + 2 rounds
+    assertEquals(1 + 3 + 2, plan.preservedMessageCount) // system + the two newest rounds
   }
 
   @Test
@@ -125,7 +130,7 @@ class ManualCompactTest {
       "Primary Request and Intent",
       "Key Technical Concepts",
       "Files and Code Sections",
-      "Errors and fixes",
+      "Errors and Fixes",
       "Problem Solving",
       "All user messages",
       "Pending Tasks",
@@ -259,11 +264,17 @@ class ManualCompactTest {
   @Test
   fun `a round boundary is never inside an assistant turn`() {
     // A tool result arrives after its assistant message: the round must own both.
-    val messages = transcript(2)
+    val messages = transcript(3)
     val plan = ManualCompact.plan(messages, config.copy(keepRecentRounds = 1))
     val kept = plan.keepRounds.single()
-    assertEquals(LlmRole.USER, kept.messages.first().role)
+    assertEquals(LlmRole.ASSISTANT, kept.messages.first().role)
     assertEquals(LlmRole.TOOL, kept.messages.last().role)
+    // The kept tail can never start with an orphaned tool result, and every
+    // call it answers is either in the same round or summarized away.
+    assertFalse(kept.messages.any { it.role == LlmRole.TOOL && it.toolCallId == null })
+    val summarizedCalls = plan.transcript().flatMap { r -> r.toolCalls.map { it.id } }.toSet()
+    assertTrue(kept.messages.filter { it.role == LlmRole.TOOL }
+      .none { summarizedCalls.contains(it.toolCallId) })
     assertNotEquals(0, kept.messages.size)
   }
 }

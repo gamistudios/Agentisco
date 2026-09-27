@@ -190,7 +190,7 @@ class AgentChatStore(context: Context?) {
    *
    * The returned entries carry their `rowId`, so the caller can tell which
    * messages a recorded compaction already summarized and therefore must not
-   * send again (see [compactConversationMessages]).
+   * send again (see [latestCompactionBlocking]).
    *
    * @param excludeLastUser skip the newest user message (a fresh prompt the
    *   runtime appends itself).

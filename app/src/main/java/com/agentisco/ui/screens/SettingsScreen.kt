@@ -5,17 +5,14 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.shape.RoundedCornerShape/**
- * How agent tool activity is rendered in chat: structured cards (command,
- * git-style diff, plain output) by default, with raw request JSON optional.
- */
-@Composable
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.BugReport
 import androidx.compose.material.icons.outlined.Calculate
+import androidx.compose.material.icons.outlined.Compress
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material3.*
@@ -23,13 +20,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -532,6 +522,7 @@ private fun ContextCompactionCard(viewModel: WorkspaceViewModel) {
   val settings by viewModel.compactSettings.collectAsState()
   val usage by viewModel.contextUsage.collectAsState()
   val model by viewModel.selectedModel.collectAsState()
+  val working by viewModel.isAgentWorking.collectAsState()
 
   Card(
     modifier = Modifier
@@ -582,6 +573,13 @@ private fun ContextCompactionCard(viewModel: WorkspaceViewModel) {
         checked = settings.microcompactEnabled,
         tag = "switch_microcompact"
       ) { viewModel.setMicrocompactEnabled(it) }
+
+      ToggleRow(
+        title = "Allow manual compaction",
+        subtitle = "Lets you compress the conversation on demand from the composer",
+        checked = settings.manualCompactEnabled,
+        tag = "switch_manual_compact"
+      ) { viewModel.setManualCompactEnabled(it) }
 
       ToggleRow(
         title = "Show context percentage in the composer",
@@ -685,6 +683,23 @@ private fun ContextCompactionCard(viewModel: WorkspaceViewModel) {
             viewModel.setCompactKeepRecentRounds(settings.keepRecentRounds + 1)
           }
         }
+      }
+
+      Spacer(modifier = Modifier.height(12.dp))
+
+      OutlinedButton(
+        onClick = { viewModel.compactNow() },
+        enabled = settings.manualCompactEnabled && !working,
+        border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder),
+        modifier = Modifier.testTag("button_compact_now")
+      ) {
+        Icon(Icons.Outlined.Compress, contentDescription = null, modifier = Modifier.size(14.dp), tint = TextSecondary)
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+          text = if (working) "Compaction waits for the current turn" else "Compact conversation now",
+          fontSize = 12.sp,
+          color = TextPrimary
+        )
       }
     }
   }

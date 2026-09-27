@@ -92,15 +92,16 @@ data class ContextTokenUsage(
 
 /** "812", "14.2k", "1.3M" — keeps the chip to a fixed, narrow width. */
 fun compactNumber(value: Int): String = when {
-  value >= 1_000_000 -> oneDecimal(value / 1_000_000.0) + "M"
-  value >= 1_000 -> oneDecimal(value / 1_000.0) + "k"
+  value >= 1_000_000 -> scaledValue(value / 1_000_000.0) + "M"
+  value >= 1_000 -> scaledValue(value / 1_000.0) + "k"
   else -> value.toString()
 }
 
-private fun oneDecimal(value: Double): String {
+/** One decimal while it costs nothing ("37.5k"); whole once it would mislead ("100k"). */
+private fun scaledValue(value: Double): String {
   val rounded = (value * 10).roundToInt() / 10.0
-  return if (rounded >= 10.0 || rounded == rounded.toInt().toDouble()) rounded.toInt().toString()
-  else rounded.toString()
+  return if (rounded >= 100.0) rounded.roundToInt().toString()
+  else String.format(java.util.Locale.US, "%.1f", rounded)
 }
 
 /**

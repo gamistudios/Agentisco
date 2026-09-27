@@ -25,7 +25,7 @@ import java.util.concurrent.TimeUnit
  *
  * AgentRuntime → LlmService → protocol client → provider HTTP API
  */
-class LlmService(
+open class LlmService(
   httpClient: OkHttpClient? = null,
   private val chainStore: GeminiChainStore = GeminiChainStoreImpl()
 ) {
@@ -49,7 +49,20 @@ class LlmService(
     LlmStreamRegistry.cancelActive()
   }
 
-  suspend fun streamChat(
+  /**
+   * Forgets the server-side conversation for [conversationKey], so the next
+   * request opens a new chain from the local transcript.
+   *
+   * Only the stateful protocols keep anything remotely: after a transcript
+   * compaction the provider's own copy is strictly larger than ours, and a
+   * continuation turn would ship just the delta, leaving the model on the
+   * uncompressed history.
+   */
+  open fun invalidateConversation(conversationKey: String?) {
+    conversationKey?.takeIf { it.isNotBlank() }?.let(chainStore::clear)
+  }
+
+  open suspend fun streamChat(
     provider: AIProvider,
     model: AIModel,
     apiKey: String,

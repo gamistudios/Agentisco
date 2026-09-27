@@ -3,9 +3,9 @@ package com.agentisco
 import com.agentisco.agent.compact.CompactPolicy
 import com.agentisco.agent.compact.CompactPolicyConfig
 import com.agentisco.agent.compact.CompactReason
-import com.agentisco.agent.compact.CompactRound
 import com.agentisco.agent.compact.estimateMessageTokens
 import com.agentisco.agent.compact.estimateTokens
+import com.agentisco.agent.compact.groupByAssistantStartedRounds
 import com.agentisco.agent.llm.LlmMessage
 import com.agentisco.agent.llm.LlmRole
 import com.agentisco.agent.llm.LlmToolCall
@@ -21,12 +21,14 @@ class CompactPolicyTest {
     contextWindow: Int = 200_000,
     outputReserve: Int = 32_000,
     buffer: Int = 13_000,
-    thresholdPercent: Int = 100
+    thresholdPercent: Int = 100,
+    maxConsecutiveFailures: Int = 3
   ) = CompactPolicyConfig(
     contextWindow = contextWindow,
     outputReserve = outputReserve,
     buffer = buffer,
-    thresholdPercent = thresholdPercent
+    thresholdPercent = thresholdPercent,
+    maxConsecutiveFailures = maxConsecutiveFailures
   )
 
   private val large = buildString {
@@ -42,9 +44,21 @@ class CompactPolicyTest {
     LlmMessage(LlmRole.TOOL, large, toolCallId = "call_1", toolName = "read_file")
   )
 
-  private fun rounds(messages: List<LlmMessage>) = listOf(
-    CompactRound(messages.drop(1), 1, 1, estimateMessageTokens(messages.drop(1)))
+  /** A short conversation: comfortably inside any window. */
+  private fun smallTranscript(): List<LlmMessage> = listOf(
+    LlmMessage(LlmRole.SYSTEM, "system prompt"),
+    LlmMessage(LlmRole.USER, "first request"),
+    LlmMessage(LlmRole.ASSISTANT, "answer one"),
+    LlmMessage(LlmRole.USER, "second request"),
+    LlmMessage(
+      LlmRole.ASSISTANT, "answer two",
+      toolCalls = listOf(LlmToolCall("call_1", "read_file", "{\"path\":\"a.kt\"}"))
+    ),
+    LlmMessage(LlmRole.TOOL, "1: fun main() {}", toolCallId = "call_1", toolName = "read_file")
   )
+
+  /** The production grouping, so the decision is tested with real rounds. */
+  private fun rounds(messages: List<LlmMessage>) = groupByAssistantStartedRounds(messages)
 
   @Test
   fun `the threshold is the effective window minus the buffer`() {
@@ -62,8 +76,9 @@ class CompactPolicyTest {
   @Test
   fun `a small model gets the floor, not a negative budget`() {
     val tiny = policy(contextWindow = 8_000, outputReserve = 7_000, buffer = 5_000)
-    assertEquals(CompactPolicyConfig.DEFAULT_OUTPUT_RESERVE, tiny.outputReserve)
-    // effective window floors at 16_000; threshold floors at 8_000
+    assertEquals(7_000, tiny.outputReserve)
+    // The effective window floors at 16_000, but the threshold is still capped
+    // by what the model can actually hold — otherwise it could never be reached.
     assertEquals(16_000, tiny.effectiveContextWindow)
     assertEquals(8_000, tiny.thresholdTokens)
   }
@@ -76,7 +91,8 @@ class CompactPolicyTest {
 
   @Test
   fun `below threshold the transcript is left alone`() {
-    val decision = CompactPolicy.evaluate(transcript(), rounds(transcript()), policy())
+    val messages = smallTranscript()
+    val decision = CompactPolicy.evaluate(messages, rounds(messages), policy())
     assertFalse(decision.shouldCompact)
     assertEquals(CompactReason.BELOW_THRESHOLD, decision.reason)
     assertTrue(decision.estimatedTokens < decision.thresholdTokens)

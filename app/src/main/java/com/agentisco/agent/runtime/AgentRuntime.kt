@@ -21,7 +21,6 @@ import com.agentisco.agent.llm.LlmRole
 import com.agentisco.agent.llm.LlmService
 import com.agentisco.agent.llm.LlmStreamEvent
 import com.agentisco.agent.llm.LlmToolCall
-import com.agentisco.agent.llm.LlmUsage
 import com.agentisco.agent.model.AgentPermissions
 import com.agentisco.agent.model.AgentStreamEvent
 import com.agentisco.agent.model.PendingApproval
@@ -203,8 +202,6 @@ class AgentRuntime(
     )
     val messages = transcript.messages
     val rowIds = transcript.rowIds
-    val compactedThrough = transcript.compactedThrough
-    var lastUsage: LlmUsage? = null
 
     /**
      * Replaces the transcript with a compressed one, keeping [rowIds] aligned.
@@ -224,15 +221,17 @@ class AgentRuntime(
      * Compresses the transcript before the next request.
      *
      * 1. Local tier: old tool-result payloads are replaced with a placeholder —
-     *    no model call. The medata in SQLite is untouched, so the chat keeps
+     *    no model call. The metadata in SQLite is untouched, so the chat keeps
      *    showing the real output.
      * 2. Model tier: when the transcript is still above the threshold, the
      *    older assistant-started rounds are summarized and replaced by that
      *    summary, keeping the newest rounds verbatim.
      */
     suspend fun compactTranscript(): Unit {
-      lastUsage?.let { meter.onResponseCompleted(it) }
-      lastUsage = null
+      // The transcript gained a whole round of tool output since the last
+      // measurement, so the budget is re-read from the exact payload about to
+      // be sent. Once per request — not once per streamed token.
+      meter.setBase(messages)
 
       val micro = compactor.microcompact(messages, meter.snapshot().usedTokens)
       if (micro.applied) {
@@ -256,51 +255,11 @@ class AgentRuntime(
         hintIfClose(decision)
         return
       }
-
-      val plan = ManualCompact.plan(messages, activePolicy)
-      if (plan.summarizedRoundCount == 0) return
-      val systemCount = messages.count { it.role == LlmRole.SYSTEM }
-      // The plan keeps the trailing non-system messages of [messages] as-is.
-      val keptTailCount = plan.keepRounds.sumOf { it.messages.size }
-      val keepStart = (messages.size - keptTailCount).coerceIn(systemCount, messages.size)
-      val summarizedThrough = rowIds.subList(0, keepStart).filter { it > 0L }.maxOrNull() ?: compactedThrough
-      val keptFrom = rowIds.getOrNull(keepStart)?.takeIf { it > 0L } ?: summarizedThrough
-      if (summarizedThrough <= compactedThrough) return // nothing new to summarize
-
-      val result = compactor.compactWithModel(
-        plan = plan,
-        provider = provider,
-        model = model,
-        apiKey = apiKey,
-        tokensBefore = meter.snapshot().usedTokens,
-        clearedToolResults = meter.snapshot().clearedToolResults,
-        trigger = decision.reason,
-        onProgress = { onEvent(AgentStreamEvent.Status(it)) }
-      ) ?: run {
-        emitUsage(meter, force = true)
-        return
-      }
-
-      // Rebuild the parallel row map: the preserved tail still points at the
-      // rows it was built from (system prompt and summary were never rows).
-      val newRowIds = MutableList(result.messages.size) { 0L }
-      for (offset in 0 until keptTailCount) {
-        val source = keepStart + offset
-        val target = systemCount + 1 + offset
-        if (source < rowIds.size && target < newRowIds.size) newRowIds[target] = rowIds[source]
-      }
-      replaceAll(result.messages, newRowIds)
-      meter.onCompacted(
-        ContextTokenUsage(
-          usedTokens = estimateMessageTokens(result.messages),
-          contextWindow = activePolicy.contextWindow,
-          thresholdTokens = activePolicy.thresholdTokens,
-          clearedToolResults = result.boundary.clearedToolResults
-        )
+      summarizeRounds(
+        transcript = transcript,
+        decision = decision,
+        ctx = CompactionContext(provider, model, apiKey, sessionId, sink, meter, null, onEvent)
       )
-      onEvent(AgentStreamEvent.ContextCompacted(result.boundary, summarizedThrough, result.summary))
-      sink.onCompacted(sessionId, result.summary, result.boundary, summarizedThrough, keptFrom)
-      emitUsage(meter, force = true)
     }
 
     try {
@@ -346,7 +305,11 @@ class AgentRuntime(
                 is LlmStreamEvent.ToolCallRequested -> onEvent(AgentStreamEvent.Status("Model requested ${event.call.name}"))
                 is LlmStreamEvent.Completed -> {
                   completedMessage = event.message
-                  lastUsage = event.message.usage
+                  // The provider's own count is authoritative and includes the
+                  // hidden reasoning tokens no local estimate can see, so the
+                  // chip adopts it the moment the response lands.
+                  meter.onResponseCompleted(event.message.usage)
+                  emitUsage(meter, force = true)
                 }
                 is LlmStreamEvent.Interrupted -> failure = LlmException("Response stream was interrupted.", LlmErrorKind.CANCELLED)
                 is LlmStreamEvent.Failed -> failure = event.error
@@ -494,7 +457,7 @@ class AgentRuntime(
       rowIds.add(rowId)
     }
 
-    add(buildSystemPrompt(project, useTools))
+    add(LlmMessage(LlmRole.SYSTEM, buildSystemPrompt(project, useTools)))
 
     val priorCompaction = sessionId?.let { sink?.latestCompaction(it) }
     val compactedThrough = priorCompaction?.summarizedThroughRowId ?: 0L
@@ -561,8 +524,177 @@ class AgentRuntime(
     val compactedThrough: Long
   )
 
+  /** Everything tier 2 needs beyond the transcript it compresses. */
+  private class CompactionContext(
+    val provider: AIProvider,
+    val model: AIModel,
+    val apiKey: String,
+    val sessionId: String,
+    val sink: CompactSink,
+    val meter: CompactTokenMeter,
+    val customInstructions: String?,
+    val onEvent: (AgentStreamEvent) -> Unit
+  )
+
+  /**
+   * Tier 2 over [transcript], in place: the older assistant-started rounds are
+   * replaced by one summary message, the preserved tail keeps the persisted rows
+   * it was built from, and the boundary is recorded through the sink so the next
+   * turn rebuilds the compressed transcript instead of the full one.
+   *
+   * Returns the boundary when the transcript shrank, or null when nothing was
+   * compacted — no material, nothing new since the last summary, or a failed
+   * summary — in which case the caller keeps sending the history as it is.
+   */
+  private suspend fun summarizeRounds(
+    transcript: Transcript,
+    decision: com.agentisco.agent.compact.CompactDecision,
+    ctx: CompactionContext
+  ): CompactBoundary? {
+    val messages = transcript.messages
+    val rowIds = transcript.rowIds
+    val meter = ctx.meter
+    val forced = decision.reason == CompactReason.MANUAL
+    val tokensBeforeLocal = estimateMessageTokens(messages)
+    /** An on-demand pass must explain itself; an automatic one stays silent. */
+    fun report(text: String) {
+      if (forced) ctx.onEvent(AgentStreamEvent.Status(text))
+    }
+
+    val plan = ManualCompact.plan(messages, activePolicy)
+    if (plan.summarizedRoundCount == 0) {
+      report("Nothing to compact yet — this conversation has no earlier turns to summarize.")
+      return null
+    }
+    val systemCount = messages.count { it.role == LlmRole.SYSTEM }
+    // The plan keeps the trailing non-system messages of [messages] as-is.
+    val keptTailCount = plan.keepRounds.sumOf { it.messages.size }
+    val keepStart = (messages.size - keptTailCount).coerceIn(systemCount, messages.size)
+    val summarizedThrough = rowIds.subList(0, keepStart).filter { it > 0L }.maxOrNull()
+      ?: transcript.compactedThrough
+    val keptFrom = rowIds.getOrNull(keepStart)?.takeIf { it > 0L } ?: summarizedThrough
+    if (summarizedThrough <= transcript.compactedThrough) {
+      report("Nothing to compact yet — everything older is already summarized.")
+      return null
+    } // nothing new to summarize
+
+    val result = compactor.compactWithModel(
+      plan = plan,
+      provider = ctx.provider,
+      model = ctx.model,
+      apiKey = ctx.apiKey,
+      tokensBefore = meter.snapshot().usedTokens,
+      clearedToolResults = meter.snapshot().clearedToolResults,
+      trigger = decision.reason,
+      customInstructions = ctx.customInstructions,
+      onProgress = { ctx.onEvent(AgentStreamEvent.Status(it)) }
+    )
+    if (result == null) {
+      emitUsage(meter, force = true)
+      return null
+    }
+
+    // A summary carries a fixed continuation preamble, so forcing a pass over a
+    // short conversation can cost more than it saves. On demand that is reported
+    // instead of recorded; the automatic pass only ever runs above the threshold.
+    if (forced && estimateMessageTokens(result.messages) >= tokensBeforeLocal) {
+      report("Nothing to compact yet — this conversation is too short for a summary to save anything.")
+      return null
+    }
+
+    // Rebuild the parallel row map: the preserved tail still points at the
+    // rows it was built from (system prompt and summary were never rows).
+    val newRowIds = MutableList(result.messages.size) { 0L }
+    for (offset in 0 until keptTailCount) {
+      val source = keepStart + offset
+      val target = systemCount + 1 + offset
+      if (source < rowIds.size && target < newRowIds.size) newRowIds[target] = rowIds[source]
+    }
+    messages.clear(); messages.addAll(result.messages)
+    rowIds.clear(); rowIds.addAll(newRowIds)
+    meter.onCompacted(
+      ContextTokenUsage(
+        usedTokens = estimateMessageTokens(result.messages),
+        contextWindow = activePolicy.contextWindow,
+        thresholdTokens = activePolicy.thresholdTokens,
+        clearedToolResults = result.boundary.clearedToolResults
+      )
+    )
+    ctx.onEvent(AgentStreamEvent.ContextCompacted(result.boundary, summarizedThrough, result.summary))
+    ctx.sink.onCompacted(ctx.sessionId, result.summary, result.boundary, summarizedThrough, keptFrom)
+    // A stateful provider keeps the transcript on its own side and receives only
+    // each new delta, so the summary would never land and the summarized turns
+    // would stay billed. Reopening the chain sends the compressed history as the
+    // conversation from now on.
+    llmService.invalidateConversation(ctx.sessionId)
+    emitUsage(meter, force = true)
+    return result.boundary
+  }
+
+  /**
+   * The user's explicit "compact now": run the model tier over the stored
+   * conversation without asking the provider for a new answer.
+   *
+   * The transcript is rebuilt exactly as a turn would rebuild it — system prompt,
+   * previous summary, uncompacted rows — so the plan, the row bookkeeping and the
+   * recorded boundary match what the next turn will send. The persisted chat is
+   * never rewritten; only what goes to the provider shrinks.
+   *
+   * Returns the boundary when the conversation shrank, null when there was
+   * nothing to compact. Progress and failures are reported through [onEvent].
+   */
+  suspend fun compactNow(
+    project: Project,
+    provider: AIProvider,
+    model: AIModel,
+    apiKey: String,
+    sessionId: String,
+    history: List<ChatHistoryMessage>,
+    compactPolicy: CompactPolicyConfig? = null,
+    customInstructions: String? = null,
+    onTokenUsage: ((ContextTokenUsage) -> Unit)? = null,
+    onEvent: (AgentStreamEvent) -> Unit = {}
+  ): CompactBoundary? = withContext(Dispatchers.IO) {
+    val sink = compactSinkProvider()
+    if (sink == null) {
+      onEvent(AgentStreamEvent.Status("Compaction is unavailable for this session."))
+      return@withContext null
+    }
+    activePolicy = compactPolicy ?: CompactPolicyConfig.forModel(model.contextWindow, model.maxOutputTokens)
+    usageListener = onTokenUsage
+    usageCharsSinceEmit = 0
+    compactor.resetCircuitBreaker()
+    val meter = CompactTokenMeter(activePolicy.contextWindow, activePolicy)
+
+    val transcript = buildTranscript(
+      project = project,
+      useTools = model.capabilities.tools,
+      sessionId = sessionId,
+      history = history,
+      sink = sink,
+      prompt = "",
+      resume = true
+    )
+    meter.setBase(transcript.messages)
+    emitUsage(meter, force = true)
+
+    val decision = CompactPolicy.forceCompact(
+      messages = transcript.messages,
+      rounds = groupByAssistantStartedRounds(transcript.messages),
+      config = activePolicy
+    )
+    val boundary = summarizeRounds(
+      transcript = transcript,
+      decision = decision,
+      ctx = CompactionContext(provider, model, apiKey, sessionId, sink, meter, customInstructions, onEvent)
+    )
+    // summarizeRounds explains a no-op itself: only an on-demand pass reports.
+    emitUsage(meter, force = true)
+    boundary  }
+
   /** Pushes the meter's current snapshot to the UI, throttled by the caller. */
-  private fun emitUsage(meter: CompactTokenMeter, force: Boolean = false) {    val listener = usageListener ?: return
+  private fun emitUsage(meter: CompactTokenMeter, force: Boolean = false) {
+    val listener = usageListener ?: return
     if (!force && usageCharsSinceEmit < USAGE_EMIT_INTERVAL_CHARS) return
     usageCharsSinceEmit = 0
     runCatching { listener(meter.snapshot()) }

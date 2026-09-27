@@ -2498,25 +2498,82 @@ class WorkspaceRepository(
     executeAgentTask("", history, resume = true, sessionId = sessionId)
   }
 
+  /**
+   * The selected model plus its provider credentials. Surfaces why it is missing
+   * (and opens the model sheet) so the caller can simply not start.
+   */
+  private fun resolveAgentTarget(): Triple<AIModel, AIProvider, String>? {
+    val model = _selectedModel.value
+    if (model == null) {
+      _agentStatusText.value = "No model selected — configure a provider and select a model in Settings first."
+      _isModelSheetOpen.value = true
+      return null
+    }
+    val connection = resolveProviderForModel(model)
+    if (connection == null) {
+      _agentStatusText.value = "Provider \"${_providers.value.firstOrNull { it.id == model.providerId }?.name ?: model.providerId}\" is not configured with a valid API key."
+      _isModelSheetOpen.value = true
+      return null
+    }
+    return Triple(model, connection.first, connection.second)
+  }
+
+  /**
+   * The user's "compact now": summarize this session's stored conversation
+   * without asking the model for a new turn.
+   *
+   * Refuses to run while a task is in flight — that turn owns the transcript, and
+   * compacting underneath it would send the provider two different histories.
+   *
+   * Events go to [onEvent] rather than the shared turn stream: there is no turn
+   * of its own here, and the UI decides where the compaction card belongs.
+   */
+  suspend fun compactConversationNow(
+    sessionId: String,
+    onEvent: (com.agentisco.agent.model.AgentStreamEvent) -> Unit = {}
+  ) {
+    if (_isAgentWorking.value) return
+    if (!_compactSettings.value.manualCompactEnabled) {
+      _agentStatusText.value = "Manual compaction is turned off in Settings → Context & Compaction."
+      return
+    }
+    val (model, provider, apiKey) = resolveAgentTarget() ?: return
+    _isAgentWorking.value = true
+    _agentStatusText.value = "Compacting the conversation…"
+    try {
+      agentRuntime.compactNow(
+        project = _activeProject.value,
+        provider = provider,
+        model = model,
+        apiKey = apiKey,
+        sessionId = sessionId,
+        history = chatStore.buildConversationMessages(sessionId, excludeLastUser = false),
+        compactPolicy = _compactSettings.value.toPolicyConfig(model.contextWindow, model.maxOutputTokens),
+        onTokenUsage = { usage -> publishContextUsage(usage) },
+        onEvent = { event ->
+          // Deliberately not the shared agent stream: that one writes events
+          // into the running turn, and a manual compaction belongs to no turn.
+          when (event) {
+            is com.agentisco.agent.model.AgentStreamEvent.Status -> _agentStatusText.value = event.text
+            is com.agentisco.agent.model.AgentStreamEvent.ContextCompacted ->
+              _agentStatusText.value = event.boundary.describe()
+            else -> Unit
+          }
+          onEvent(event)
+        }
+      )
+    } finally {
+      _isAgentWorking.value = false
+    }
+  }
+
   private suspend fun executeAgentTask(
     prompt: String,
     history: List<com.agentisco.data.repository.ChatHistoryMessage>,
     resume: Boolean,
     sessionId: String?
   ) {
-    val model = _selectedModel.value
-    if (model == null) {
-      _agentStatusText.value = "No model selected — configure a provider and select a model in Settings first."
-      _isModelSheetOpen.value = true
-      return
-    }
-    val connection = resolveProviderForModel(model)
-    if (connection == null) {
-      _agentStatusText.value = "Provider \"${_providers.value.firstOrNull { it.id == model.providerId }?.name ?: model.providerId}\" is not configured with a valid API key."
-      _isModelSheetOpen.value = true
-      return
-    }
-    val (provider, apiKey) = connection
+    val (model, provider, apiKey) = resolveAgentTarget() ?: return
 
     _isAgentWorking.value = true
     _agentStatusText.value = "Starting agent task..."

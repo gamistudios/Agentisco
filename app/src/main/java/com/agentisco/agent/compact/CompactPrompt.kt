@@ -11,7 +11,7 @@ import com.agentisco.agent.llm.LlmRole
 const val COMPACT_PREAMBLE = """You are compacting a coding-agent conversation so it can continue after the older turns are dropped.
 
 ABSOLUTE RULES:
-- Output TEXT ONLY. Do not request or call any tool.
+- Output TEXT ONLY, no tools: never request or call a tool in this answer.
 - Do NOT write any conversational filler: no "Sure", no "I'll summarize", no closing remarks.
 - Reason briefly inside a single <analysis></analysis> block FIRST, then emit the summary.
 - The summary must let the agent resume work with no other context. Be specific and factual.
