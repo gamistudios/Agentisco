@@ -1020,6 +1020,13 @@ class WorkspaceViewModel(
     repository.testProviderConnection(providerId)
   }
 
+  /**
+   * Returns the stored key for a provider, or null when none is set. Fetched on
+   * demand for the reveal-toggle in the provider UI — the secret is deliberately
+   * kept out of [com.agentisco.settings.model.AIProvider] UI state.
+   */
+  fun getApiKey(providerId: String): String? = repository.getApiKey(providerId)
+
   fun updateSearchQuery(query: String) {
     repository.updateSearchQuery(query)
   }

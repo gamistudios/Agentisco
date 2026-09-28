@@ -169,6 +169,10 @@ class ProviderConfigStore(private val context: Context? = null) {
     put("name", name)
     put("baseUrl", baseUrl)
     put("protocol", protocol.name)
+    // hasApiKey is derived from credentials.json, but it is persisted here too
+    // so a provider saved with a key still reads as "key set" after a restart
+    // (the secret itself is never written to this file).
+    put("hasApiKey", hasApiKey)
   }
 
   private fun AIModel.toJson() = JSONObject().apply {
@@ -202,7 +206,10 @@ class ProviderConfigStore(private val context: Context? = null) {
         id = o.getString("id"),
         name = o.getString("name"),
         baseUrl = o.getString("baseUrl"),
-        protocol = LLMProtocol.fromName(o.optString("protocol")) ?: LLMProtocol.OPENAI_CHAT_COMPLETIONS
+        protocol = LLMProtocol.fromName(o.optString("protocol")) ?: LLMProtocol.OPENAI_CHAT_COMPLETIONS,
+        // Older installs stored no flag; fall back to credential storage so the
+        // label corrects itself on first read instead of claiming "no key".
+        hasApiKey = if (o.has("hasApiKey")) o.getBoolean("hasApiKey") else credentialsCache[o.getString("id")]?.isNotBlank() == true
       )
     }.getOrNull()
   }

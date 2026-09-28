@@ -12,6 +12,8 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.outlined.StarOutline
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -295,6 +297,7 @@ private fun ProviderFormDialog(
   var baseUrl by remember { mutableStateOf(existing?.baseUrl ?: "https://") }
   var protocol by remember { mutableStateOf(existing?.protocol ?: LLMProtocol.OPENAI_CHAT_COMPLETIONS) }
   var apiKey by remember { mutableStateOf("") }
+  var keyVisible by remember { mutableStateOf(false) }
 
   val valid = name.isNotBlank() && baseUrl.startsWith("http")
 
@@ -352,8 +355,21 @@ private fun ProviderFormDialog(
         OutlinedTextField(
           value = apiKey, onValueChange = { apiKey = it },
           label = { Text(if (existing?.hasApiKey == true) "API key (leave blank to keep)" else "API key", fontSize = 11.sp) },
-          visualTransformation = PasswordVisualTransformation(),
-          singleLine = true, modifier = Modifier.fillMaxWidth().testTag("input_provider_key")
+          singleLine = true, modifier = Modifier.fillMaxWidth().testTag("input_provider_key"),
+          visualTransformation = if (keyVisible) VisualTransformation.None else PasswordVisualTransformation(),
+          trailingIcon = {
+            IconButton(
+              onClick = { keyVisible = !keyVisible },
+              modifier = Modifier.testTag("btn_toggle_key_visible")
+            ) {
+              Icon(
+                imageVector = if (keyVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                contentDescription = if (keyVisible) "Hide API key" else "Show API key",
+                tint = TextMuted,
+                modifier = Modifier.size(16.dp)
+              )
+            }
+          }
         )
         Text(
           "Keys are stored in the app's private storage and never sent anywhere except the provider endpoint.",
@@ -403,7 +419,7 @@ private fun ProviderDetailDialog(
         verticalArrangement = Arrangement.spacedBy(8.dp)
       ) {
         DetailField("Base URL", provider.baseUrl)
-        DetailField("API Key", if (provider.hasApiKey) "••••••••••••" else "not set")
+        ApiKeyField(viewModel = viewModel, provider = provider)
         if (testState != null) {
           when (testState) {
             is WorkspaceRepository.ConnectionTestState.Testing -> StatusLine("Testing connection…", WarningAmber)
@@ -505,6 +521,54 @@ private fun DetailField(label: String, value: String) {
   Column {
     Text(label, color = TextMuted, fontSize = 9.sp)
     Text(value, color = TextCode, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+  }
+}
+
+/**
+ * The provider's key: masked by default, revealed by the eye toggle.
+ *
+ * The plaintext is fetched from credential storage only when the user asks to
+ * see it (and re-fetched every time the dialog re-opens), so the secret is not
+ * held in ordinary UI state or recomposed into memory when nobody is looking.
+ */
+@Composable
+private fun ApiKeyField(viewModel: WorkspaceViewModel, provider: AIProvider) {
+  var keyVisible by remember { mutableStateOf(false) }
+  // Loaded lazily on first reveal: reading it eagerly would put the plaintext in
+  // memory even while it stays masked on screen.
+  var revealedKey by remember { mutableStateOf<String?>(null) }
+
+  Column {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+      Text("API Key", color = TextMuted, fontSize = 9.sp, modifier = Modifier.weight(1f))
+      Icon(
+        imageVector = if (keyVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+        contentDescription = if (keyVisible) "Hide API key" else "Show API key",
+        tint = if (provider.hasApiKey) TextSecondary else TextMuted,
+        modifier = Modifier
+          .size(14.dp)
+          .clickable(enabled = provider.hasApiKey) {
+            keyVisible = !keyVisible
+            if (keyVisible && revealedKey == null) {
+              revealedKey = viewModel.getApiKey(provider.id)
+            }
+          }
+          .testTag("btn_toggle_key_detail")
+      )
+    }
+    if (!provider.hasApiKey) {
+      Text("not set", color = TextMuted, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+    } else if (keyVisible) {
+      Text(
+        revealedKey ?: "",
+        color = TextCode,
+        fontSize = 11.sp,
+        fontFamily = FontFamily.Monospace,
+        modifier = Modifier.testTag("txt_api_key_revealed")
+      )
+    } else {
+      Text("••••••••••••", color = TextCode, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+    }
   }
 }
 

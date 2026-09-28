@@ -874,6 +874,12 @@ class WorkspaceRepository(
   }
 
   /** Real connection test: probe the endpoint first, then fall back to an actual model request. */
+  fun getApiKey(providerId: String): String? {
+    val existing = _providers.value.firstOrNull { it.id == providerId } ?: return null
+    if (!existing.hasApiKey) return null
+    return providerStore?.getApiKey(providerId)
+  }
+
   fun testProviderConnection(providerId: String) {
     val provider = _providers.value.firstOrNull { it.id == providerId } ?: return
     val apiKey = providerStore?.getApiKey(providerId)

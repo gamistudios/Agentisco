@@ -1,6 +1,7 @@
 package com.agentisco
 
 import com.agentisco.core.model.AppDestination
+import com.agentisco.settings.model.LLMProtocol
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.agentisco.data.model.DiffLineType
@@ -327,5 +328,31 @@ class ExampleRobolectricTest {
     
     // Cleanup
     tempDir.deleteRecursively()
+  }
+
+  @Test
+  fun `getApiKey returns the stored key only for a provider flagged as having one`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val dir = context.getDir("agentisco", Context.MODE_PRIVATE)
+    File(dir, "providers.json").delete()
+    File(dir, "credentials.json").delete()
+
+    val store = com.agentisco.data.local.ProviderConfigStore(context)
+    val repo = WorkspaceRepository(context = context, providerStore = store)
+
+    repo.saveProvider("KeyProvider", "https://keyed/v1", LLMProtocol.OPENAI_CHAT_COMPLETIONS, "sk-live-key")
+    // A provider saved with a key reads the key back through the repository.
+    val saved = repo.providers.value.first()
+    assertTrue(saved.hasApiKey)
+    assertEquals("sk-live-key", repo.getApiKey(saved.id))
+
+    // Unknown providers and providers flagged as keyless return null, so the
+    // reveal toggle never shows a stale secret from another provider.
+    assertNull(repo.getApiKey("provider-that-does-not-exist"))
+
+    // Saving a blank key clears it: the flag and the fetch must agree.
+    repo.saveProvider("KeyProvider", "https://keyed/v1", LLMProtocol.OPENAI_CHAT_COMPLETIONS, "")
+    assertFalse(repo.providers.value.first().hasApiKey)
+    assertNull(repo.getApiKey(repo.providers.value.first().id))
   }
 }

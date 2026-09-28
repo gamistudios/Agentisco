@@ -7,6 +7,8 @@ import com.agentisco.settings.model.AIModel
 import com.agentisco.settings.model.AIProvider
 import com.agentisco.settings.model.LLMProtocol
 import com.agentisco.settings.model.ModelCapabilities
+import org.json.JSONArray
+import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
@@ -174,5 +176,68 @@ class ProviderConfigStoreTest {
     assertEquals("model_001", store.getSelectedModelId())
     store.deleteModel("model_001")
     assertNull(store.getSelectedModelId())
+  }
+
+  @Test
+  fun `a key saved with a provider still reads as set after a restart`() {
+    // hasApiKey used to be dropped on save, so every provider with a stored
+    // key reloaded as "No API key" forever.
+    val first = newStore()
+    first.upsertProvider(
+      AIProvider("p-hf", "Hugging Face", "https://router.huggingface.co/v1", LLMProtocol.OPENAI_CHAT_COMPLETIONS),
+      "hf-key"
+    )
+
+    val second = newStore()
+    val reloaded = second.getProviders().single()
+    assertTrue("hasApiKey must survive a restart", reloaded.hasApiKey)
+    assertEquals("hf-key", second.getApiKey("p-hf"))
+
+    // Clearing the key has to flip it back, so the label tracks the truth.
+    second.upsertProvider(reloaded.copy(hasApiKey = true), "")
+    assertFalse(newStore().getProviders().single().hasApiKey)
+  }
+
+  @Test
+  fun `providers saved by an older install fall back to credentials for the key flag`() {
+    // Legacy providers.json has no hasApiKey field; the reload must trust
+    // credentials.json instead of assuming the key is missing.
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val dir = context.getDir("agentisco", Context.MODE_PRIVATE)
+
+    val first = newStore()
+    first.upsertProvider(
+      AIProvider("p-hf", "Hugging Face", "https://router.huggingface.co/v1", LLMProtocol.OPENAI_CHAT_COMPLETIONS),
+      "hf-key"
+    )
+    // Rewrite the config the pre-fix way: every field except hasApiKey.
+    val legacy = JSONObject(first.getProviders().single().let { p ->
+      JSONObject().apply {
+        put("id", p.id); put("name", p.name); put("baseUrl", p.baseUrl); put("protocol", p.protocol.name)
+      }
+    })
+    JSONObject(dir.resolve("providers.json").readText())
+      .put("providers", JSONArray().apply { put(legacy) })
+      .also { dir.resolve("providers.json").writeText(it.toString()) }
+
+    val second = newStore()
+    assertTrue(second.getProviders().single().hasApiKey)
+  }
+
+  @Test
+  fun `hasApiKey flag stays out of the persisted provider file`() {
+    // The flag is persisted, but the secret itself must never be.
+    newStore().upsertProvider(
+      AIProvider("p-hf", "Hugging Face", "https://router.huggingface.co/v1", LLMProtocol.OPENAI_CHAT_COMPLETIONS),
+      "hf-secret-value"
+    )
+
+    val providerJson = File(
+      ApplicationProvider.getApplicationContext<Context>().getDir("agentisco", Context.MODE_PRIVATE),
+      "providers.json"
+    ).readText()
+    assertFalse(providerJson.contains("hf-secret-value"))
+    // The flag itself is fine to write — it is not a secret.
+    assertTrue(providerJson.contains("hasApiKey"))
   }
 }
