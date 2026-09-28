@@ -479,13 +479,13 @@ class RunCommandTool(private val tm: TerminalProcessManager) : AgentTool {
 
     val guard = com.agentisco.agent.permission.DestructiveCommandGuard.assess(command)
     if (guard != null) {
-      val ok = ctx.requestApproval(
+      val decision = ctx.requestApprovalDecision(
         PendingApproval(
           id = newApprovalId(),
           command = command, title = guard.title, impactDescription = guard.reason, isDestructive = true
         )
       )
-      if (!ok) return ToolResult(false, error = "Command not executed: the user stopped the turn before deciding on $command", exitCode = -1)
+      if (!decision.approved) return ToolResult(false, error = decision.describeNotExecuted("Command not executed", command), exitCode = -1)
     } else {
       val needsApproval = when (ctx.permissions().terminalCommands) {
         PermissionMode.ALWAYS_ASK -> true
@@ -494,7 +494,7 @@ class RunCommandTool(private val tm: TerminalProcessManager) : AgentTool {
         else -> !com.agentisco.agent.permission.DestructiveCommandGuard.isSafeCommand(command)
       }
       if (needsApproval) {
-        val ok = ctx.requestApproval(
+        val decision = ctx.requestApprovalDecision(
           PendingApproval(
             id = newApprovalId(),
             command = command, title = "Agent wants to run a command",
@@ -502,7 +502,7 @@ class RunCommandTool(private val tm: TerminalProcessManager) : AgentTool {
             isDestructive = false
           )
         )
-        if (!ok) return ToolResult(false, error = "Command not executed: the turn was stopped before you decided.", exitCode = -1)
+        if (!decision.approved) return ToolResult(false, error = decision.describeNotExecuted("Command not executed", command), exitCode = -1)
       }
     }
 

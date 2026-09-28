@@ -141,5 +141,65 @@ class ToolContext(
    */
   val askUser: suspend (PendingApproval) -> String? = { approval ->
     if (requestApproval(approval)) approval.options.firstOrNull() else null
+  },
+  /**
+   * The runtime installs this so a stopped turn is distinguishable from a
+   * refusal: [requestApprovalDecision] reads it, and a tool that reports the
+   * outcome to the model must not describe a request it never got an answer to
+   * as "the user said no". Null everywhere but the live agent run, so tests and
+   * every other context treat a plain "no" as the refusal it is.
+   */
+  val onApprovalTerminated: ((String) -> Boolean)? = null
+) {
+  /**
+   * The decision a tool needs when "not approved" is ambiguous: the runtime can
+   * distinguish a refusal from a turn the user stopped mid-request, and a tool
+   * has no other channel to learn it. Tools that only need yes/no keep using
+   * [requestApproval]; the ones whose message to the model changes use this.
+   *
+   * The runtime distinguishes the two and reports the termination through this
+   * hook; anywhere else, a "no" is a plain refusal because nothing ended the turn.
+   */
+  suspend fun requestApprovalDecision(approval: PendingApproval): ApprovalDecision {
+    val approved = requestApproval(approval)
+    val terminated = onApprovalTerminated?.invoke(approval.id) == true
+    return ApprovalDecision(approved, refused = !approved && !terminated, terminated = terminated)
   }
-)
+}
+
+/**
+ * What the user actually decided about a protected operation.
+ *
+ * The distinction that matters: a refusal is a choice the user made, a
+ * termination is the turn ending before they made one. Collapsing them makes a
+ * parked request read back as a denial the user never issued.
+ */
+data class ApprovalDecision(
+  val approved: Boolean,
+  /** True only when the user explicitly chose to refuse. */
+  val refused: Boolean,
+  /** True when the turn was stopped before the user decided. */
+  val terminated: Boolean
+) {
+  /** The tool never ran, and the transcript must not report a refusal. */
+  val neverExecuted: Boolean get() = !approved && !refused
+
+  /**
+   * One message for the model, phrased by what actually happened: a refusal says
+   * the user said no, a terminated request says nothing ran. [subject] is the
+   * tool's own noun ("File not modified"); [detail] adds what was blocked.
+   */
+  fun describeNotExecuted(subject: String, detail: String = ""): String = buildString {
+    append(subject)
+    append(": ")
+    if (terminated) {
+      append("the turn was stopped before the user decided")
+      if (detail.isNotBlank()) append(" on ").append(detail)
+      append(". Nothing was run. Ask again if the task still needs it.")
+    } else {
+      append("the user denied permission")
+      if (detail.isNotBlank()) append(" to run ").append(detail)
+      append(".")
+    }
+  }
+}

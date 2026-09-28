@@ -317,7 +317,7 @@ object PermissionGates {
       return ToolResult(false, error = "Blocked by permission policy: file editing is never allowed.")
     }
     if (ctx.permissions().fileEditing == PermissionMode.ALWAYS_ASK) {
-      val ok = ctx.requestApproval(
+      val decision = ctx.requestApprovalDecision(
         PendingApproval(
           id = newApprovalId(),
           command = "write $path",
@@ -326,7 +326,7 @@ object PermissionGates {
           isDestructive = false
         )
       )
-      if (!ok) return ToolResult(false, error = "File not modified: the turn was stopped before you decided.")
+      if (!decision.approved) return ToolResult(false, error = decision.describeNotExecuted("File not modified"))
     }
     return null
   }
@@ -335,7 +335,7 @@ object PermissionGates {
     if (!ctx.permissions().deleteFiles) {
       return ToolResult(false, error = "Blocked by permission policy: file deletion is disabled.")
     }
-    val ok = ctx.requestApproval(
+    val decision = ctx.requestApprovalDecision(
       PendingApproval(
         id = newApprovalId(),
         command = "delete $path",
@@ -344,7 +344,7 @@ object PermissionGates {
         isDestructive = true
       )
     )
-    if (!ok) return ToolResult(false, error = "File not deleted: the turn was stopped before you decided.")
+    if (!decision.approved) return ToolResult(false, error = decision.describeNotExecuted("File not deleted"))
     return null
   }
 }

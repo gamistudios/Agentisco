@@ -467,6 +467,36 @@ class WorkspaceFileToolTest {
   }
 
   @Test
+  fun `a refused edit is not a stopped turn, and a stopped turn is not a refusal`() {
+    val ws = ws()
+    ws.write("a.txt", "one\n")
+    ws.write("b.txt", "one\n")
+
+    val refused = runBlocking {
+      EditFileTool(PermissionGates::fileWrite).execute(
+        args("""{"path": "a.txt", "old_string": "one", "new_string": "two"}"""),
+        contextFor(ws, fileEditing = com.agentisco.agent.model.PermissionMode.ALWAYS_ASK,
+          log = ApprovalLog().apply { approve = false; terminated = false })
+      )
+    }
+    assertFalse(refused.success)
+    assertTrue(refused.error!!, refused.error!!.contains("denied permission"))
+    assertEquals("one\n", ws.read("a.txt"))
+
+    val stopped = runBlocking {
+      EditFileTool(PermissionGates::fileWrite).execute(
+        args("""{"path": "b.txt", "old_string": "one", "new_string": "two"}"""),
+        contextFor(ws, fileEditing = com.agentisco.agent.model.PermissionMode.ALWAYS_ASK,
+          log = ApprovalLog().apply { approve = false; terminated = true })
+      )
+    }
+    assertFalse(stopped.success)
+    assertFalse(stopped.error!!, stopped.error!!.contains("denied permission"))
+    assertTrue(stopped.error!!, stopped.error!!.contains("stopped"))
+    assertEquals("one\n", ws.read("b.txt"))
+  }
+
+  @Test
   fun `deletion refused by policy leaves the file`() {
     val ws = ws()
     ws.write("gone.txt", "x\n")

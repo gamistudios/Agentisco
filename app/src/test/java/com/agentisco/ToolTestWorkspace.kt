@@ -81,6 +81,9 @@ internal fun contextFor(
     )
   },
   terminalSession = TerminalSession(id = "term-1", name = "main", currentDir = workspace.root.absolutePath),
+  // A "no" from a terminated turn is the harness ending the request, not the
+  // user refusing it — the same distinction the live runtime makes.
+  onApprovalTerminated = { _ -> log.terminated },
   requestApproval = { approval ->
     log.requests.add(approval)
     !log.terminated && log.approve

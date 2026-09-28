@@ -67,7 +67,7 @@ class CommandToolTest {
     assertFalse(result.success)
     assertEquals(1, log.requests.size)
     assertEquals("npm publish", log.requests.single().command)
-    assertTrue(result.error!!.contains("rejected"))
+    assertTrue(result.error!!.contains("denied permission"))
   }
 
   @Test
@@ -82,7 +82,7 @@ class CommandToolTest {
     assertEquals(1, log.requests.size)
     assertEquals("npm publish", log.requests.single().command)
     // The command never ran, and the transcript must not claim the user refused.
-    assertFalse(result.error!!.contains("rejected"))
+    assertFalse(result.error!!.contains("denied permission"))
     assertTrue(result.error!!.contains("stopped"))
   }
 

@@ -207,6 +207,13 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
   /** Tool calls the user SIGKILLed; keyed by the model's call id. */
   private val userCancelledCalls: MutableSet<String> =
     java.util.Collections.synchronizedSet(HashSet())
+  /**
+   * Approvals the user ended the turn on, keyed by approval id. A tool reporting
+   * the outcome reads this to distinguish "the user refused" from "the turn was
+   * stopped before the user decided".
+   */
+  private val terminatedApprovals: MutableMap<String, Boolean> =
+    java.util.Collections.synchronizedMap(HashMap())
   /** Awaits the user's retry/continue decision for a cancelled tool call. */
   private val toolCancelDecisions =
     java.util.concurrent.ConcurrentHashMap<String, CompletableDeferred<Boolean>>()
@@ -224,7 +231,10 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
     val allowed: Boolean,
     val answer: String? = null,
     val termination: Boolean = false
-  )
+  ) {
+    /** Convenience for the tool-context adapter; see [lastDecision]. */
+    internal val approved: Boolean get() = !termination && allowed
+  }
 
   fun resolvePendingApproval(allowed: Boolean, answer: String? = null, termination: Boolean = false) {
     val deferred = pendingApprovalDeferred
@@ -918,12 +928,14 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
     toolCallId = callId,
     permissions = { permissions }, // Dynamic: reads current permissions at tool execution time
     terminalSession = terminalSession,
+    onApprovalTerminated = { id -> terminatedApprovals[id] == true },
     requestApproval = { approval ->
-      // Only a real, user-made decision counts. A terminated request is the Stop
-      // button ending the turn — the tool reports it as never having run rather
-      // than letting the transcript claim the user refused.
+      // Only a real, user-made decision counts. The termination flag is recorded
+      // first so a tool reading [ToolContext.requestApprovalDecision] can tell a
+      // refusal from a turn that was stopped before the user decided.
       val decision = awaitUserDecision(approval, onRequestApproval, onEvent)
-      !decision.termination && decision.allowed
+      terminatedApprovals[approval.id] = decision.termination
+      decision.approved
     },
     askUser = { approval ->
       val decision = awaitUserDecision(approval, onRequestApproval, onEvent)
