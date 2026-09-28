@@ -225,28 +225,16 @@ fun AgentScreen(
         Icon(Icons.Default.Add, contentDescription = "New session", tint = TextSecondary, modifier = Modifier.size(16.dp))
       }
 
-      // Live agent state + stop.
+      // Live agent state: a pulse dot while working. The stop control lives in
+      // the composer next to pause, so the session bar does not carry a
+      // duplicate button.
       if (isWorking) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-          Box(
-            modifier = Modifier
-              .size(7.dp)
-              .clip(CircleShape)
-              .background(ElectricBlueGlow)
-          )
-          Spacer(modifier = Modifier.width(4.dp))
-          IconButton(
-            onClick = { viewModel.cancelAgent() },
-            modifier = Modifier
-              .size(32.dp)
-              .clip(RoundedCornerShape(8.dp))
-              .background(DangerRed.copy(alpha = 0.15f))
-              .border(1.dp, DangerRed, RoundedCornerShape(8.dp))
-              .testTag("btn_stop_agent")
-          ) {
-            Icon(Icons.Default.Stop, contentDescription = "Stop agent", tint = DangerRed, modifier = Modifier.size(15.dp))
-          }
-        }
+        Box(
+          modifier = Modifier
+            .size(7.dp)
+            .clip(CircleShape)
+            .background(ElectricBlueGlow)
+        )
       }
     }
 
