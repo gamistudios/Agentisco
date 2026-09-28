@@ -67,7 +67,7 @@ class CommandToolTest {
     assertFalse(result.success)
     assertEquals(1, log.requests.size)
     assertEquals("npm publish", log.requests.single().command)
-    assertTrue(result.error!!.contains("denied permission"))
+    assertTrue(result.error!!.contains("user denied permission"))
     assertFalse(result.error!!.contains("and said"))
   }
 
@@ -81,7 +81,7 @@ class CommandToolTest {
     }
     assertFalse(result.success)
     // A denial with a reason must reach the model as that reason, not a bare "no".
-    assertTrue(result.error!!.contains("denied permission"))
+    assertTrue(result.error!!.contains("user denied permission"))
     assertTrue(result.error!!.contains("that writes outside the workspace"))
   }
 
@@ -94,7 +94,7 @@ class CommandToolTest {
       RunCommandTool(unavailableTerminal()).execute(args("""{"command": "npm publish"}"""), ctx)
     }
     assertFalse(result.success)
-    assertTrue(result.error!!.contains("denied permission"))
+    assertTrue(result.error!!.contains("user denied permission"))
     assertFalse(result.error!!.contains("and said"))
   }
 
@@ -110,7 +110,7 @@ class CommandToolTest {
     assertEquals(1, log.requests.size)
     assertEquals("npm publish", log.requests.single().command)
     // The command never ran, and the transcript must not claim the user refused.
-    assertFalse(result.error!!.contains("denied permission"))
+    assertFalse(result.error!!.contains("user denied permission"))
     assertTrue(result.error!!.contains("stopped"))
   }
 
