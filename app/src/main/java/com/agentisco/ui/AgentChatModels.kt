@@ -148,7 +148,7 @@ fun MessageWithBlocks.toChatItem(): ChatItem {
   }
 }
 
-private fun AgentBlockEntity.toTurnBlock(): TurnBlock? = when (kind) {
+fun AgentBlockEntity.toTurnBlock(): TurnBlock? = when (kind) {
   "text" -> TextBlock(uuid, summary, status == "streaming")
   "reasoning" -> ReasoningBlock(uuid, summary, status == "streaming")
   "approval", "question" -> ApprovalBlock(
