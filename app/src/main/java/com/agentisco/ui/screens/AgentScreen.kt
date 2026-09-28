@@ -869,7 +869,6 @@ private fun CompactionCard(block: CompactionBlock) {
         lineHeight = 15.sp,
         modifier = Modifier
           .fillMaxWidth()
-          .verticalScroll(rememberScrollState())
           .heightIn(max = 220.dp)
       )
     }
