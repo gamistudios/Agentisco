@@ -225,6 +225,12 @@ fun AgentScreen(
         Icon(Icons.Default.Add, contentDescription = "New session", tint = TextSecondary, modifier = Modifier.size(16.dp))
       }
 
+      // Plan mode: research and plan, change nothing. Switchable mid-turn —
+      // "stop, just show me a plan" is a thing users do.
+      PlanModeToggle(active = permissions.planMode) {
+        viewModel.updatePermissions { it.copy(planMode = !it.planMode) }
+      }
+
       // Live agent state + stop.
       if (isWorking) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -249,6 +255,9 @@ fun AgentScreen(
         }
       }
     }
+
+    // What the mode means, stated where the user can see it while working.
+    if (permissions.planMode) PlanModeNotice()
 
     // Conversation (the primary surface).
     Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
@@ -1562,6 +1571,72 @@ private fun ContextUsageChip(usage: com.agentisco.agent.compact.ContextTokenUsag
         maxLines = 1
       )
     }
+  }
+}
+
+/**
+ * The plan-mode switch. A mode the user cannot see is a mode the agent appears
+ * to ignore, so it is lit while it is on, and it never disables itself: stopping
+ * a runaway implementation to "just plan" is exactly when it is needed.
+ */
+@Composable
+internal fun PlanModeToggle(active: Boolean, onToggle: () -> Unit) {
+  Surface(
+    onClick = onToggle,
+    shape = RoundedCornerShape(8.dp),
+    color = if (active) ElectricBlue.copy(alpha = 0.16f) else DarkSurface,
+    border = androidx.compose.foundation.BorderStroke(
+      1.dp,
+      if (active) ElectricBlueGlow else DarkBorderSubtle
+    ),
+    modifier = Modifier.testTag("btn_plan_mode")
+  ) {
+    Row(
+      modifier = Modifier.padding(horizontal = 9.dp, vertical = 7.dp),
+      verticalAlignment = Alignment.CenterVertically
+    ) {
+      Icon(
+        Icons.Outlined.Description,
+        contentDescription = null,
+        tint = if (active) ElectricBlueGlow else TextSecondary,
+        modifier = Modifier.size(13.dp)
+      )
+      Spacer(modifier = Modifier.width(5.dp))
+      Text(
+        "Plan",
+        color = if (active) ElectricBlueGlow else TextSecondary,
+        fontSize = 11.sp,
+        fontWeight = FontWeight.SemiBold
+      )
+    }
+  }
+}
+
+/** Says what the lit switch means, in the user's words rather than the model's. */
+@Composable
+internal fun PlanModeNotice() {
+  Row(
+    modifier = Modifier
+      .fillMaxWidth()
+      .background(ElectricBlue.copy(alpha = 0.10f))
+      .padding(horizontal = 12.dp, vertical = 5.dp),
+    verticalAlignment = Alignment.CenterVertically
+  ) {
+    Icon(
+      Icons.Outlined.Description,
+      contentDescription = null,
+      tint = ElectricBlueGlow,
+      modifier = Modifier.size(12.dp)
+    )
+    Spacer(modifier = Modifier.width(6.dp))
+    Text(
+      text = "Plan mode: the agent reads, researches and plans. It will refuse any change until you turn this off.",
+      color = TextSecondary,
+      fontSize = 10.sp,
+      maxLines = 2,
+      overflow = TextOverflow.Ellipsis,
+      modifier = Modifier.testTag("plan_mode_notice")
+    )
   }
 }
 

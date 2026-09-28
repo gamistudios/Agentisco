@@ -25,6 +25,7 @@ import com.agentisco.agent.model.AgentPermissions
 import com.agentisco.agent.model.AgentStreamEvent
 import com.agentisco.agent.model.PendingApproval
 import com.agentisco.agent.tool.AgentToolRegistry
+import com.agentisco.agent.tool.PlanMode
 import com.agentisco.agent.tool.ToolContext
 import com.agentisco.agent.tool.ToolArgumentError
 import com.agentisco.agent.tool.ToolResult
@@ -168,6 +169,28 @@ Habits:
     changed, and the verified outcome. That summary is the answer the user reads.
 
     """.trimIndent()
+
+    /**
+     * Sent only while the user has plan mode on. The runtime gate does the
+     * refusing; this exists so the model plans instead of probing for a way
+     * around the gate.
+     */
+    val PLAN_MODE_ADDENDUM = """
+Plan mode is ON for this turn: the user wants a plan, not changes.
+  - Research freely with the read-only tools (glob_files, search_files, read_file,
+    file_info, git_status, git_diff, web_search, web_fetch) and with read-only shell
+    commands (ls, cat, head, grep, find, wc).
+  - Every tool that would change something (write_file, create_file, edit_file,
+    edit_files, delete_file, move_file, copy_file, create_directory, git_stage,
+    git_commit, build, test, and any other run_command) is refused by the app.
+    A refusal is final: do not retry it, rephrase it or work around it.
+  - Decide the whole change before answering: which files, what exactly changes in
+    each, the order of work, how each step will be verified, and the risks.
+  - Present that with task_plan, then write the same plan as your final text answer
+    and say you can implement it as soon as the user turns plan mode off.
+  - When the request is ambiguous, call ask_user for the decision instead of
+    guessing, so the plan you present is the one the user actually wants.
+    """.trimIndent()
   }
 
   /** Two-tier compaction over the in-memory transcript of the current run. */
@@ -260,7 +283,8 @@ Habits:
       history = history,
       sink = sink,
       prompt = prompt,
-      resume = resume
+      resume = resume,
+      planMode = permissions().planMode
     )
     val messages = transcript.messages
     val rowIds = transcript.rowIds
@@ -508,7 +532,8 @@ Habits:
     history: List<ChatHistoryMessage>,
     sink: CompactSink?,
     prompt: String,
-    resume: Boolean
+    resume: Boolean,
+    planMode: Boolean = false
   ): Transcript {
     val messages = mutableListOf<LlmMessage>()
     // Persisted rowId each message came from (0 = produced by this run), so a
@@ -519,7 +544,7 @@ Habits:
       rowIds.add(rowId)
     }
 
-    add(LlmMessage(LlmRole.SYSTEM, buildSystemPrompt(project, useTools)))
+    add(LlmMessage(LlmRole.SYSTEM, buildSystemPrompt(project, useTools, planMode)))
 
     val priorCompaction = sessionId?.let { sink?.latestCompaction(it) }
     val compactedThrough = priorCompaction?.summarizedThroughRowId ?: 0L
@@ -805,6 +830,18 @@ Habits:
     }
     Log.d(TAG, "validated args id=${call.id} name=${tool.name} -> $args")
 
+    // Plan mode is enforced here, not inside the tools: nothing that changes the
+    // workspace can reach an implementation while the user is still deciding.
+    PlanMode.evaluate(tool.name, args, permissions.planMode)?.let { refusal ->
+      Log.i(TAG, "plan mode refused tool ${tool.name}")
+      onEvent(
+        AgentStreamEvent.ToolFinished(
+          tool.name, false, "Plan mode: no changes", refusal.error ?: "Planning", null, call.id
+        )
+      )
+      return refusal
+    }
+
     val toolContext = buildToolContext(call.id, project, permissions, terminalSession, onRequestApproval, onEvent)
     while (true) {
       val result: ToolResult = try {
@@ -917,7 +954,11 @@ Habits:
     decision
   }
 
-  private fun buildSystemPrompt(project: Project, toolsAvailable: Boolean): String {
+  private fun buildSystemPrompt(
+    project: Project,
+    toolsAvailable: Boolean,
+    planMode: Boolean
+  ): String {
     val files = fileSystem.getFileTree(project, maxDepth = 3)
     val paths = StringBuilder()
     fun walk(items: List<ProjectFile>, depth: Int) {
@@ -937,6 +978,10 @@ Habits:
       if (toolsAvailable) {
         appendLine()
         append(TOOL_PLAYBOOK)
+        if (planMode) {
+          appendLine()
+          append(PLAN_MODE_ADDENDUM)
+        }
       } else {
         appendLine()
         appendLine("This model cannot call tools. Answer with descriptions/snippets only.")

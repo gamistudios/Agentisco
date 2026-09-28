@@ -80,5 +80,11 @@ data class AgentPermissions(
   val gitDiff: Boolean = true,
   val gitCommit: Boolean = true,
   val gitPush: Boolean = false,
-  val alwaysAskDangerous: Boolean = true
+  val alwaysAskDangerous: Boolean = true,
+  /**
+   * Plan turns: the agent researches and presents a plan but changes nothing.
+   * Enforced by the runtime before any tool body runs, so no tool can write by
+   * forgetting to check.
+   */
+  val planMode: Boolean = false
 )

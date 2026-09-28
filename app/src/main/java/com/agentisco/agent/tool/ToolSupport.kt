@@ -349,6 +349,111 @@ object PermissionGates {
   }
 }
 
+/**
+ * Plan mode: the user asked what should be done, not for it to be done.
+ *
+ * The gate is an allowlist and it runs in the runtime, before any tool body
+ * executes. Both choices are deliberate: a tool that is not listed here can only
+ * ever be over-refused while planning, never silently allowed, and a check inside
+ * each tool would be a check each new tool can forget.
+ */
+object PlanMode {
+
+  /** The tools that only look, and therefore stay usable while planning. */
+  private val READ_ONLY_TOOLS = setOf(
+    "read_file", "read_files", "list_files", "directory_tree", "file_info",
+    "glob_files", "search_files", "regex_search",
+    "git_status", "git_diff", "git_log", "git_show",
+    "web_fetch", "web_search", "ask_user", "task_plan",
+    "terminal_output", "interrupt_terminal"
+  )
+
+  /**
+   * Shell binaries that read. Anything that can install, write, or run other code
+   * (`npm`, `node`, `sed`, `awk`, `tee`, `xargs`, `sh`) is absent, whatever its
+   * arguments look like.
+   */
+  private val READ_ONLY_BINARIES = setOf(
+    "ls", "ll", "cat", "tac", "head", "tail", "nl", "od", "wc", "pwd", "echo", "file",
+    "stat", "du", "df", "tree", "which", "whereis", "sort", "uniq", "cut", "tr",
+    "diff", "cmp", "basename", "dirname", "realpath", "readlink", "md5sum", "sha1sum",
+    "sha256sum", "printenv", "date", "whoami", "id", "uname", "jq", "grep", "egrep",
+    "fgrep", "rg", "find"
+  )
+
+  /**
+   * Git is read-only only for these subcommands: the rest move the index, the
+   * working tree or a ref, which is exactly what planning must not do.
+   */
+  private val READ_ONLY_GIT_SUBCOMMANDS = setOf(
+    "status", "diff", "log", "show", "rev-parse", "ls-files", "ls-tree", "blame",
+    "describe", "cat-file", "shortlog", "merge-base"
+  )
+
+  /**
+   * Flags that turn an otherwise read-only binary into a writer or an executor:
+   * `-o` / `--output` write a file, `-delete` / `-exec` remove or run (find),
+   * `--pre` pipes every file through another program (rg).
+   */
+  private val UNSAFE_FLAGS =
+    Regex("""(^|\s)-{1,2}(delete|exec|execdir|ok|ok-cmd|o|output|pre|post-filter)(\s|=|$)""")
+
+  /** Redirection and substitution can write or execute anything, whatever the binary is. */
+  private val WRITE_SYNTAX = Regex(">>?|\\$\\(|`|<\\(")
+
+  private val STAGE_SEPARATOR = Regex("""&&|\|\||[;\n]|\|""")
+
+  private val WHITESPACE = Regex("\\s+")
+
+  /**
+   * Whether a command can only look at the workspace. Deliberately narrow: an
+   * unrecognised shape is refused, and the refusal names the read tools instead.
+   */
+  fun isReadOnlyCommand(command: String): Boolean {
+    val text = command.trim()
+    if (text.isEmpty()) return false
+    if (WRITE_SYNTAX.containsMatchIn(text)) return false
+    if (UNSAFE_FLAGS.containsMatchIn(text)) return false
+    return text.split(STAGE_SEPARATOR).all { stage ->
+      val tokens = stage.trim().split(WHITESPACE)
+      val binary = tokens.firstOrNull()?.substringAfterLast('/').orEmpty()
+      when (binary) {
+        "git" -> tokens.getOrElse(1) { "" } in READ_ONLY_GIT_SUBCOMMANDS
+        else -> binary in READ_ONLY_BINARIES
+      }
+    }
+  }
+
+  /**
+   * The refusal to hand back to the model when this call would change something
+   * while planning, or null when the call may proceed.
+   */
+  fun evaluate(
+    toolName: String,
+    args: org.json.JSONObject,
+    planMode: Boolean
+  ): ToolResult? {
+    if (!planMode) return null
+    if (toolName == "run_command") {
+      val command = args.optString("command")
+      return if (isReadOnlyCommand(command)) null else ToolResult(
+        success = false,
+        error = "Plan mode is on, so only read-only shell commands run (ls, cat, head, grep, find, wc, …). " +
+          "\"${command.take(80)}\" could change something. Inspect with read_file, search_files, glob_files " +
+          "or file_info, and ask the user to switch plan mode off before building, testing or installing."
+      )
+    }
+    if (toolName in READ_ONLY_TOOLS) return null
+    return ToolResult(
+      success = false,
+      error = "Plan mode is on: $toolName would change the workspace, and planning changes nothing. " +
+        "Keep researching with the read-only tools, then present the plan with task_plan. Use ask_user for a " +
+        "decision that belongs to the user; otherwise end the turn with the plan and note that switching " +
+        "plan mode off is what lets you implement it."
+    )
+  }
+}
+
 /** A `[..]`-style bounded slice of lines: 1-based, inclusive, with overflow reported. */
 internal class LineSlice(val startLine: Int, val maxLines: Int) {
   /** Returns the selected lines and how many were left out. */
