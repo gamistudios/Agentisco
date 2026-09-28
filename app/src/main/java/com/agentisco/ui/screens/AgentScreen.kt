@@ -85,6 +85,7 @@ import com.agentisco.ui.TurnBlock
 import com.agentisco.ui.TurnStatus
 import com.agentisco.ui.UserMessageItem
 import com.agentisco.ui.WorkspaceViewModel
+import com.agentisco.ui.components.DiffKind
 import com.agentisco.ui.components.DiffLine
 import com.agentisco.ui.components.DiffTable
 import com.agentisco.ui.components.MarkdownText
@@ -1735,7 +1736,7 @@ internal fun displayCommandForTool(name: String, argsJson: String): String? {
  * Diff lines for file-mutation tools, or null when the tool isn't an edit.
  * write/create have no old content persisted, so everything is an addition.
  */
-private fun editDiffForTool(name: String, argsJson: String): List<DiffLine>? {
+internal fun editDiffForTool(name: String, argsJson: String): List<DiffLine>? {
   if (argsJson.isBlank() || argsJson == "{}") return null
   val args = runCatching { JSONObject(argsJson) }.getOrNull() ?: return null
   return when (name) {
@@ -1747,6 +1748,26 @@ private fun editDiffForTool(name: String, argsJson: String): List<DiffLine>? {
     "write_file", "create_file" -> {
       val content = args.optString("content")
       if (content.isBlank()) null else computeLineDiff("", content)
+    }
+    // A batch labels each block with its file, except when it holds one edit only.
+    "edit_files" -> {
+      val edits = args.optJSONArray("edits") ?: return null
+      val blocks = ArrayList<Pair<String, List<DiffLine>>>(edits.length())
+      for (i in 0 until edits.length()) {
+        val edit = edits.optJSONObject(i) ?: continue
+        val old = edit.optString("old_string")
+        val new = edit.optString("new_string")
+        if (old.isEmpty() && new.isEmpty()) continue
+        val lines = computeLineDiff(old, new)
+        if (lines.isNotEmpty()) blocks.add(edit.optString("path") to lines)
+      }
+      when (blocks.size) {
+        0 -> null
+        1 -> blocks.single().second
+        else -> blocks.flatMap { (path, lines) ->
+          listOf(DiffLine(DiffKind.CONTEXT, "── $path ──", null, null)) + lines
+        }
+      }
     }
     else -> null
   }
