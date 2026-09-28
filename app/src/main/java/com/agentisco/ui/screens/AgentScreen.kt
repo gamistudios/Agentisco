@@ -225,12 +225,6 @@ fun AgentScreen(
         Icon(Icons.Default.Add, contentDescription = "New session", tint = TextSecondary, modifier = Modifier.size(16.dp))
       }
 
-      // Plan mode: research and plan, change nothing. Switchable mid-turn —
-      // "stop, just show me a plan" is a thing users do.
-      PlanModeToggle(active = permissions.planMode) {
-        viewModel.updatePermissions { it.copy(planMode = !it.planMode) }
-      }
-
       // Live agent state + stop.
       if (isWorking) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1472,23 +1466,38 @@ private fun AgentComposer(
           modifier = Modifier.testTag("composer_model_selector")
         )
 
-        // File editing policy dropdown
+        // File editing policy dropdown. Plan mode lives here: it is the widest
+        // possible file-edit policy ("edit nothing") and shares the dropdown's
+        // semantics — pick once, it applies to the next prompt.
         ConfigDropdown(
-          label = when (permissions.fileEditing) {
-            PermissionMode.ALWAYS_ASK -> "Edits: ask"
-            PermissionMode.AUTO_APPROVE_PROJECT -> "Edits: auto"
-            PermissionMode.NEVER_ALLOW -> "Edits: off"
+          label = when {
+            permissions.planMode -> "Plan mode"
+            permissions.fileEditing == PermissionMode.ALWAYS_ASK -> "Edits: ask"
+            permissions.fileEditing == PermissionMode.AUTO_APPROVE_PROJECT -> "Edits: auto"
+            permissions.fileEditing == PermissionMode.NEVER_ALLOW -> "Edits: off"
             else -> "Edits: ask"
           },
-          tint = if (permissions.fileEditing == PermissionMode.NEVER_ALLOW) DangerRed else TerminalGreen,
+          tint = if (permissions.planMode) ElectricBlueGlow
+            else if (permissions.fileEditing == PermissionMode.NEVER_ALLOW) DangerRed
+            else TerminalGreen,
           options = listOf(
+            DropdownOption(
+              label = "Plan mode — research only, no changes",
+              tag = "PLAN_MODE",
+              checked = permissions.planMode
+            ),
             DropdownOption(label = "Ask before editing", tag = PermissionMode.ALWAYS_ASK.name),
             DropdownOption(label = "Auto-approve in workspace", tag = PermissionMode.AUTO_APPROVE_PROJECT.name),
             DropdownOption(label = "Never edit files", tag = PermissionMode.NEVER_ALLOW.name)
           ),
           onPick = { option ->
-            option.tag?.let { PermissionMode.valueOf(it) }?.let { mode ->
-              viewModel.updatePermissions { it.copy(fileEditing = mode) }
+            when (option.tag) {
+              // Toggling plan mode from here also clears an active edit policy
+              // mismatch, since plan overrides whatever fileEditing says.
+              "PLAN_MODE" -> viewModel.updatePermissions { it.copy(planMode = !it.planMode) }
+              else -> option.tag?.let { PermissionMode.valueOf(it) }?.let { mode ->
+                viewModel.updatePermissions { it.copy(fileEditing = mode) }
+              }
             }
           }
         )
@@ -1529,7 +1538,9 @@ data class DropdownOption(
   val sublabel: String? = null,
   val tag: String? = null,
   val header: Boolean = false,
-  val configure: Boolean = false
+  val configure: Boolean = false,
+  /** A toggle-style option: shows a checkmark while it is the active choice. */
+  val checked: Boolean = false
 )
 
 /**
@@ -1682,14 +1693,25 @@ private fun ConfigDropdown(
         } else {
           DropdownMenuItem(
             text = {
-              Column {
-                Text(
-                  option.label,
-                  color = if (option.configure) ElectricBlueGlow else TextPrimary,
-                  fontSize = 13.sp
-                )
-                option.sublabel?.let {
-                  Text(it, color = TextMuted, fontSize = 10.sp, fontFamily = FontFamily.Monospace, maxLines = 1)
+              Row(verticalAlignment = Alignment.CenterVertically) {
+                if (option.checked) {
+                  Icon(
+                    Icons.Default.Check,
+                    contentDescription = null,
+                    tint = ElectricBlueGlow,
+                    modifier = Modifier.size(14.dp)
+                  )
+                  Spacer(modifier = Modifier.width(6.dp))
+                }
+                Column {
+                  Text(
+                    option.label,
+                    color = if (option.configure) ElectricBlueGlow else TextPrimary,
+                    fontSize = 13.sp
+                  )
+                  option.sublabel?.let {
+                    Text(it, color = TextMuted, fontSize = 10.sp, fontFamily = FontFamily.Monospace, maxLines = 1)
+                  }
                 }
               }
             },
