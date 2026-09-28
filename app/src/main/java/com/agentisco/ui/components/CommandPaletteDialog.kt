@@ -297,7 +297,7 @@ fun CommandPaletteDialog(
         id = "manage_providers",
         title = "Manage AI Providers & Models",
         category = "Settings",
-        icon = Icons.Outlined.Dns,
+        icon = Icons.Outlined.Cloud,
         destination = AppDestination.AI_PROVIDERS
       ),
       PaletteAction(
