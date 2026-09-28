@@ -170,6 +170,10 @@ class WorkspaceViewModel(
   private val _activeSessionId = MutableStateFlow<String?>(null)
   val activeSessionId: StateFlow<String?> = _activeSessionId.asStateFlow()
 
+  /** Track sessions that need auto-titling when their first message arrives */
+  private val _pendingAutoTitleSessionId = MutableStateFlow<String?>(null)
+  val pendingAutoTitleSessionId: StateFlow<String?> = _pendingAutoTitleSessionId.asStateFlow()
+
   val chatSessions: StateFlow<List<AgentSessionEntity>> = activeProject
     .flatMapLatest { project -> chatStore.sessionsForProject(project.path) }
     .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -567,6 +571,12 @@ class WorkspaceViewModel(
       )
       chatStore.createSessionBlocking(session)
       _activeSessionId.value = session.id
+      
+      // If this is a "New session" without a specific title, set up auto-titling
+      // when the first user message arrives
+      if (title == "New session") {
+        _pendingAutoTitleSessionId.value = session.id
+      }
     }
   }
 
@@ -1312,7 +1322,7 @@ class WorkspaceViewModel(
       if (sessionId == null) {
         val session = AgentSessionEntity(
           id = AgentChatStore.newId(), projectId = project.path,
-          title = prompt.lineSequence().firstOrNull()?.take(48) ?: "New session",
+          title = generateInitialTitle(prompt),
           status = "running", createdAt = now, updatedAt = now
         )
         chatStore.createSessionBlocking(session)
@@ -1340,7 +1350,7 @@ class WorkspaceViewModel(
       val now = System.currentTimeMillis()
       val session = AgentSessionEntity(
         id = AgentChatStore.newId(), projectId = project.path,
-        title = prompt.lineSequence().firstOrNull()?.take(48) ?: "New session",
+        title = generateInitialTitle(prompt),
         status = "running", createdAt = now, updatedAt = now
       )
       chatStore.createSessionBlocking(session)
@@ -1366,12 +1376,21 @@ class WorkspaceViewModel(
     val userUuid = AgentChatStore.newId()
     val turnUuid = AgentChatStore.newId()
     val (providerName, modelName) = turnAttribution()
-    chatStore.insertMessage(
-      AgentMessageEntity(
-        uuid = userUuid, sessionId = sessionId, role = "user", content = prompt,
-        status = "sent", statusMessage = "", createdAt = System.currentTimeMillis()
-      )
+    
+    // Insert the user message
+    val userMessage = AgentMessageEntity(
+      uuid = userUuid, sessionId = sessionId, role = "user", content = prompt,
+      status = "sent", statusMessage = "", createdAt = System.currentTimeMillis()
     )
+    chatStore.insertMessage(userMessage)
+    
+    // Check if this is the first message in a session that needs auto-titling
+    if (_pendingAutoTitleSessionId.value == sessionId) {
+      _pendingAutoTitleSessionId.value = null
+      autoTitleSession(sessionId, prompt)
+    }
+    
+    // Insert the assistant turn
     chatStore.insertMessage(
       AgentMessageEntity(
         uuid = turnUuid, sessionId = sessionId, role = "assistant_turn", content = "",
@@ -1389,11 +1408,21 @@ class WorkspaceViewModel(
     repository.runAgentTask(prompt, sessionId)
   }
 
+  /** Generate a clean title from the first sentence of a prompt */
+  private fun generateInitialTitle(prompt: String): String {
+    val firstSentence = prompt.split(Regex("[.!?]\s*")).firstOrNull() ?: prompt
+    return firstSentence.take(48).trim().ifBlank { "New session" }
+  }
+
   /** AI-generated session name (max 6 words); falls back to the prompt slice. */
   private fun autoTitleSession(sessionId: String, prompt: String) {
     viewModelScope.launch {
       repository.requestSessionTitle(prompt)?.let { title ->
         chatStore.renameSession(sessionId, title)
+      } ?: run {
+        // AI title generation failed, use improved fallback from prompt
+        val fallbackTitle = generateInitialTitle(prompt)
+        chatStore.renameSession(sessionId, fallbackTitle)
       }
     }
   }
