@@ -5,6 +5,7 @@ import com.agentisco.settings.model.LLMProtocol
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.agentisco.data.model.DiffLineType
+import com.agentisco.data.repository.WorkspaceRepository
 import com.agentisco.workspace.git.DiffEngine
 import com.agentisco.workspace.git.GitRepositoryManager
 import com.agentisco.workspace.filesystem.ProjectFileSystem

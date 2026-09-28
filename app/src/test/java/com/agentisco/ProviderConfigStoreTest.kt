@@ -205,20 +205,20 @@ class ProviderConfigStoreTest {
     val context = ApplicationProvider.getApplicationContext<Context>()
     val dir = context.getDir("agentisco", Context.MODE_PRIVATE)
 
-    val first = newStore()
-    first.upsertProvider(
+    newStore().upsertProvider(
       AIProvider("p-hf", "Hugging Face", "https://router.huggingface.co/v1", LLMProtocol.OPENAI_CHAT_COMPLETIONS),
       "hf-key"
     )
     // Rewrite the config the pre-fix way: every field except hasApiKey.
-    val legacy = JSONObject(first.getProviders().single().let { p ->
-      JSONObject().apply {
-        put("id", p.id); put("name", p.name); put("baseUrl", p.baseUrl); put("protocol", p.protocol.name)
-      }
-    })
-    JSONObject(dir.resolve("providers.json").readText())
-      .put("providers", JSONArray().apply { put(legacy) })
-      .also { dir.resolve("providers.json").writeText(it.toString()) }
+    val legacy = JSONObject().apply {
+      put("id", "p-hf")
+      put("name", "Hugging Face")
+      put("baseUrl", "https://router.huggingface.co/v1")
+      put("protocol", LLMProtocol.OPENAI_CHAT_COMPLETIONS.name)
+    }
+    dir.resolve("providers.json").writeText(
+      JSONObject().put("providers", JSONArray().apply { put(legacy) }).toString()
+    )
 
     val second = newStore()
     assertTrue(second.getProviders().single().hasApiKey)
