@@ -1410,7 +1410,7 @@ class WorkspaceViewModel(
 
   /** Generate a clean title from the first sentence of a prompt */
   private fun generateInitialTitle(prompt: String): String {
-    val firstSentence = prompt.split(Regex("[.!?]\s*")).firstOrNull() ?: prompt
+    val firstSentence = prompt.split(Regex("[.!?]\\s*")).firstOrNull() ?: prompt
     return firstSentence.take(48).trim().ifBlank { "New session" }
   }
 
