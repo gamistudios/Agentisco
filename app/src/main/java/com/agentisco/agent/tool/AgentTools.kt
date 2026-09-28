@@ -510,9 +510,7 @@ class RunCommandTool(private val tm: TerminalProcessManager) : AgentTool {
     // Unique process id per call so batched parallel commands never overwrite
     // each other's entry in the process registry, and so the UI can SIGKILL
     // this exact command.
-    val runnerSession = ctx.terminalSession.copy(
-      id = ctx.terminalSession.id + "-run-" + java.util.UUID.randomUUID().toString().take(8)
-    )
+    val runnerSession = ctx.terminalSession.copy(id = newAgentRunnerId(ctx.terminalSession.id))
 
     if (args.optBoolean("run_in_background", false)) {
       val runId = tm.startBackground(runnerSession, command, projectDir)
@@ -633,7 +631,22 @@ class InterruptTerminalTool(private val tm: TerminalProcessManager) : AgentTool 
     val requested = args.str("runner_id").trim()
     val target = when {
       requested.isNotEmpty() -> requested
-      else -> tm.listBackgroundRuns().firstOrNull { it.running }?.id ?: ctx.terminalSession.id
+      else -> tm.listBackgroundRuns().firstOrNull { it.running }?.id ?: ""
+    }
+    if (target.isEmpty()) {
+      return ToolResult(
+        success = false,
+        error = "Nothing is running that you started. Start a command with run_command, " +
+          "or pass the runner_id of a background command."
+      )
+    }
+    // Only the agent's own commands: never the terminal session the user is typing in.
+    if (!isAgentRunner(target)) {
+      return ToolResult(
+        success = false,
+        error = "\"$target\" is not a command the agent started, so it will not be stopped. " +
+          "Stop your own terminal from the Terminal tab."
+      )
     }
     return if (tm.interrupt(target)) {
       ToolResult(true, output = "Stopped $target", metadata = mapOf("runner" to target))
@@ -671,6 +684,13 @@ class WriteTerminalInputTool(private val tm: TerminalProcessManager) : AgentTool
       return ToolResult(
         success = false,
         error = "No command is running, so there is nothing to send input to. Start one with run_command (run_in_background true)."
+      )
+    }
+    if (!isAgentRunner(target)) {
+      return ToolResult(
+        success = false,
+        error = "\"$target\" is not a command the agent started, so nothing is typed into it. " +
+          "Start the command with run_command and use the runner_id it reports."
       )
     }
     if (!tm.isRunning(target)) {

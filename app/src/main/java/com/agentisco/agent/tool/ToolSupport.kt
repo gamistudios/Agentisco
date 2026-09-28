@@ -292,6 +292,19 @@ private object ProjectFileSystemIgnore {
 internal fun newApprovalId(): String = "tool-appr-${java.util.UUID.randomUUID()}"
 
 /**
+ * Marks a terminal id as a command the agent started itself. Every command tool
+ * mints its runner id with this marker, and the tools that stop or feed a command
+ * accept only such ids — otherwise a model could SIGKILL or type into the user's
+ * own interactive terminal session.
+ */
+internal const val AGENT_RUN_MARKER = "-run-"
+
+internal fun newAgentRunnerId(sessionId: String): String =
+  sessionId + AGENT_RUN_MARKER + java.util.UUID.randomUUID().toString().take(8)
+
+internal fun isAgentRunner(id: String): Boolean = id.contains(AGENT_RUN_MARKER)
+
+/**
  * The permission gates every mutating tool runs through. They live here, rather
  * than inside each tool, because a tool must never be able to write by forgetting
  * to ask: the registry wires them into every file-mutating tool as its [WriteGate]

@@ -145,6 +145,24 @@ class CommandToolTest {
   }
 
   @Test
+  fun `terminal tools never touch the user's own terminal session`() {
+    val tm = unavailableTerminal()
+    val ctx = contextFor(ws())
+
+    val stopped = runBlocking {
+      InterruptTerminalTool(tm).execute(args("""{"runner_id": "term-1"}"""), ctx)
+    }
+    assertFalse(stopped.success)
+    assertTrue(stopped.error!!.contains("not a command the agent started"))
+
+    val typed = runBlocking {
+      WriteTerminalInputTool(tm).execute(args("""{"input": "rm -rf /", "runner_id": "term-1"}"""), ctx)
+    }
+    assertFalse(typed.success)
+    assertTrue(typed.error!!.contains("not a command the agent started"))
+  }
+
+  @Test
   fun `input is only sent to a command that is really waiting for it`() {
     val tm = unavailableTerminal()
     val none = runBlocking {
@@ -155,10 +173,13 @@ class CommandToolTest {
     assertTrue(none.error!!.contains("run_command"))
 
     val finished = runBlocking {
-      WriteTerminalInputTool(tm).execute(args("""{"input": "y", "runner_id": "runner-9"}"""), contextFor(ws()))
+      WriteTerminalInputTool(tm).execute(
+        args("""{"input": "y", "runner_id": "term-1-run-a1b2c3d4"}"""),
+        contextFor(ws())
+      )
     }
     assertFalse(finished.success)
-    assertTrue(finished.error!!.contains("runner-9 has already finished"))
+    assertTrue(finished.error!!.contains("term-1-run-a1b2c3d4 has already finished"))
     assertTrue(finished.error!!.contains("terminal_output"))
   }
 
