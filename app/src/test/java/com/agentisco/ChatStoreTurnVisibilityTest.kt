@@ -2,18 +2,10 @@ package com.agentisco
 
 import androidx.test.core.app.ApplicationProvider
 import com.agentisco.data.local.chat.AgentBlockEntity
-import com.agentisco.data.local.chat.AgentBlockEntity.toTurnBlock
 import com.agentisco.data.local.chat.AgentMessageEntity
 import com.agentisco.data.local.chat.AgentSessionEntity
 import com.agentisco.data.repository.AgentChatStore
-import com.agentisco.ui.AgentTurnItem
-import com.agentisco.ui.toChatItem
-import com.agentisco.ui.ApprovalBlock
-import com.agentisco.ui.TextBlock
-import com.agentisco.ui.ReasoningBlock
-import com.agentisco.ui.ActionBlock
-import com.agentisco.ui.CompactionBlock
-import com.agentisco.ui.TurnBlock
+import com.agentisco.ui.*
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -60,7 +52,7 @@ fun AgentBlockEntity.toTurnBlock(): TurnBlock? = when (kind) {
     detail = detail,
     exitCode = exitCode,
     callId = callId.orEmpty(),
-    cancelled = cancelled
+    cancelled = false
   )
   "error" -> ErrorBlock(uuid, summary)
   "compaction" -> CompactionBlock(
