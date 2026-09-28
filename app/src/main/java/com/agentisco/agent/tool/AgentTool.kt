@@ -149,7 +149,13 @@ class ToolContext(
    * as "the user said no". Null everywhere but the live agent run, so tests and
    * every other context treat a plain "no" as the refusal it is.
    */
-  val onApprovalTerminated: ((String) -> Boolean)? = null
+  val onApprovalTerminated: ((String) -> Boolean)? = null,
+  /**
+   * The runtime installs this so a typed reason travels with the decision: the
+   * tool reports "denied because the user said X" instead of a bare refusal,
+   * which is what makes a denial actionable for the model.
+   */
+  val onApprovalRationale: ((String) -> String?)? = null
 ) {
   /**
    * The decision a tool needs when "not approved" is ambiguous: the runtime can
@@ -163,7 +169,12 @@ class ToolContext(
   suspend fun requestApprovalDecision(approval: PendingApproval): ApprovalDecision {
     val approved = requestApproval(approval)
     val terminated = onApprovalTerminated?.invoke(approval.id) == true
-    return ApprovalDecision(approved, refused = !approved && !terminated, terminated = terminated)
+    return ApprovalDecision(
+      approved = approved,
+      refused = !approved && !terminated,
+      terminated = terminated,
+      rationale = onApprovalRationale?.invoke(approval.id)
+    )
   }
 }
 
@@ -179,15 +190,18 @@ data class ApprovalDecision(
   /** True only when the user explicitly chose to refuse. */
   val refused: Boolean,
   /** True when the turn was stopped before the user decided. */
-  val terminated: Boolean
+  val terminated: Boolean,
+  /** Free text the user typed with the decision — usually why a refusal happened. */
+  val rationale: String? = null
 ) {
   /** The tool never ran, and the transcript must not report a refusal. */
   val neverExecuted: Boolean get() = !approved && !refused
 
   /**
    * One message for the model, phrased by what actually happened: a refusal says
-   * the user said no, a terminated request says nothing ran. [subject] is the
-   * tool's own noun ("File not modified"); [detail] adds what was blocked.
+   * the user said no (and why, when they said why), a terminated request says
+   * nothing ran. [subject] is the tool's own noun ("File not modified");
+   * [detail] adds what was blocked.
    */
   fun describeNotExecuted(subject: String, detail: String = ""): String = buildString {
     append(subject)
@@ -199,6 +213,9 @@ data class ApprovalDecision(
     } else {
       append("the user denied permission")
       if (detail.isNotBlank()) append(" to run ").append(detail)
+      if (!rationale.isNullOrBlank()) {
+        append(" and said: \"").append(rationale.trim()).append("\"")
+      }
       append(".")
     }
   }

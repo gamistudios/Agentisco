@@ -49,6 +49,8 @@ sealed class AgentStreamEvent {
     val approvalId: String,
     val allowed: Boolean,
     val answer: String? = null,
+    /** Free text the user typed with the decision — usually why a refusal happened. */
+    val rationale: String? = null,
     /**
      * True when the turn was stopped while the request was open, so the user
      * never actually chose. Recorded as a neutral "stalled" card, never a denial.

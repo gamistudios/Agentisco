@@ -2508,11 +2508,18 @@ class WorkspaceRepository(
   /**
    * Applies a real decision. [termination] marks a request the turn never got an
    * answer to because the user stopped it — recorded as neutral, not as a denial.
+   * [rationale] is the free text the user typed with it, surfaced to the model so
+   * a denial says why instead of just "no".
    */
-  fun resolveApproval(allowed: Boolean, answer: String? = null, termination: Boolean = false) {
+  fun resolveApproval(
+    allowed: Boolean,
+    answer: String? = null,
+    rationale: String? = null,
+    termination: Boolean = false
+  ) {
     _pendingApproval.value = null
     _approvalDeferred.value = false
-    agentRuntime.resolvePendingApproval(allowed, answer, termination)
+    agentRuntime.resolvePendingApproval(allowed, answer, rationale, termination)
   }
 
   // Run Real Agent Task Workflow. `sessionId` ties the run to a persisted chat

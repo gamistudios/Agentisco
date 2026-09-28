@@ -99,6 +99,48 @@ class AskUserToolTest {
   }
 
   @Test
+  fun `two options are a valid question, not a validation error`() {
+    val log = ApprovalLog().apply { answer = "Compose" }
+    val result = runBlocking {
+      AskUserTool().execute(
+        args("""{"question": "Which framework?", "options": ["Compose", "Views"]}"""),
+        contextFor(ws(), log = log)
+      )
+    }
+    assertTrue(result.success)
+    assertEquals("User answered: Compose", result.output.trim())
+    assertEquals(listOf("Compose", "Views"), log.requests.single().options)
+  }
+
+  @Test
+  fun `three options are a valid question too`() {
+    val log = ApprovalLog().apply { answer = "b" }
+    val result = runBlocking {
+      AskUserTool().execute(
+        args("""{"question": "Which one?", "options": ["a", "b", "c"]}"""),
+        contextFor(ws(), log = log)
+      )
+    }
+    assertTrue(result.success)
+    assertEquals(3, log.requests.single().options.size)
+  }
+
+  @Test
+  fun `a single option is not a question`() {
+    val log = ApprovalLog()
+    val result = runBlocking {
+      AskUserTool().execute(
+        args("""{"question": "Which framework?", "options": ["Compose"]}"""),
+        contextFor(ws(), log = log)
+      )
+    }
+    assertFalse(result.success)
+    assertTrue(result.error!!.contains("2 or more"))
+    // A non-question must never reach the user.
+    assertTrue(log.requests.isEmpty())
+  }
+
+  @Test
   fun `too many options are rejected so the dialog stays tappable`() {
     val result = runBlocking {
       AskUserTool().execute(

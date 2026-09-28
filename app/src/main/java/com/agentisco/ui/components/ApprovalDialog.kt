@@ -44,11 +44,14 @@ enum class ApprovalOutcome {
 @Composable
 fun ApprovalDialog(
   approval: PendingApproval,
-  onResolve: (outcome: ApprovalOutcome, answer: String?) -> Unit
+  onResolve: (outcome: ApprovalOutcome, answer: String?, rationale: String?) -> Unit
 ) {
   val freeText = remember { mutableStateOf("") }
+  // The reason for a refusal — a separate field from an answer, because "why
+  // not" is what makes a denial actionable for the model.
+  val rationale = remember { mutableStateOf("") }
 
-  Dialog(onDismissRequest = { onResolve(ApprovalOutcome.DEFER, null) }) {
+  Dialog(onDismissRequest = { onResolve(ApprovalOutcome.DEFER, null, null) }) {
     Surface(
       modifier = Modifier
         .fillMaxWidth()
@@ -132,7 +135,7 @@ fun ApprovalDialog(
           ) {
             approval.options.forEachIndexed { index, option ->
               Button(
-                onClick = { onResolve(ApprovalOutcome.ALLOW, option) },
+                onClick = { onResolve(ApprovalOutcome.ALLOW, option, null) },
                 modifier = Modifier
                   .fillMaxWidth()
                   .testTag("dialog_answer_option_$index"),
@@ -149,7 +152,7 @@ fun ApprovalDialog(
                 modifier = Modifier
                   .fillMaxWidth()
                   .testTag("dialog_answer_free_text"),
-                placeholder = { Text("Type your own answer…", fontSize = 12.sp) },
+                placeholder = { Text(approval.freeTextLabel, fontSize = 12.sp) },
                 textStyle = LocalTextStyle.current.copy(fontSize = 13.sp),
                 singleLine = true,
                 colors = OutlinedTextFieldDefaults.colors(
@@ -161,7 +164,7 @@ fun ApprovalDialog(
                 )
               )
               Button(
-                onClick = { onResolve(ApprovalOutcome.ALLOW, freeText.value.trim().ifBlank { null }) },
+                onClick = { onResolve(ApprovalOutcome.ALLOW, freeText.value.trim().ifBlank { null }, null) },
                 enabled = freeText.value.isNotBlank(),
                 modifier = Modifier
                   .fillMaxWidth()
@@ -173,7 +176,7 @@ fun ApprovalDialog(
             }
 
             TextButton(
-              onClick = { onResolve(ApprovalOutcome.DEFER, null) },
+              onClick = { onResolve(ApprovalOutcome.DEFER, null, null) },
               modifier = Modifier
                 .fillMaxWidth()
                 .testTag("dialog_answer_skip")
@@ -187,7 +190,7 @@ fun ApprovalDialog(
             horizontalArrangement = Arrangement.spacedBy(10.dp)
           ) {
             OutlinedButton(
-              onClick = { onResolve(ApprovalOutcome.DENY, null) },
+              onClick = { onResolve(ApprovalOutcome.DENY, null, rationale.value.trim().ifBlank { null }) },
               modifier = Modifier
                 .weight(1f)
                 .testTag("dialog_cancel_destructive"),
@@ -198,7 +201,7 @@ fun ApprovalDialog(
             }
 
             Button(
-              onClick = { onResolve(ApprovalOutcome.ALLOW, null) },
+              onClick = { onResolve(ApprovalOutcome.ALLOW, null, null) },
               modifier = Modifier
                 .weight(1f)
                 .testTag("dialog_allow_destructive"),
@@ -213,7 +216,7 @@ fun ApprovalDialog(
             verticalArrangement = Arrangement.spacedBy(8.dp)
           ) {
             Button(
-              onClick = { onResolve(ApprovalOutcome.ALLOW, null) },
+              onClick = { onResolve(ApprovalOutcome.ALLOW, null, null) },
               modifier = Modifier
                 .fillMaxWidth()
                 .testTag("dialog_allow_once"),
@@ -223,7 +226,7 @@ fun ApprovalDialog(
             }
 
             OutlinedButton(
-              onClick = { onResolve(ApprovalOutcome.ALLOW, null) },
+              onClick = { onResolve(ApprovalOutcome.ALLOW, null, null) },
               modifier = Modifier
                 .fillMaxWidth()
                 .testTag("dialog_allow_session"),
@@ -233,8 +236,28 @@ fun ApprovalDialog(
               Text("Allow for this session", fontSize = 12.sp)
             }
 
+            // A denial without a reason is a dead end for the model; the reason
+            // is optional, but it is the field that makes "no" useful.
+            OutlinedTextField(
+              value = rationale.value,
+              onValueChange = { rationale.value = it },
+              modifier = Modifier
+                .fillMaxWidth()
+                .testTag("dialog_deny_reason"),
+              placeholder = { Text(approval.freeTextLabel, fontSize = 12.sp) },
+              textStyle = LocalTextStyle.current.copy(fontSize = 13.sp),
+              singleLine = true,
+              colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = DangerRed,
+                unfocusedBorderColor = DarkBorder,
+                cursorColor = DangerRed,
+                focusedLabelColor = TextSecondary,
+                unfocusedLabelColor = TextMuted
+              )
+            )
+
             TextButton(
-              onClick = { onResolve(ApprovalOutcome.DEFER, null) },
+              onClick = { onResolve(ApprovalOutcome.DEFER, null, null) },
               modifier = Modifier
                 .fillMaxWidth()
                 .testTag("dialog_decide_later")
@@ -243,7 +266,7 @@ fun ApprovalDialog(
             }
 
             TextButton(
-              onClick = { onResolve(ApprovalOutcome.DENY, null) },
+              onClick = { onResolve(ApprovalOutcome.DENY, null, rationale.value.trim().ifBlank { null }) },
               modifier = Modifier
                 .fillMaxWidth()
                 .testTag("dialog_deny")

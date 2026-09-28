@@ -12,12 +12,12 @@ import org.json.JSONObject
 class AskUserTool : AgentTool {
   override val name = "ask_user"
   override val description =
-    "Ask the user a question and wait for the answer. Use it when a decision genuinely belongs to the user (which library, which behaviour, destructive trade-offs) and the options are not derivable from the workspace. Give 2-${MAX_OPTIONS} short, mutually exclusive options; the user can always type a free-text answer."
+    "Ask the user a question and wait for the answer. Use it when a decision genuinely belongs to the user (which library, which behaviour, destructive trade-offs) and the options are not derivable from the workspace. Give ${MIN_OPTIONS}-${MAX_OPTIONS} short, mutually exclusive options; the user can always type a free-text answer."
   override val params = listOf(
     ToolParam("question", "One clear question, e.g. \"Cache the compiled model in the project folder or in app storage?\"."),
     ToolParam(
       "options",
-      "JSON array of ${MAX_OPTIONS}-or-fewer short answer labels the user can pick, e.g. [\"project folder\", \"app storage\"].",
+      "JSON array of ${MIN_OPTIONS}-to-${MAX_OPTIONS} short answer labels the user can pick, e.g. [\"project folder\", \"app storage\"].",
       type = "array", required = false, allowBlank = true
     ),
     ToolParam(
@@ -37,6 +37,13 @@ class AskUserTool : AgentTool {
         val option = rawOptions.opt(i)?.toString()?.trim().orEmpty()
         if (option.isNotBlank() && option !in options) options += option.take(MAX_OPTION_CHARS)
       }
+    }
+    // A single choice is not a question — it is the answer already.
+    if (options.size == 1) {
+      return ToolResult(
+        false,
+        error = "options must hold ${MIN_OPTIONS} or more choices (got 1); either add a real alternative or answer the question yourself."
+      )
     }
     if (options.size > MAX_OPTIONS) {
       return ToolResult(
@@ -75,6 +82,7 @@ class AskUserTool : AgentTool {
   }
 
   companion object {
+    const val MIN_OPTIONS = 2
     const val MAX_OPTIONS = 4
     const val MAX_OPTION_CHARS = 120
   }

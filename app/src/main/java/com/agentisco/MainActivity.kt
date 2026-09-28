@@ -249,10 +249,10 @@ fun AgentIDEApp(
     if (!approvalDeferred) pendingApproval?.let { approval ->
       ApprovalDialog(
         approval = approval,
-        onResolve = { outcome, answer ->
+        onResolve = { outcome, answer, rationale ->
           when (outcome) {
             ApprovalOutcome.ALLOW -> viewModel.resolveApproval(true, answer)
-            ApprovalOutcome.DENY -> viewModel.resolveApproval(false, answer)
+            ApprovalOutcome.DENY -> viewModel.denyWithReason(rationale.orEmpty())
             ApprovalOutcome.DEFER -> viewModel.deferApproval()
           }
         }

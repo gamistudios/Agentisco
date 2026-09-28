@@ -265,7 +265,9 @@ fun AgentScreen(
                 item = item,
                 showToolJson = chatDisplay.showToolJson,
                 onAllow = { viewModel.resolveApproval(true) },
-                onDeny = { viewModel.resolveApproval(false) },
+                onDeny = { (id, reason) ->
+                  if (reason.isNullOrBlank()) viewModel.resolveApproval(false) else viewModel.denyWithReason(reason)
+                },
                 onAnswer = { _, answer -> viewModel.answerQuestion(answer) },
                 onReopen = { viewModel.showApprovalDialog() },
                 onRetry = { viewModel.retryAgentTurn(item.id) },
@@ -576,7 +578,7 @@ private fun AgentTurnCard(
   item: AgentTurnItem,
   showToolJson: Boolean,
   onAllow: (String) -> Unit,
-  onDeny: (String) -> Unit,
+  onDeny: (Pair<String, String?>) -> Unit,
   onAnswer: (String, String?) -> Unit,
   onReopen: (String) -> Unit,
   onRetry: () -> Unit,
@@ -722,7 +724,7 @@ private fun AgentTurnCard(
         is ApprovalBlock -> ApprovalCard(
           item = block,
           onAllow = { onAllow(block.approvalId) },
-          onDeny = { onDeny(block.approvalId) },
+          onDeny = { reason -> onDeny(block.approvalId to reason) },
           onAnswer = { answer -> onAnswer(block.approvalId, answer) },
           onReopen = { onReopen(block.approvalId) }
         )
@@ -1136,7 +1138,7 @@ private fun ToolCallRow(
 private fun ApprovalCard(
   item: ApprovalBlock,
   onAllow: () -> Unit,
-  onDeny: () -> Unit,
+  onDeny: (String?) -> Unit,
   onAnswer: (String) -> Unit,
   onReopen: () -> Unit
 ) {
@@ -1162,7 +1164,17 @@ private fun ApprovalCard(
     }
     Spacer(modifier = Modifier.height(6.dp))
     Text(item.command, color = TextCode, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
-    if (item.impact.isNotBlank() && item.impact != item.command) {
+    // The impact line explains what the action would do; once the user has
+    // refused and said why, their reason replaces it.
+    if (item.rationale.isNotBlank()) {
+      Spacer(modifier = Modifier.height(4.dp))
+      Text(
+        "“${item.rationale}”",
+        color = DangerRed,
+        fontSize = 11.sp,
+        lineHeight = 15.sp
+      )
+    } else if (item.impact.isNotBlank() && item.impact != item.command) {
       Spacer(modifier = Modifier.height(4.dp))
       Text(item.impact, color = TextSecondary, fontSize = 11.sp, lineHeight = 15.sp)
     }
@@ -1199,6 +1211,9 @@ private fun ApprovalCard(
             modifier = Modifier.testTag("btn_reopen_dialog")
           ) { Text("Answer in the dialog…", color = TextSecondary, fontSize = 11.sp) }
         } else {
+          // A denial the user can explain is worth far more to the model than a
+          // bare "no" — the field stays optional so one tap still refuses.
+          var rationale by remember { mutableStateOf("") }
           Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(
               onClick = onAllow,
@@ -1207,12 +1222,29 @@ private fun ApprovalCard(
               modifier = Modifier.height(30.dp).testTag("btn_allow_tool")
             ) { Text("Allow", color = Color.White, fontSize = 11.sp) }
             Button(
-              onClick = onDeny,
+              onClick = { onDeny(rationale.trim().ifBlank { null }) },
               colors = ButtonDefaults.buttonColors(containerColor = DangerRed),
               contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
               modifier = Modifier.height(30.dp).testTag("btn_deny_tool")
             ) { Text("Deny", color = Color.White, fontSize = 11.sp) }
           }
+          OutlinedTextField(
+            value = rationale,
+            onValueChange = { rationale = it },
+            modifier = Modifier
+              .fillMaxWidth()
+              .testTag("card_deny_reason"),
+            placeholder = { Text(item.freeTextLabel, color = TextMuted, fontSize = 11.sp) },
+            textStyle = LocalTextStyle.current.copy(fontSize = 11.sp),
+            singleLine = true,
+            colors = OutlinedTextFieldDefaults.colors(
+              focusedBorderColor = WarningAmber,
+              unfocusedBorderColor = DarkBorder,
+              cursorColor = WarningAmber,
+              focusedTextColor = TextPrimary,
+              unfocusedTextColor = TextPrimary
+            )
+          )
           TextButton(
             onClick = onReopen,
             modifier = Modifier.testTag("btn_reopen_dialog")
@@ -1249,6 +1281,9 @@ private fun ApprovalCard(
   }
 }
 
+/** Label for the free-text field the request's card and dialog share. */
+private val ApprovalBlock.freeTextLabel: String
+  get() = if (isQuestion) "Or type your own answer…" else "Why not? (the agent reads this)"
 /** Highlighted, copyable card for the agent's final answer. */
 @Composable
 private fun ResponseCard(block: TextBlock) {

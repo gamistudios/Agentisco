@@ -266,8 +266,16 @@ class AgentChatStore(context: Context?) {
                       toolArgs = "{\"command\": \"$escaped\"}", toolCallId = callId, rowId = m.rowId
                     )
                   )
+                  // `detail` held the impact text before the decision; for a
+                  // denial it holds the reason the user typed, if any.
+                  val reason = b.detail.takeIf { it.isNotBlank() && it != command }
                   result.add(
-                    ChatHistoryMessage("tool", "User denied permission to run: $command", toolName = "run_command", toolCallId = callId, rowId = m.rowId)
+                    ChatHistoryMessage(
+                      "tool",
+                      if (reason.isNullOrBlank()) "User denied permission to run: $command"
+                      else "User denied permission to run: $command — $reason",
+                      toolName = "run_command", toolCallId = callId, rowId = m.rowId
+                    )
                   )
                 }
                 "stalled" -> {

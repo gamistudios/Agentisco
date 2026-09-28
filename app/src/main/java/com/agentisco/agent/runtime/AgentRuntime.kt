@@ -162,9 +162,14 @@ Habits:
     an earlier result.
   - Keep working until the task is done. If a real decision belongs to the user
     (ambiguous requirement, destructive choice, two viable designs), call ask_user with
-    concrete options instead of guessing, and instead of writing a message asking.
+    2-4 concrete options instead of guessing, and instead of writing a message asking.
+    Two options is enough — a question with only one is an answer you should give.
+  - A refusal may come with the user's reason for it. That reason is the user
+    telling you what to do instead, so act on it rather than repeating the same
+    request a different way.
   - Anything the user must approve (protected commands, file deletion) shows a dialog;
-    a denial is the user's decision — adapt, do not retry the same refused action.
+    a denial is the user's decision — adapt to it and to the reason they typed, and do
+    not retry the same refused action.
   - Finish with a plain-text response and NO tool calls: what you did, which files
     changed, and the verified outcome. That summary is the answer the user reads.
 
@@ -214,6 +219,12 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
    */
   private val terminatedApprovals: MutableMap<String, Boolean> =
     java.util.Collections.synchronizedMap(HashMap())
+  /**
+   * The reason the user typed for a decision, keyed by approval id, so a tool
+   * can report "no, because…" instead of a bare refusal.
+   */
+  private val approvalRationales: MutableMap<String, String> =
+    java.util.Collections.synchronizedMap(HashMap())
   /** Awaits the user's retry/continue decision for a cancelled tool call. */
   private val toolCancelDecisions =
     java.util.concurrent.ConcurrentHashMap<String, CompletableDeferred<Boolean>>()
@@ -232,14 +243,29 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
     val answer: String? = null,
     val termination: Boolean = false
   ) {
-    /** Convenience for the tool-context adapter; see [lastDecision]. */
+    /** Convenience for the tool-context adapter. */
     internal val approved: Boolean get() = !termination && allowed
+
+    /**
+     * The reason the user typed alongside the decision — a denial's "why". Null
+     * when they picked a button without explaining.
+     */
+    internal var rationale: String? = null
   }
 
   fun resolvePendingApproval(allowed: Boolean, answer: String? = null, termination: Boolean = false) {
+    resolvePendingApproval(allowed, answer, rationale = null, termination = termination)
+  }
+
+  /**
+   * Applies the user's decision. [rationale] is the free text the user typed
+   * alongside it — a denial's "why" — which the tools surface to the model in
+   * place of a bare refusal.
+   */
+  fun resolvePendingApproval(allowed: Boolean, answer: String?, rationale: String?, termination: Boolean) {
     val deferred = pendingApprovalDeferred
     pendingApprovalDeferred = null
-    deferred?.complete(UserDecision(allowed, answer, termination))
+    deferred?.complete(UserDecision(allowed, answer, termination).apply { this.rationale = rationale })
   }
 
   /** SIGKILLs a specific running tool call; the loop then awaits user guidance. */
@@ -929,12 +955,15 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
     permissions = { permissions }, // Dynamic: reads current permissions at tool execution time
     terminalSession = terminalSession,
     onApprovalTerminated = { id -> terminatedApprovals[id] == true },
+    onApprovalRationale = { id -> approvalRationales[id] },
     requestApproval = { approval ->
-      // Only a real, user-made decision counts. The termination flag is recorded
-      // first so a tool reading [ToolContext.requestApprovalDecision] can tell a
-      // refusal from a turn that was stopped before the user decided.
+      // Only a real, user-made decision counts. The termination flag and the
+      // rationale are recorded first so a tool reading
+      // [ToolContext.requestApprovalDecision] can tell a refusal from a stopped
+      // turn, and can say *why* the user refused.
       val decision = awaitUserDecision(approval, onRequestApproval, onEvent)
       terminatedApprovals[approval.id] = decision.termination
+      decision.rationale?.let { approvalRationales[approval.id] = it }
       decision.approved
     },
     askUser = { approval ->
@@ -982,6 +1011,7 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
         approvalId = approval.id,
         allowed = decision.allowed,
         answer = decision.answer,
+        rationale = decision.rationale,
         terminated = decision.termination
       )
     )

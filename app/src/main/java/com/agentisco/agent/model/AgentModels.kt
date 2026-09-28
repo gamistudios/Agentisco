@@ -50,7 +50,15 @@ data class PendingApproval(
   val options: List<String> = emptyList(),
   /** Let the user type an answer instead of picking one of [options]. */
   val allowFreeText: Boolean = true
-)
+) {
+  /**
+   * The label for the free-text field. A refusal with a typed reason is worth a
+   * different field than a chosen answer, so the dialog asks for the user's
+   * reasoning rather than passing it off as another option.
+   */
+  val freeTextLabel: String
+    get() = if (isQuestion) "Or type your own answer…" else "Why not? (the agent reads this)"
+}
 
 enum class PermissionMode {
   ALWAYS_ASK,

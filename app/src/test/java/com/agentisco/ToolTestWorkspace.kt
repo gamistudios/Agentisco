@@ -61,6 +61,8 @@ internal class ApprovalLog {
   var answer: String? = null
   /** True when the turn was stopped before the user decided. */
   var terminated = false
+  /** What the user typed alongside the decision — usually why they refused. */
+  var rationale: String? = null
 
   fun last(): PendingApproval = requests.last()
 }
@@ -82,8 +84,10 @@ internal fun contextFor(
   },
   terminalSession = TerminalSession(id = "term-1", name = "main", currentDir = workspace.root.absolutePath),
   // A "no" from a terminated turn is the harness ending the request, not the
-  // user refusing it — the same distinction the live runtime makes.
+  // user refusing it — the same distinction the live runtime makes. The
+  // rationale rides along so a test's refusal can say why.
   onApprovalTerminated = { _ -> log.terminated },
+  onApprovalRationale = { _ -> log.rationale },
   requestApproval = { approval ->
     log.requests.add(approval)
     !log.terminated && log.approve

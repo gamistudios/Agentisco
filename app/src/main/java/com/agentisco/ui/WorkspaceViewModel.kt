@@ -465,8 +465,15 @@ class WorkspaceViewModel(
             else -> "denied"
           }
           val answer = event.answer
-          if (answer.isNullOrBlank()) chatStore.updateBlockStatus(uuid, status)
-          else chatStore.updateBlockAnswer(uuid, status, answer)
+          // The refusal's reason is stored where the impact text was, so the card
+          // stops showing "what would happen" once the user has explained.
+          if (!event.allowed && !event.rationale.isNullOrBlank()) {
+            chatStore.updateBlockAnswer(uuid, status, event.rationale.trim())
+          } else if (answer.isNullOrBlank()) {
+            chatStore.updateBlockStatus(uuid, status)
+          } else {
+            chatStore.updateBlockAnswer(uuid, status, answer)
+          }
         }
       }
       is AgentStreamEvent.Completed -> {
@@ -1298,7 +1305,15 @@ class WorkspaceViewModel(
   }
 
   fun resolveApproval(allowed: Boolean, answer: String? = null, termination: Boolean = false) {
-    repository.resolveApproval(allowed, answer, termination)
+    repository.resolveApproval(allowed, answer, null, termination)
+  }
+
+  /**
+   * Refuses with the reason the user typed, so the model gets "no, because…"
+   * instead of a bare denial it can only guess at.
+   */
+  fun denyWithReason(rationale: String) {
+    repository.resolveApproval(allowed = false, rationale = rationale)
   }
 
   /** Answers an agent question with a chosen option or typed text. */

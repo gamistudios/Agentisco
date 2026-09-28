@@ -59,7 +59,7 @@ class CommandToolTest {
   @Test
   fun `a refused command is reported to the model as a refusal`() {
     val ws = ws()
-    val log = ApprovalLog().apply { approve = false; terminated = false }
+    val log = ApprovalLog().apply { approve = false; terminated = false; rationale = null }
     val ctx = contextFor(ws, terminalCommands = PermissionMode.ALWAYS_ASK, log = log)
     val result = runBlocking {
       RunCommandTool(unavailableTerminal()).execute(args("""{"command": "npm publish"}"""), ctx)
@@ -68,12 +68,40 @@ class CommandToolTest {
     assertEquals(1, log.requests.size)
     assertEquals("npm publish", log.requests.single().command)
     assertTrue(result.error!!.contains("denied permission"))
+    assertFalse(result.error!!.contains("and said"))
+  }
+
+  @Test
+  fun `a refused command carries the user's reason to the model`() {
+    val ws = ws()
+    val log = ApprovalLog().apply { approve = false; rationale = "that writes outside the workspace" }
+    val ctx = contextFor(ws, terminalCommands = PermissionMode.ALWAYS_ASK, log = log)
+    val result = runBlocking {
+      RunCommandTool(unavailableTerminal()).execute(args("""{"command": "npm publish"}"""), ctx)
+    }
+    assertFalse(result.success)
+    // A denial with a reason must reach the model as that reason, not a bare "no".
+    assertTrue(result.error!!.contains("denied permission"))
+    assertTrue(result.error!!.contains("that writes outside the workspace"))
+  }
+
+  @Test
+  fun `a refused command without a reason stays a plain refusal`() {
+    val ws = ws()
+    val log = ApprovalLog().apply { approve = false }
+    val ctx = contextFor(ws, terminalCommands = PermissionMode.ALWAYS_ASK, log = log)
+    val result = runBlocking {
+      RunCommandTool(unavailableTerminal()).execute(args("""{"command": "npm publish"}"""), ctx)
+    }
+    assertFalse(result.success)
+    assertTrue(result.error!!.contains("denied permission"))
+    assertFalse(result.error!!.contains("and said"))
   }
 
   @Test
   fun `a stopped turn is never reported to the model as the user refusing`() {
     val ws = ws()
-    val log = ApprovalLog().apply { approve = false; terminated = true }
+    val log = ApprovalLog().apply { approve = false; terminated = true; rationale = null }
     val ctx = contextFor(ws, terminalCommands = PermissionMode.ALWAYS_ASK, log = log)
     val result = runBlocking {
       RunCommandTool(unavailableTerminal()).execute(args("""{"command": "npm publish"}"""), ctx)

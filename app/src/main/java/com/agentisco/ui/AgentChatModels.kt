@@ -75,6 +75,8 @@ data class ApprovalBlock(
    * actionable and never claim the user refused something.
    */
   val stalled: Boolean = false,
+  /** The reason the user gave for refusing, when they typed one. */
+  val rationale: String = "",
   /** Choices the agent offered a question, so the card can render them inline. */
   val options: List<String> = emptyList()
 ) : TurnBlock()
@@ -164,6 +166,9 @@ private fun AgentBlockEntity.toTurnBlock(): TurnBlock? = when (kind) {
     // Never decided: the dialog was dismissed, or the turn was stopped. Kept
     // apart from `denied` so the UI never implies the user refused.
     stalled = status == "stalled",
+    // The reason for a refusal lives in `detail` for approvals (whose impact
+    // text is stored there too, so it only shows before the decision).
+    rationale = if (status == "denied") detail else "",
     options = optionsJson.toOptionList()
   )
   "tool" -> ActionBlock(
