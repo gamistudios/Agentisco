@@ -9,5 +9,6 @@ enum class AppDestination {
   DIFF,
   GIT,
   BUILD_RUN,
-  SETTINGS
+  SETTINGS,
+  AI_PROVIDERS
 }

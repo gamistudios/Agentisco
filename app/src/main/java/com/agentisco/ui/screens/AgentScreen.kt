@@ -1463,7 +1463,7 @@ private fun AgentComposer(
           },
           onPick = { option ->
             if (option.configure) {
-              viewModel.navigateTo(AppDestination.SETTINGS)
+              viewModel.navigateTo(AppDestination.AI_PROVIDERS)
             } else {
               val recordId = option.tag?.substringBefore("|")
               models.firstOrNull { it.id == recordId }?.let { viewModel.selectModel(it) }

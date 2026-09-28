@@ -9,11 +9,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.BugReport
 import androidx.compose.material.icons.outlined.Calculate
 import androidx.compose.material.icons.outlined.Compress
 import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -234,17 +236,60 @@ fun SettingsScreen(
       }
     }
 
-    // AI Providers & Models (provider-centric configuration)
+    // AI Providers & Models — managed on their own screen. The provider list
+    // grows long (10+ providers is normal), so embedding it here buried every
+    // setting below it. This card is the doorway instead.
     item {
+      val providers by viewModel.providers.collectAsState()
+      val models by viewModel.aiModels.collectAsState()
+      val providerCount = providers.size
+      val modelCount = models.size
+
       Card(
         modifier = Modifier
           .fillMaxWidth()
           .clip(RoundedCornerShape(12.dp))
-          .border(1.dp, DarkBorder, RoundedCornerShape(12.dp)),
-        colors = CardDefaults.cardColors(containerColor = DarkSurface)
+          .border(1.dp, DarkBorder, RoundedCornerShape(12.dp))
+          .clickable { onNavigate(AppDestination.AI_PROVIDERS) }
+          .testTag("card_ai_providers")
       ) {
-        Column(modifier = Modifier.padding(14.dp)) {
-          com.agentisco.ui.components.AIProvidersSection(viewModel = viewModel)
+        Row(
+          modifier = Modifier
+            .fillMaxWidth()
+            .padding(14.dp),
+          horizontalArrangement = Arrangement.SpaceBetween,
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.weight(1f)
+          ) {
+            Icon(
+              Icons.Outlined.Psychology,
+              contentDescription = null,
+              tint = ElectricBlue,
+              modifier = Modifier.size(18.dp)
+            )
+            Spacer(modifier = Modifier.width(10.dp))
+            Column {
+              Text("AI Providers", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+              Text(
+                if (providerCount == 0) {
+                  "No providers configured — tap to add one"
+                } else {
+                  "$providerCount provider${if (providerCount == 1) "" else "s"} · $modelCount model${if (modelCount == 1) "" else "s"}"
+                },
+                color = TextMuted,
+                fontSize = 11.sp
+              )
+            }
+          }
+          Icon(
+            Icons.Default.ChevronRight,
+            contentDescription = "Open AI providers",
+            tint = TextMuted,
+            modifier = Modifier.size(18.dp)
+          )
         }
       }
     }

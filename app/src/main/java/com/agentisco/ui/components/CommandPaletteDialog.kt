@@ -289,10 +289,17 @@ fun CommandPaletteDialog(
         title = "Switch AI Model or Provider",
         category = "Settings",
         icon = Icons.Outlined.Psychology,
-        destination = null
+        destination = AppDestination.AI_PROVIDERS
       ) {
         onOpenModelSheet()
       },
+      PaletteAction(
+        id = "manage_providers",
+        title = "Manage AI Providers & Models",
+        category = "Settings",
+        icon = Icons.Outlined.Dns,
+        destination = AppDestination.AI_PROVIDERS
+      ),
       PaletteAction(
         id = "settings_permissions",
         title = "Configure Agent Permissions & Tool Guards",

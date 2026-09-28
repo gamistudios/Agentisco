@@ -109,6 +109,7 @@ fun AgentIDEApp(
       isModelSheetOpen -> viewModel.toggleModelSheet(false)
       currentDestination == AppDestination.EDITOR -> viewModel.navigateTo(AppDestination.FILES)
       currentDestination == AppDestination.DIFF -> viewModel.navigateTo(AppDestination.AGENT)
+      currentDestination == AppDestination.AI_PROVIDERS -> viewModel.navigateTo(AppDestination.SETTINGS)
       else -> viewModel.navigateTo(AppDestination.AGENT)
     }
   }
@@ -206,6 +207,10 @@ fun AgentIDEApp(
             updateViewModel = updateViewModel,
             onNavigate = { viewModel.navigateTo(it) },
             onShowCrashLog = { isCrashLogVisible = true }
+          )
+          AppDestination.AI_PROVIDERS -> AiProvidersScreen(
+            viewModel = viewModel,
+            onNavigate = { viewModel.navigateTo(it) }
           )
         }
       }
