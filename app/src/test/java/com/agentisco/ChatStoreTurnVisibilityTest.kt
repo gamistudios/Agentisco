@@ -229,7 +229,6 @@ class ChatStoreTurnVisibilityTest {
     else -> null
   }
   @Test
-  @Test
   fun `a denied approval keeps the reason the user typed`() = runBlocking {
     val sessionId = "sess-deny"
     val now = System.currentTimeMillis()
