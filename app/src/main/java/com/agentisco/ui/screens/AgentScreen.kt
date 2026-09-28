@@ -727,7 +727,8 @@ private fun AgentTurnCard(
           onDeny = { reason -> onDeny(block.approvalId to reason) },
           onAnswer = { answer -> onAnswer(block.approvalId, answer) },
           onReopen = { onReopen(block.approvalId) }
-        )        is ErrorBlock -> ErrorCard(block, showRetry = item.status == TurnStatus.FAILED, onRetry = onRetry)
+        )
+        is ErrorBlock -> ErrorCard(block, showRetry = item.status == TurnStatus.FAILED, onRetry = onRetry)
         is CompactionBlock -> CompactionCard(block)
       }
     }
