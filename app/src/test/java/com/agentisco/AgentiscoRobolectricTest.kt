@@ -353,9 +353,12 @@ class ExampleRobolectricTest {
     // reveal toggle never shows a stale secret from another provider.
     assertNull(repo.getApiKey("provider-that-does-not-exist"))
 
-    // Saving a blank key clears it: the flag and the fetch must agree.
-    repo.saveProvider("KeyProvider", "https://keyed/v1", LLMProtocol.OPENAI_CHAT_COMPLETIONS, "")
-    assertFalse(repo.providers.value.first().hasApiKey)
-    assertNull(repo.getApiKey(repo.providers.value.first().id))
+    // Saving a blank key clears it: the flag and the fetch must agree. Same
+    // provider id, otherwise this just creates a second provider.
+    repo.saveProvider("KeyProvider", "https://keyed/v1", LLMProtocol.OPENAI_CHAT_COMPLETIONS, "", providerId = saved.id)
+    val cleared = repo.providers.value.first()
+    assertEquals(saved.id, cleared.id)
+    assertFalse(cleared.hasApiKey)
+    assertNull(repo.getApiKey(saved.id))
   }
 }
