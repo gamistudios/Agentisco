@@ -166,8 +166,10 @@ private fun AgentBlockEntity.toTurnBlock(): TurnBlock? = when (kind) {
     // Never decided: the dialog was dismissed, or the turn was stopped. Kept
     // apart from `denied` so the UI never implies the user refused.
     stalled = status == "stalled",
-    // The reason for a refusal lives in `detail` for approvals (whose impact
-    // text is stored there too, so it only shows before the decision).
+    // The reason for a refusal lives in `detail`, which held the impact text
+    // while the request was still pending — so a card that was never decided
+    // keeps showing what the action would have done, and a denial shows the
+    // user's own words instead.
     rationale = if (status == "denied") detail else "",
     options = optionsJson.toOptionList()
   )

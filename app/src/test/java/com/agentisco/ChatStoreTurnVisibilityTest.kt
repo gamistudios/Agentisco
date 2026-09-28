@@ -10,6 +10,7 @@ import com.agentisco.ui.toChatItem
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -170,5 +171,39 @@ class ChatStoreTurnVisibilityTest {
         listOfNotNull(t.providerName, t.modelName).joinToString(" · ")
       }
     )
+  }
+
+  /**
+   * A denial the user explained must be read back as that explanation: the model
+   * acts on the reason, so a round trip through SQLite cannot drop or mangle it.
+   */
+  @Test
+  fun `a denied approval keeps the reason the user typed`() = runBlocking {
+    val sessionId = "sess-deny"
+    val now = System.currentTimeMillis()
+    store.createSessionBlocking(
+      AgentSessionEntity(
+        id = sessionId, projectId = "/proj", title = "T", status = "completed",
+        createdAt = now, updatedAt = now
+      )
+    )
+    val turn = AgentChatStore.newId()
+    put(AgentMessageEntity(uuid = turn, sessionId = sessionId, role = "assistant_turn", content = "", status = "completed", statusMessage = "", createdAt = now))
+    val approval = AgentChatStore.newId()
+    put(
+      AgentBlockEntity(
+        uuid = approval, messageUuid = turn, kind = "approval", name = "approval-1",
+        argsJson = "rm -rf node_modules", status = "denied", summary = "Agent wants to run a command",
+        // `detail` is the impact text while pending and the user's reason once denied.
+        detail = "that would delete my local cache", exitCode = null, createdAt = now
+      )
+    )
+
+    val block = store.messagesWithBlocks(sessionId).first()
+      .single { it.message.uuid == turn }.blocks.single()
+    val card = block.toTurnBlock() as com.agentisco.ui.ApprovalBlock
+    assertFalse(card.allowed)
+    assertTrue(card.resolved)
+    assertEquals("that would delete my local cache", card.rationale)
   }
 }

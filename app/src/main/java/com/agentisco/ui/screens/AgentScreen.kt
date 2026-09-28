@@ -727,8 +727,7 @@ private fun AgentTurnCard(
           onDeny = { reason -> onDeny(block.approvalId to reason) },
           onAnswer = { answer -> onAnswer(block.approvalId, answer) },
           onReopen = { onReopen(block.approvalId) }
-        )
-        is ErrorBlock -> ErrorCard(block, showRetry = item.status == TurnStatus.FAILED, onRetry = onRetry)
+        )        is ErrorBlock -> ErrorCard(block, showRetry = item.status == TurnStatus.FAILED, onRetry = onRetry)
         is CompactionBlock -> CompactionCard(block)
       }
     }
@@ -1248,8 +1247,7 @@ private fun ApprovalCard(
           TextButton(
             onClick = onReopen,
             modifier = Modifier.testTag("btn_reopen_dialog")
-          ) { Text("Open the dialog…", color = TextSecondary, fontSize = 11.sp) }
-        }
+          ) { Text("Open the dialog…", color = TextSecondary, fontSize = 11.sp) }        }
       }
 
       item.answer.isNotBlank() -> Text(
