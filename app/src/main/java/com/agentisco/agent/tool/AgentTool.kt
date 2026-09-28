@@ -111,7 +111,8 @@ private val SEARCHING_TOOLS = setOf("search_files", "regex_search", "glob_files"
 fun toolTypeFor(name: String): ToolType = when {
   name.startsWith("git_") -> ToolType.GIT
   name == "run_command" || name == "build" || name == "test" || name == "run" ||
-    name == "interrupt_terminal" || name.startsWith("terminal") -> ToolType.TERMINAL
+    name == "interrupt_terminal" || name == "write_terminal_input" ||
+    name.startsWith("terminal") -> ToolType.TERMINAL
   name in EDITING_TOOLS -> ToolType.EDIT_FILE
   name in SEARCHING_TOOLS -> ToolType.SEARCH
   name == "task_plan" -> ToolType.BUILD

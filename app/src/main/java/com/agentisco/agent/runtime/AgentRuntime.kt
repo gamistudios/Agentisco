@@ -126,8 +126,8 @@ Tools available:
   Change   edit_files (several exact-snippet edits, one call), edit_file,
            write_file (a whole new or replaced file), create_file, create_directory,
            move_file, copy_file, delete_file
-  Run      run_command (Linux shell in the workspace), terminal_output, interrupt_terminal,
-           build, test
+  Run      run_command (Linux shell in the workspace), terminal_output,
+           write_terminal_input (answer a prompt), interrupt_terminal, build, test
   Git      git_status, git_diff, git_log, git_show, git_stage, git_commit
   Other    web_search (find documentation or an issue for an error), web_fetch (read a
            URL as text), ask_user (let the user choose), task_plan (share a step-by-step plan)
@@ -145,6 +145,8 @@ Method:
   4. Long commands (dev server, watch, big test suites): pass run_in_background true to
      run_command, then poll with terminal_output and stop with interrupt_terminal.
      A foreground command that hits its timeout is reported as stopped, not as failed.
+     When output stops because the command is asking something, answer it with
+     write_terminal_input using the same runner_id - do not start a second copy.
   5. Unknown library behaviour, an error message you cannot explain or a config option you
      are not sure about: web_search for it, then web_fetch the page that looks authoritative.
      Never present a URL you have not read, and never invent one.

@@ -280,7 +280,8 @@ class WorkspaceSearchToolTest {
     listOf(
       "read_file", "read_files", "search_files", "regex_search", "glob_files", "file_info", "directory_tree",
       "edit_file", "edit_files", "write_file", "create_file", "create_directory", "move_file", "copy_file",
-      "delete_file", "task_plan", "run_command", "terminal_output", "interrupt_terminal",
+      "delete_file", "task_plan", "run_command", "terminal_output", "write_terminal_input",
+      "interrupt_terminal",
       "git_status", "git_diff", "git_log", "git_show", "build", "test", "web_fetch", "web_search", "ask_user"
     ).forEach { assertTrue("missing tool: $it", it in names) }
   }
@@ -301,7 +302,9 @@ class WorkspaceSearchToolTest {
     assertEquals(ToolType.EDIT_FILE, toolTypeFor("create_directory"))
     assertEquals(ToolType.SEARCH, toolTypeFor("glob_files"))
     assertEquals(ToolType.TERMINAL, toolTypeFor("terminal_output"))
+    assertEquals(ToolType.TERMINAL, toolTypeFor("write_terminal_input"))
     assertEquals(ToolType.WEB, toolTypeFor("web_fetch"))
+    assertEquals(ToolType.WEB, toolTypeFor("web_search"))
     assertEquals(ToolType.QUESTION, toolTypeFor("ask_user"))
     // A read must never be classified as an edit: the runtime records edits.
     assertEquals(ToolType.READ_FILE, toolTypeFor("read_file"))
@@ -310,7 +313,7 @@ class WorkspaceSearchToolTest {
   @Test
   fun `old read heavy results are eligible for microcompaction`() {
     val tools = CompactPolicyConfig.DEFAULT_MICROCOMPACT_TOOLS
-    listOf("read_file", "search_files", "terminal_output", "web_fetch", "git_log", "git_show").forEach {
+    listOf("read_file", "search_files", "terminal_output", "web_fetch", "web_search", "git_log", "git_show").forEach {
       assertTrue("$it should be compactable", it in tools)
     }
     assertFalse("an edit result must never be cleared", "edit_file" in tools)

@@ -56,6 +56,7 @@ class AgentToolRegistry(
     CopyFileTool(PermissionGates::fileWrite),
     RunCommandTool(terminalManager),
     TerminalOutputTool(terminalManager),
+    WriteTerminalInputTool(terminalManager),
     InterruptTerminalTool(terminalManager),
     GitStatusTool(gitManager),
     GitDiffTool(gitManager),
@@ -644,6 +645,53 @@ class InterruptTerminalTool(private val tm: TerminalProcessManager) : AgentTool 
         else "$target is not running. Still running: ${running.joinToString(", ")}"
       )
     }
+  }
+}
+
+/**
+ * Answers a prompt a running command is waiting on: an installer asking y/n, a
+ * generator asking for a name, a REPL. Without it the agent can only start such a
+ * command and watch it block until stdin closes.
+ */
+class WriteTerminalInputTool(private val tm: TerminalProcessManager) : AgentTool {
+  override val name = "write_terminal_input"
+  override val description =
+    "Send one line of input to a command that is waiting for an answer (a y/n prompt, a name, a REPL expression). Pass the runner_id from run_command, or omit it for the newest command that is still running; an empty input presses Enter. Read the reply with terminal_output."
+  override val params = listOf(
+    ToolParam("input", "The line to send to the command's stdin. \"\" presses Enter.", allowBlank = true),
+    ToolParam("runner_id", "Command to send it to; omit for the newest running one.", required = false, allowBlank = true)
+  )
+
+  override suspend fun execute(args: JSONObject, ctx: ToolContext): ToolResult {
+    val input = args.str("input")
+    val target = args.str("runner_id").trim().ifEmpty {
+      tm.listBackgroundRuns().firstOrNull { it.running }?.id.orEmpty()
+    }
+    if (target.isEmpty()) {
+      return ToolResult(
+        success = false,
+        error = "No command is running, so there is nothing to send input to. Start one with run_command (run_in_background true)."
+      )
+    }
+    if (!tm.isRunning(target)) {
+      val running = tm.listBackgroundRuns().filter { it.running }.map { it.id }
+      return ToolResult(
+        success = false,
+        error = if (running.isEmpty()) "$target has already finished — read its output with terminal_output."
+        else "$target is not running. Still waiting for input: ${running.joinToString(", ")}"
+      )
+    }
+    if (!tm.writeInput(target, input)) {
+      return ToolResult(
+        false,
+        error = "Could not write to $target: its input is closed. Check terminal_output, then interrupt_terminal and re-run with the answer piped in."
+      )
+    }
+    return ToolResult(
+      success = true,
+      output = "Sent ${if (input.isEmpty()) "an empty line (Enter)" else "\"" + input.take(200) + "\""} to $target. Read the reply with terminal_output.",
+      metadata = mapOf("runner" to target)
+    )
   }
 }
 

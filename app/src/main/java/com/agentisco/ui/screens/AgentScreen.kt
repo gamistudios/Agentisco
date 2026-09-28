@@ -1666,7 +1666,7 @@ private fun friendlyToolLabel(name: String, argsJson: String): Pair<String, Stri
     "search_files" -> "Searching" to arg("query")
     "run_command" -> "Running" to arg("command")
     "terminal_output" -> "Reading output" to arg("runner_id")
-    "write_terminal_input" -> "Terminal input" to ""
+    "write_terminal_input" -> "Terminal input" to arg("input").ifBlank { "(Enter)" }
     "interrupt_terminal" -> "Interrupting" to ""
     "git_status" -> "Git status" to ""
     "git_diff" -> "Git diff" to arg("path")

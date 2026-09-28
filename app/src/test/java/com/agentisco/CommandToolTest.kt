@@ -6,12 +6,14 @@ import com.agentisco.agent.tool.InterruptTerminalTool
 import com.agentisco.agent.tool.RunCommandTool
 import com.agentisco.agent.tool.TerminalOutputTool
 import com.agentisco.agent.tool.TestTool
+import com.agentisco.agent.tool.WriteTerminalInputTool
 import com.agentisco.workspace.terminal.TerminalProcessManager
 import java.io.File
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -140,6 +142,50 @@ class CommandToolTest {
     }
     assertFalse(result.success)
     assertTrue(result.error!!.contains("Nothing is running"))
+  }
+
+  @Test
+  fun `input is only sent to a command that is really waiting for it`() {
+    val tm = unavailableTerminal()
+    val none = runBlocking {
+      WriteTerminalInputTool(tm).execute(args("""{"input": "y"}"""), contextFor(ws()))
+    }
+    assertFalse(none.success)
+    assertTrue(none.error!!.contains("No command is running"))
+    assertTrue(none.error!!.contains("run_command"))
+
+    val finished = runBlocking {
+      WriteTerminalInputTool(tm).execute(args("""{"input": "y", "runner_id": "runner-9"}"""), contextFor(ws()))
+    }
+    assertFalse(finished.success)
+    assertTrue(finished.error!!.contains("runner-9 has already finished"))
+    assertTrue(finished.error!!.contains("terminal_output"))
+  }
+
+  @Test
+  fun `an empty input is a valid answer because it presses Enter`() {
+    val tool = WriteTerminalInputTool(unavailableTerminal())
+    val blank = args("""{"input": ""}""")
+    assertEquals("", tool.parseAndValidate(blank.toString()).getString("input"))
+    assertThrows(Exception::class.java) { tool.parseAndValidate("{}") }
+  }
+
+  @Test
+  fun `writing a line to a command leaves its input open`() {
+    var closed = false
+    val sink = object : java.io.OutputStream() {
+      val bytes = java.io.ByteArrayOutputStream()
+      override fun write(b: Int) {
+        bytes.write(b)
+      }
+
+      override fun close() {
+        closed = true
+      }
+    }
+    assertTrue(TerminalProcessManager { null }.writeLine(sink, "yes"))
+    assertEquals("yes\n", String(sink.bytes.toByteArray()))
+    assertFalse("closing stdin would end the command instead of answering it", closed)
   }
 
   @Test

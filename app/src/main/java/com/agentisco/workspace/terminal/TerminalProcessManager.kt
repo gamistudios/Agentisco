@@ -181,19 +181,23 @@ class TerminalProcessManager(
     } else false
   }
 
+  /**
+   * Sends one line to a running command's stdin. The stream is deliberately left
+   * open: closing it means end-of-input, so a command waiting for a "y" would see
+   * EOF and quit instead of reading the answer.
+   */
   fun writeInput(sessionId: String, input: String): Boolean {
     val process = activeProcesses[sessionId] ?: return false
     if (!process.isAlive) return false
-    return try {
-      process.outputStream.use { stream ->
-        stream.write((input + "\n").toByteArray())
-        stream.flush()
-      }
-      true
-    } catch (_: Exception) {
-      false
-    }
+    return writeLine(process.outputStream, input)
   }
+
+  internal fun writeLine(stdin: java.io.OutputStream, input: String): Boolean =
+    runCatching {
+      stdin.write((input + "\n").toByteArray())
+      stdin.flush()
+      true
+    }.getOrDefault(false)
 
   fun isRunning(sessionId: String): Boolean {
     val p = activeProcesses[sessionId]
