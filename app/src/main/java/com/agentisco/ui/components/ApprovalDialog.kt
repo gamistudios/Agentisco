@@ -22,14 +22,33 @@ import androidx.compose.ui.window.Dialog
 import com.agentisco.agent.model.PendingApproval
 import com.agentisco.ui.theme.*
 
+/**
+ * A protected action awaiting the user's decision.
+ *
+ * The dialog is a *convenience* surface, not the decision itself: dismissing it
+ * (back button, tap-outside, swipe) does not refuse anything, it only closes the
+ * window. The request stays pending in the runtime and in the chat, where its
+ * card keeps the Allow / Deny (or answer) controls until the user decides.
+ */
+enum class ApprovalOutcome {
+  /** Decide now: run the command / accept the edit / send this answer. */
+  ALLOW,
+
+  /** Decide now: refuse. Only ever produced by an explicit button. */
+  DENY,
+
+  /** Close the window without deciding. The request stays live in the chat. */
+  DEFER
+}
+
 @Composable
 fun ApprovalDialog(
   approval: PendingApproval,
-  onResolve: (allowed: Boolean, answer: String?) -> Unit
+  onResolve: (outcome: ApprovalOutcome, answer: String?) -> Unit
 ) {
   val freeText = remember { mutableStateOf("") }
 
-  Dialog(onDismissRequest = { onResolve(false, null) }) {
+  Dialog(onDismissRequest = { onResolve(ApprovalOutcome.DEFER, null) }) {
     Surface(
       modifier = Modifier
         .fillMaxWidth()
@@ -113,7 +132,7 @@ fun ApprovalDialog(
           ) {
             approval.options.forEachIndexed { index, option ->
               Button(
-                onClick = { onResolve(true, option) },
+                onClick = { onResolve(ApprovalOutcome.ALLOW, option) },
                 modifier = Modifier
                   .fillMaxWidth()
                   .testTag("dialog_answer_option_$index"),
@@ -142,7 +161,7 @@ fun ApprovalDialog(
                 )
               )
               Button(
-                onClick = { onResolve(true, freeText.value.trim().ifBlank { null }) },
+                onClick = { onResolve(ApprovalOutcome.ALLOW, freeText.value.trim().ifBlank { null }) },
                 enabled = freeText.value.isNotBlank(),
                 modifier = Modifier
                   .fillMaxWidth()
@@ -154,12 +173,12 @@ fun ApprovalDialog(
             }
 
             TextButton(
-              onClick = { onResolve(false, null) },
+              onClick = { onResolve(ApprovalOutcome.DEFER, null) },
               modifier = Modifier
                 .fillMaxWidth()
                 .testTag("dialog_answer_skip")
             ) {
-              Text("Don't answer", color = TextMuted, fontSize = 12.sp)
+              Text("Close and decide later", color = TextMuted, fontSize = 12.sp)
             }
           }
 
@@ -168,7 +187,7 @@ fun ApprovalDialog(
             horizontalArrangement = Arrangement.spacedBy(10.dp)
           ) {
             OutlinedButton(
-              onClick = { onResolve(false, null) },
+              onClick = { onResolve(ApprovalOutcome.DENY, null) },
               modifier = Modifier
                 .weight(1f)
                 .testTag("dialog_cancel_destructive"),
@@ -179,7 +198,7 @@ fun ApprovalDialog(
             }
 
             Button(
-              onClick = { onResolve(true, null) },
+              onClick = { onResolve(ApprovalOutcome.ALLOW, null) },
               modifier = Modifier
                 .weight(1f)
                 .testTag("dialog_allow_destructive"),
@@ -194,7 +213,7 @@ fun ApprovalDialog(
             verticalArrangement = Arrangement.spacedBy(8.dp)
           ) {
             Button(
-              onClick = { onResolve(true, null) },
+              onClick = { onResolve(ApprovalOutcome.ALLOW, null) },
               modifier = Modifier
                 .fillMaxWidth()
                 .testTag("dialog_allow_once"),
@@ -204,7 +223,7 @@ fun ApprovalDialog(
             }
 
             OutlinedButton(
-              onClick = { onResolve(true, null) },
+              onClick = { onResolve(ApprovalOutcome.ALLOW, null) },
               modifier = Modifier
                 .fillMaxWidth()
                 .testTag("dialog_allow_session"),
@@ -215,12 +234,21 @@ fun ApprovalDialog(
             }
 
             TextButton(
-              onClick = { onResolve(false, null) },
+              onClick = { onResolve(ApprovalOutcome.DEFER, null) },
+              modifier = Modifier
+                .fillMaxWidth()
+                .testTag("dialog_decide_later")
+            ) {
+              Text("Decide later", color = TextMuted, fontSize = 12.sp)
+            }
+
+            TextButton(
+              onClick = { onResolve(ApprovalOutcome.DENY, null) },
               modifier = Modifier
                 .fillMaxWidth()
                 .testTag("dialog_deny")
             ) {
-              Text("Deny", color = TextMuted, fontSize = 12.sp)
+              Text("Deny", color = DangerRed, fontSize = 12.sp)
             }
           }
         }

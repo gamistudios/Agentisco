@@ -57,9 +57,9 @@ class CommandToolTest {
   }
 
   @Test
-  fun `a command that needs approval asks and a refusal is reported as a refusal`() {
+  fun `a refused command is reported to the model as a refusal`() {
     val ws = ws()
-    val log = ApprovalLog().apply { approve = false }
+    val log = ApprovalLog().apply { approve = false; terminated = false }
     val ctx = contextFor(ws, terminalCommands = PermissionMode.ALWAYS_ASK, log = log)
     val result = runBlocking {
       RunCommandTool(unavailableTerminal()).execute(args("""{"command": "npm publish"}"""), ctx)
@@ -71,9 +71,25 @@ class CommandToolTest {
   }
 
   @Test
+  fun `a stopped turn is never reported to the model as the user refusing`() {
+    val ws = ws()
+    val log = ApprovalLog().apply { approve = false; terminated = true }
+    val ctx = contextFor(ws, terminalCommands = PermissionMode.ALWAYS_ASK, log = log)
+    val result = runBlocking {
+      RunCommandTool(unavailableTerminal()).execute(args("""{"command": "npm publish"}"""), ctx)
+    }
+    assertFalse(result.success)
+    assertEquals(1, log.requests.size)
+    assertEquals("npm publish", log.requests.single().command)
+    // The command never ran, and the transcript must not claim the user refused.
+    assertFalse(result.error!!.contains("rejected"))
+    assertTrue(result.error!!.contains("stopped"))
+  }
+
+  @Test
   fun `a destructive command always reaches the user as destructive`() {
     val ws = ws()
-    val log = ApprovalLog().apply { approve = false }
+    val log = ApprovalLog().apply { approve = false; terminated = false }
     val ctx = contextFor(ws, terminalCommands = PermissionMode.ALLOW_ALL, log = log)
     val result = runBlocking {
       RunCommandTool(unavailableTerminal()).execute(args("""{"command": "rm -rf /"}"""), ctx)
@@ -226,7 +242,7 @@ class CommandToolTest {
   fun `build inherits the run_command permission policy instead of bypassing it`() {
     val ws = ws()
     File(ws.root, "package.json").writeText("""{"scripts": {"build": "tsc"}}""")
-    val log = ApprovalLog().apply { approve = false }
+    val log = ApprovalLog().apply { approve = false; terminated = false }
     val ctx = contextFor(ws, terminalCommands = PermissionMode.ALWAYS_ASK, log = log)
     val result = runBlocking { BuildTool(unavailableTerminal()).execute(args("""{"args": "--verbose"}"""), ctx) }
     assertFalse(result.success)

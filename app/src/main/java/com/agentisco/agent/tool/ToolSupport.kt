@@ -326,7 +326,7 @@ object PermissionGates {
           isDestructive = false
         )
       )
-      if (!ok) return ToolResult(false, error = "User rejected the file modification.")
+      if (!ok) return ToolResult(false, error = "File not modified: the turn was stopped before you decided.")
     }
     return null
   }
@@ -344,7 +344,7 @@ object PermissionGates {
         isDestructive = true
       )
     )
-    if (!ok) return ToolResult(false, error = "User rejected the file deletion.")
+    if (!ok) return ToolResult(false, error = "File not deleted: the turn was stopped before you decided.")
     return null
   }
 }

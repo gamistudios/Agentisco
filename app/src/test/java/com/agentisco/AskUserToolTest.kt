@@ -52,7 +52,7 @@ class AskUserToolTest {
 
   @Test
   fun `a dismissed question is not an answer and says not to ask again`() {
-    val log = ApprovalLog().apply { answer = null }
+    val log = ApprovalLog().apply { answer = null; terminated = false }
     val result = runBlocking {
       AskUserTool().execute(
         args("""{"question": "Which framework?", "options": ["Compose", "Views"]}"""),
@@ -63,6 +63,20 @@ class AskUserToolTest {
     assertTrue(result.output.contains("did not answer"))
     assertTrue(result.output.contains("do not ask the same question again"))
     assertEquals("false", result.metadata["answered"])
+  }
+
+  @Test
+  fun `a stopped turn is not an answer, just as a dismissal is not`() {
+    val log = ApprovalLog().apply { answer = null; terminated = true }
+    val result = runBlocking {
+      AskUserTool().execute(
+        args("""{"question": "Which framework?", "options": ["Compose", "Views"]}"""),
+        contextFor(ws(), log = log)
+      )
+    }
+    assertTrue(result.success)
+    assertEquals("false", result.metadata["answered"])
+    assertFalse(result.output.contains("User answered"))
   }
 
   @Test
@@ -77,7 +91,7 @@ class AskUserToolTest {
     val noWayToAnswer = runBlocking {
       AskUserTool().execute(
         args("""{"question": "Pick one", "allow_free_text": false}"""),
-        contextFor(ws, log = ApprovalLog().apply { answer = "ignored" })
+        contextFor(ws, log = ApprovalLog().apply { answer = "ignored"; terminated = false })
       )
     }
     assertFalse(noWayToAnswer.success)

@@ -48,7 +48,12 @@ sealed class AgentStreamEvent {
   data class ApprovalResolved(
     val approvalId: String,
     val allowed: Boolean,
-    val answer: String? = null
+    val answer: String? = null,
+    /**
+     * True when the turn was stopped while the request was open, so the user
+     * never actually chose. Recorded as a neutral "stalled" card, never a denial.
+     */
+    val terminated: Boolean = false
   ) : AgentStreamEvent()
 
   data class Completed(val summary: String) : AgentStreamEvent()

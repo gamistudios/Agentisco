@@ -68,7 +68,15 @@ data class ApprovalBlock(
   /** The agent asked the user to choose instead of approving a command. */
   val isQuestion: Boolean = false,
   /** What the user picked/typed, once answered. */
-  val answer: String = ""
+  val answer: String = "",
+  /**
+   * True when the request was never decided — the dialog was dismissed, or the
+   * turn was stopped. Deliberately distinct from a denial, so the card can stay
+   * actionable and never claim the user refused something.
+   */
+  val stalled: Boolean = false,
+  /** Choices the agent offered a question, so the card can render them inline. */
+  val options: List<String> = emptyList()
 ) : TurnBlock()
 
 /** Streamed model reasoning ("thinking"), rendered as a collapsible box. */
@@ -99,6 +107,21 @@ data class CompactionBlock(
   val tokensAfter: Int,
   val contextWindow: Int
 ) : TurnBlock()
+
+/**
+ * Decodes a stored question's choices, tolerating anything that isn't a clean
+ * array of strings: a card that cannot render its options must still show the
+ * question and the "reopen" affordance rather than crash the chat.
+ */
+private fun String?.toOptionList(): List<String> {
+  if (isNullOrBlank()) return emptyList()
+  return runCatching {
+    val array = org.json.JSONArray(this)
+    (0 until array.length()).mapNotNull { index ->
+      array.optString(index).takeIf { it.isNotBlank() }
+    }
+  }.getOrDefault(emptyList())
+}
 
 fun MessageWithBlocks.toChatItem(): ChatItem {
   val message = message
@@ -133,11 +156,15 @@ private fun AgentBlockEntity.toTurnBlock(): TurnBlock? = when (kind) {
     title = summary,
     impact = detail,
     resolved = status != "pending",
-    allowed = status != "pending" && status != "denied",
+    allowed = status == "allowed",
     isQuestion = kind == "question",
-    // A question stores the user's pick in `detail` (its impact text is the
-    // question itself, which already lives in `argsJson`).
-    answer = if (kind == "question" && status != "pending") detail else ""
+    // Only an actual answer lives in `detail`; a declined/stalled question still
+    // has the question text there, which must never render as an answer.
+    answer = if (kind == "question" && status == "allowed") detail else "",
+    // Never decided: the dialog was dismissed, or the turn was stopped. Kept
+    // apart from `denied` so the UI never implies the user refused.
+    stalled = status == "stalled",
+    options = optionsJson.toOptionList()
   )
   "tool" -> ActionBlock(
     id = uuid,

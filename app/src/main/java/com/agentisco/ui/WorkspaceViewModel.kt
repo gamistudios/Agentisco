@@ -74,6 +74,8 @@ class WorkspaceViewModel(
   val agentSteps: StateFlow<List<AgentTaskStep>> = repository.agentSteps
   val toolExecutions: StateFlow<List<ToolExecution>> = repository.toolExecutions
   val pendingApproval: StateFlow<PendingApproval?> = repository.pendingApproval
+  /** True when a request was parked in the chat instead of answered in the dialog. */
+  val approvalDeferred: StateFlow<Boolean> = repository.approvalDeferred
 
   val fileDiffs: StateFlow<List<FileDiff>> = repository.fileDiffs
   val stagedFiles: StateFlow<Set<String>> = repository.stagedFiles
@@ -447,13 +449,21 @@ class WorkspaceViewModel(
             kind = if (event.isQuestion) "question" else "approval",
             name = event.approvalId,
             argsJson = event.command, status = "pending", summary = event.title,
-            detail = event.impact, exitCode = null, createdAt = System.currentTimeMillis()
+            detail = event.impact, exitCode = null, createdAt = System.currentTimeMillis(),
+            // Persisted so a deferred question can still be answered from its card.
+            optionsJson = if (event.options.isEmpty()) null else event.options.toJsonArray()
           )
         )
       }
       is AgentStreamEvent.ApprovalResolved -> {
         approvalBlocks.remove(event.approvalId)?.let { uuid ->
-          val status = if (event.allowed) "allowed" else "denied"
+          // A stopped turn is not a refusal: "stalled" keeps the user from being
+          // recorded as having denied something they never chose.
+          val status = when {
+            event.terminated -> "stalled"
+            event.allowed -> "allowed"
+            else -> "denied"
+          }
           val answer = event.answer
           if (answer.isNullOrBlank()) chatStore.updateBlockStatus(uuid, status)
           else chatStore.updateBlockAnswer(uuid, status, answer)
@@ -622,7 +632,8 @@ class WorkspaceViewModel(
     _isAgentPaused.value = true
     repository.cancelAgentGeneration()
     if (repository.pendingApproval.value != null) {
-      repository.resolveApproval(false)
+      // Never a denial: the user stopped the turn, they didn't refuse the action.
+      repository.resolveApproval(allowed = false, termination = true)
     }
     repository.interruptTerminal()
     agentJob?.cancel()
@@ -636,7 +647,8 @@ class WorkspaceViewModel(
     // then cancel the coroutine driving the loop.
     repository.cancelAgentGeneration()
     if (repository.pendingApproval.value != null) {
-      repository.resolveApproval(false)
+      // Never a denial: the user stopped the turn, they didn't refuse the action.
+      repository.resolveApproval(allowed = false, termination = true)
     }
     repository.interruptTerminal()
     agentJob?.cancel()
@@ -1285,8 +1297,29 @@ class WorkspaceViewModel(
     repository.interruptTerminal(sessionId)
   }
 
-  fun resolveApproval(allowed: Boolean, answer: String? = null) {
-    repository.resolveApproval(allowed, answer)
+  fun resolveApproval(allowed: Boolean, answer: String? = null, termination: Boolean = false) {
+    repository.resolveApproval(allowed, answer, termination)
+  }
+
+  /** Answers an agent question with a chosen option or typed text. */
+  fun answerQuestion(answer: String?) {
+    repository.resolveApproval(allowed = true, answer = answer)
+  }
+
+  /**
+   * Closes the approval dialog without deciding anything.
+   *
+   * The request stays pending: the tool remains suspended and its chat card keeps
+   * the controls, so the user can decide later instead of being forced into a
+   * denial by a stray back-button press.
+   */
+  fun deferApproval() {
+    repository.deferApproval()
+  }
+
+  /** Re-opens the dialog for a request the user parked in the chat. */
+  fun showApprovalDialog() {
+    repository.showApprovalDialog()
   }
 
   /** SIGKILLs a specific running tool call (process kill, task keeps going). */
@@ -1437,4 +1470,11 @@ class WorkspaceViewModel(
   fun toggleDevServer() {
     repository.toggleDevServer()
   }
+}
+
+/** Encodes a question's choices for the block's `optionsJson` column. */
+private fun List<String>.toJsonArray(): String {
+  val array = org.json.JSONArray()
+  forEach { array.put(it) }
+  return array.toString()
 }

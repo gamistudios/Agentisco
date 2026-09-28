@@ -214,13 +214,22 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
   /**
    * What the user answered: permission granted or refused, plus the free-text or
    * chosen option for a question.
+   *
+   * [termination] marks a decision the user never made: the turn was stopped
+   * (Stop/Pause) while the request was open, so the tool can no longer run. It
+   * is recorded as "stalled" rather than "denied" because refusing would put a
+   * choice in the user's mouth that they did not make.
    */
-  data class UserDecision(val allowed: Boolean, val answer: String? = null)
+  data class UserDecision(
+    val allowed: Boolean,
+    val answer: String? = null,
+    val termination: Boolean = false
+  )
 
-  fun resolvePendingApproval(allowed: Boolean, answer: String? = null) {
+  fun resolvePendingApproval(allowed: Boolean, answer: String? = null, termination: Boolean = false) {
     val deferred = pendingApprovalDeferred
     pendingApprovalDeferred = null
-    deferred?.complete(UserDecision(allowed, answer))
+    deferred?.complete(UserDecision(allowed, answer, termination))
   }
 
   /** SIGKILLs a specific running tool call; the loop then awaits user guidance. */
@@ -909,12 +918,18 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
     toolCallId = callId,
     permissions = { permissions }, // Dynamic: reads current permissions at tool execution time
     terminalSession = terminalSession,
-    requestApproval = { approval -> awaitUserDecision(approval, onRequestApproval, onEvent).allowed },
+    requestApproval = { approval ->
+      // Only a real, user-made decision counts. A terminated request is the Stop
+      // button ending the turn — the tool reports it as never having run rather
+      // than letting the transcript claim the user refused.
+      val decision = awaitUserDecision(approval, onRequestApproval, onEvent)
+      !decision.termination && decision.allowed
+    },
     askUser = { approval ->
       val decision = awaitUserDecision(approval, onRequestApproval, onEvent)
-      // A refusal (or a dismissed dialog) is not an answer: the tool must be able
-      // to tell "the user said no" from "the user chose this".
-      if (!decision.allowed) null else decision.answer
+      // Only a genuine answer is an answer: a refusal, a dismissal, and a
+      // stopped turn all mean "the user did not pick one".
+      if (decision.termination || !decision.allowed) null else decision.answer
     },
     activeSessions = { listOf(terminalSession) }
   )
@@ -950,7 +965,14 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
       throw e
     }
     pendingApprovalDeferred = null
-    onEvent(AgentStreamEvent.ApprovalResolved(approval.id, decision.allowed, decision.answer))
+    onEvent(
+      AgentStreamEvent.ApprovalResolved(
+        approvalId = approval.id,
+        allowed = decision.allowed,
+        answer = decision.answer,
+        terminated = decision.termination
+      )
+    )
     decision
   }
 

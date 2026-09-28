@@ -565,6 +565,17 @@ class WorkspaceRepository(
   private val _pendingApproval = MutableStateFlow<PendingApproval?>(null)
   val pendingApproval: StateFlow<PendingApproval?> = _pendingApproval.asStateFlow()
 
+  /**
+   * True while a request is parked in the chat rather than waiting in a dialog.
+   *
+   * Deferring is not deciding: the runtime keeps its suspended tool call and the
+   * chat card keeps its controls, but the modal is closed until the user asks
+   * for it again from the card. Distinct from [pendingApproval] being null,
+   * which means the request is genuinely resolved.
+   */
+  private val _approvalDeferred = MutableStateFlow(false)
+  val approvalDeferred: StateFlow<Boolean> = _approvalDeferred.asStateFlow()
+
   // Diffs
   private val _fileDiffs = MutableStateFlow<List<FileDiff>>(emptyList())
   val fileDiffs: StateFlow<List<FileDiff>> = _fileDiffs.asStateFlow()
@@ -2475,12 +2486,33 @@ class WorkspaceRepository(
   }
 
   fun requestApproval(approval: PendingApproval) {
+    _approvalDeferred.value = false
     _pendingApproval.value = approval
   }
 
-  fun resolveApproval(allowed: Boolean, answer: String? = null) {
+  /**
+   * Handles the user closing the dialog without deciding.
+   *
+   * The request survives: the tool stays suspended and its chat card keeps the
+   * Allow / Deny controls. Only the modal goes away.
+   */
+  fun deferApproval() {
+    _approvalDeferred.value = true
+  }
+
+  /** Re-opens the modal for a request the user parked in the chat. */
+  fun showApprovalDialog() {
+    _approvalDeferred.value = false
+  }
+
+  /**
+   * Applies a real decision. [termination] marks a request the turn never got an
+   * answer to because the user stopped it — recorded as neutral, not as a denial.
+   */
+  fun resolveApproval(allowed: Boolean, answer: String? = null, termination: Boolean = false) {
     _pendingApproval.value = null
-    agentRuntime.resolvePendingApproval(allowed, answer)
+    _approvalDeferred.value = false
+    agentRuntime.resolvePendingApproval(allowed, answer, termination)
   }
 
   // Run Real Agent Task Workflow. `sessionId` ties the run to a persisted chat
@@ -2604,7 +2636,7 @@ class WorkspaceRepository(
         resume = resume,
         compactPolicy = _compactSettings.value.toPolicyConfig(model.contextWindow, model.maxOutputTokens),
         onTokenUsage = { usage -> publishContextUsage(usage) },
-        onRequestApproval = { approval -> _pendingApproval.value = approval },
+        onRequestApproval = { approval -> requestApproval(approval) },
       onEvent = { event ->
         _agentEvents.tryEmit(event)
         when (event) {
@@ -2632,6 +2664,7 @@ class WorkspaceRepository(
       // Always leave the "Working" state — on cancel, failure, or completion.
       _isAgentWorking.value = false
       _pendingApproval.value = null
+      _approvalDeferred.value = false
     }
     refreshFiles()
 

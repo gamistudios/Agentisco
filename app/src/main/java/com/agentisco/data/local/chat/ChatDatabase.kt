@@ -84,13 +84,20 @@ data class AgentBlockEntity(
   @PrimaryKey(autoGenerate = true) val rowId: Long = 0,
   val uuid: String,
   val messageUuid: String,
-  /** text | tool | approval */
+  /** text | tool | approval | question */
   val kind: String,
   /** tool name, "approval" for approvals, unused for text. */
   val name: String,
   /** tool args JSON, or the command for approvals. */
   val argsJson: String,
-  /** text: streaming | done. tool: running | success | failed. approval: pending | allowed | denied */
+  /**
+   * text: streaming | done. tool: running | success | failed.
+   * approval/question: pending | allowed | denied | stalled.
+   *
+   * `pending` is a live request still awaiting a decision; `stalled` is one the
+   * user never actually decided (dismissed the dialog, or stopped the turn) and
+   * must never be reported to the model as a refusal.
+   */
   val status: String,
   /** tool summary, approval title. */
   val summary: String,
@@ -99,7 +106,13 @@ data class AgentBlockEntity(
   val exitCode: Int?,
   val createdAt: Long,
   /** The model's tool-call id (null for legacy rows) — used for per-call cancellation. */
-  val callId: String? = null
+  val callId: String? = null,
+  /**
+   * JSON array of the choices a question offered, so its card can render the
+   * options inline after the dialog is dismissed or the app restarts. Null for
+   * approvals and for questions from before this column existed.
+   */
+  val optionsJson: String? = null
 )
 
 /**
@@ -235,6 +248,18 @@ interface ChatDao {
   @Query("UPDATE agent_blocks SET status = 'failed', summary = 'Interrupted' WHERE status = 'running'")
   suspend fun failRunningBlocks()
 
+  /**
+   * Cold-start recovery for requests that were still open when the process died.
+   *
+   * A `pending` approval or question cannot be resumed as-is: the runtime's
+   * suspended tool call is gone. Marking it `stalled` keeps the record honest —
+   * the user never decided — instead of reporting it as either allowed or
+   * denied. The transcript therefore carries the same neutral fact the UI shows
+   * for a request parked in the chat.
+   */
+  @Query("UPDATE agent_blocks SET status = 'stalled' WHERE kind IN ('approval', 'question') AND status = 'pending'")
+  suspend fun stallOpenApprovals()
+
   @Query("SELECT rowId FROM agent_messages WHERE uuid = :uuid LIMIT 1")
   suspend fun messageRowId(uuid: String): Long?
 
@@ -276,7 +301,7 @@ interface ChatDao {
     AgentBlockEntity::class,
     AgentCompactionEntity::class
   ],
-  version = 6,
+  version = 7,
   exportSchema = false
 )
 abstract class ChatDatabase : RoomDatabase() {
@@ -379,6 +404,18 @@ abstract class ChatDatabase : RoomDatabase() {
           "CREATE INDEX IF NOT EXISTS `index_agent_compactions_sessionId_createdAt` " +
             "ON `agent_compactions` (`sessionId`, `createdAt`)"
         )
+      }
+    }
+
+    /**
+     * Stores the choices a question offered, so a deferred question can still be
+     * answered from its chat card. A pure addition — existing rows get NULL and
+     * keep falling back to the dialog, exactly as they do today.
+     */
+    val MIGRATION_6_7 = object : androidx.room.migration.Migration(6, 7) {
+      override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+        if (hasColumn(db, "agent_blocks", "optionsJson")) return
+        db.execSQL("ALTER TABLE agent_blocks ADD COLUMN optionsJson TEXT")
       }
     }
   }

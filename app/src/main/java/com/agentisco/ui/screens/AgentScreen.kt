@@ -266,6 +266,8 @@ fun AgentScreen(
                 showToolJson = chatDisplay.showToolJson,
                 onAllow = { viewModel.resolveApproval(true) },
                 onDeny = { viewModel.resolveApproval(false) },
+                onAnswer = { _, answer -> viewModel.answerQuestion(answer) },
+                onReopen = { viewModel.showApprovalDialog() },
                 onRetry = { viewModel.retryAgentTurn(item.id) },
                 onCancelTool = { viewModel.cancelToolCall(it) },
                 onRetryTool = { viewModel.resolveToolCancellation(it, retry = true) },
@@ -573,8 +575,10 @@ private fun UserBubble(item: UserMessageItem, onEdit: (String) -> Unit = {}) {
 private fun AgentTurnCard(
   item: AgentTurnItem,
   showToolJson: Boolean,
-  onAllow: () -> Unit,
-  onDeny: () -> Unit,
+  onAllow: (String) -> Unit,
+  onDeny: (String) -> Unit,
+  onAnswer: (String, String?) -> Unit,
+  onReopen: (String) -> Unit,
   onRetry: () -> Unit,
   onCancelTool: (String) -> Unit,
   onRetryTool: (String) -> Unit,
@@ -715,7 +719,13 @@ private fun AgentTurnCard(
           onRetryTool = { onRetryTool(block.callId) },
           onContinueTool = { onContinueTool(block.callId) }
         )
-        is ApprovalBlock -> ApprovalCard(block, onAllow, onDeny)
+        is ApprovalBlock -> ApprovalCard(
+          item = block,
+          onAllow = { onAllow(block.approvalId) },
+          onDeny = { onDeny(block.approvalId) },
+          onAnswer = { answer -> onAnswer(block.approvalId, answer) },
+          onReopen = { onReopen(block.approvalId) }
+        )
         is ErrorBlock -> ErrorCard(block, showRetry = item.status == TurnStatus.FAILED, onRetry = onRetry)
         is CompactionBlock -> CompactionCard(block)
       }
@@ -1123,7 +1133,13 @@ private fun ToolCallRow(
 }
 
 @Composable
-private fun ApprovalCard(item: ApprovalBlock, onAllow: () -> Unit, onDeny: () -> Unit) {
+private fun ApprovalCard(
+  item: ApprovalBlock,
+  onAllow: () -> Unit,
+  onDeny: () -> Unit,
+  onAnswer: (String) -> Unit,
+  onReopen: () -> Unit
+) {
   val accent = if (item.isQuestion) ElectricBlueGlow else WarningAmber
   Column(
     modifier = Modifier
@@ -1151,45 +1167,84 @@ private fun ApprovalCard(item: ApprovalBlock, onAllow: () -> Unit, onDeny: () ->
       Text(item.impact, color = TextSecondary, fontSize = 11.sp, lineHeight = 15.sp)
     }
     Spacer(modifier = Modifier.height(8.dp))
+
+    // Unanswered state: the request is still live, so the controls stay here.
+    // Dismissing the dialog parks the request — it never answers it for you.
+    val unanswered = !item.resolved
+
     when {
-      item.resolved && item.answer.isNotBlank() -> Text(
+      unanswered -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+          if (item.isQuestion) "Waiting for your answer — choose below."
+          else "Waiting for your decision — nothing has run yet.",
+          color = TextMuted,
+          fontSize = 11.sp
+        )
+        if (item.isQuestion) {
+          // The dialog is only a shortcut; the card is the durable surface, so
+          // it has to carry the same choices for a deferred question.
+          item.options.forEachIndexed { index, option ->
+            Button(
+              onClick = { onAnswer(option) },
+              colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
+              contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
+              modifier = Modifier
+                .fillMaxWidth()
+                .height(30.dp)
+                .testTag("btn_card_answer_$index")
+            ) { Text(option, color = Color.White, fontSize = 11.sp) }
+          }
+          TextButton(
+            onClick = onReopen,
+            modifier = Modifier.testTag("btn_reopen_dialog")
+          ) { Text("Answer in the dialog…", color = TextSecondary, fontSize = 11.sp) }
+        } else {
+          Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+              onClick = onAllow,
+              colors = ButtonDefaults.buttonColors(containerColor = TerminalGreen),
+              contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+              modifier = Modifier.height(30.dp).testTag("btn_allow_tool")
+            ) { Text("Allow", color = Color.White, fontSize = 11.sp) }
+            Button(
+              onClick = onDeny,
+              colors = ButtonDefaults.buttonColors(containerColor = DangerRed),
+              contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+              modifier = Modifier.height(30.dp).testTag("btn_deny_tool")
+            ) { Text("Deny", color = Color.White, fontSize = 11.sp) }
+          }
+          TextButton(
+            onClick = onReopen,
+            modifier = Modifier.testTag("btn_reopen_dialog")
+          ) { Text("Open the dialog…", color = TextSecondary, fontSize = 11.sp) }
+        }
+      }
+
+      item.answer.isNotBlank() -> Text(
         "Answered: ${item.answer}",
         color = TerminalGreen,
         fontSize = 11.sp,
         fontWeight = FontWeight.SemiBold
       )
-      item.resolved && item.isQuestion -> Text(
+      // Stopped while unanswered: the user never chose, so this is not a denial.
+      item.stalled -> Text(
+        "Turn stopped before you decided — nothing was run.",
+        color = TextMuted,
+        fontSize = 11.sp,
+        fontWeight = FontWeight.SemiBold
+      )
+      item.isQuestion -> Text(
         "Not answered",
         color = TextMuted,
         fontSize = 11.sp,
         fontWeight = FontWeight.SemiBold
       )
-      item.resolved -> Text(
+      else -> Text(
         if (item.allowed) "✓ Allowed" else "✗ Denied",
         color = if (item.allowed) TerminalGreen else DangerRed,
         fontSize = 11.sp,
         fontWeight = FontWeight.SemiBold
       )
-      // A question is answered in the dialog the agent opened, not here.
-      item.isQuestion -> Text(
-        "Pick an answer in the dialog above.",
-        color = TextMuted,
-        fontSize = 11.sp
-      )
-      else -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Button(
-          onClick = onAllow,
-          colors = ButtonDefaults.buttonColors(containerColor = TerminalGreen),
-          contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
-          modifier = Modifier.height(30.dp).testTag("btn_allow_tool")
-        ) { Text("Allow", color = Color.White, fontSize = 11.sp) }
-        Button(
-          onClick = onDeny,
-          colors = ButtonDefaults.buttonColors(containerColor = DangerRed),
-          contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
-          modifier = Modifier.height(30.dp).testTag("btn_deny_tool")
-        ) { Text("Deny", color = Color.White, fontSize = 11.sp) }
-      }
     }
   }
 }

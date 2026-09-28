@@ -59,6 +59,8 @@ internal class ApprovalLog {
   val requests = mutableListOf<PendingApproval>()
   var approve = true
   var answer: String? = null
+  /** True when the turn was stopped before the user decided. */
+  var terminated = false
 
   fun last(): PendingApproval = requests.last()
 }
@@ -81,12 +83,12 @@ internal fun contextFor(
   terminalSession = TerminalSession(id = "term-1", name = "main", currentDir = workspace.root.absolutePath),
   requestApproval = { approval ->
     log.requests.add(approval)
-    log.approve
+    !log.terminated && log.approve
   },
   activeSessions = { emptyList() },
   askUser = { approval ->
     log.requests.add(approval)
-    log.answer
+    if (log.terminated) null else log.answer
   }
 )
 

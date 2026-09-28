@@ -77,6 +77,7 @@ fun AgentIDEApp(
   val providers by viewModel.providers.collectAsState()
   val isAgentWorking by viewModel.isAgentWorking.collectAsState()
   val pendingApproval by viewModel.pendingApproval.collectAsState()
+  val approvalDeferred by viewModel.approvalDeferred.collectAsState()
   val isCommandPaletteOpen by viewModel.isCommandPaletteOpen.collectAsState()
   val isModelSheetOpen by viewModel.isModelSheetOpen.collectAsState()
 
@@ -242,11 +243,19 @@ fun AgentIDEApp(
       }
     }
 
-    // Modal Overlays
-    pendingApproval?.let { approval ->
+    // Modal overlays. The approval dialog is a shortcut to the decision, not the
+    // decision itself: while a request sits deferred in the chat it stays closed,
+    // and the user can re-open it from the request's card.
+    if (!approvalDeferred) pendingApproval?.let { approval ->
       ApprovalDialog(
         approval = approval,
-        onResolve = { allowed, answer -> viewModel.resolveApproval(allowed, answer) }
+        onResolve = { outcome, answer ->
+          when (outcome) {
+            ApprovalOutcome.ALLOW -> viewModel.resolveApproval(true, answer)
+            ApprovalOutcome.DENY -> viewModel.resolveApproval(false, answer)
+            ApprovalOutcome.DEFER -> viewModel.deferApproval()
+          }
+        }
       )
     }
 

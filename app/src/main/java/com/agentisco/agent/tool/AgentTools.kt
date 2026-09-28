@@ -485,7 +485,7 @@ class RunCommandTool(private val tm: TerminalProcessManager) : AgentTool {
           command = command, title = guard.title, impactDescription = guard.reason, isDestructive = true
         )
       )
-      if (!ok) return ToolResult(false, error = "User rejected destructive command: $command", exitCode = -1)
+      if (!ok) return ToolResult(false, error = "Command not executed: the user stopped the turn before deciding on $command", exitCode = -1)
     } else {
       val needsApproval = when (ctx.permissions().terminalCommands) {
         PermissionMode.ALWAYS_ASK -> true
@@ -502,7 +502,7 @@ class RunCommandTool(private val tm: TerminalProcessManager) : AgentTool {
             isDestructive = false
           )
         )
-        if (!ok) return ToolResult(false, error = "User rejected command execution.", exitCode = -1)
+        if (!ok) return ToolResult(false, error = "Command not executed: the turn was stopped before you decided.", exitCode = -1)
       }
     }
 

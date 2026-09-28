@@ -72,7 +72,8 @@ class AgentChatStore(context: Context?) {
         ChatDatabase.MIGRATION_2_3,
         ChatDatabase.MIGRATION_3_4,
         ChatDatabase.MIGRATION_4_5,
-        ChatDatabase.MIGRATION_5_6
+        ChatDatabase.MIGRATION_5_6,
+        ChatDatabase.MIGRATION_6_7
       )
       .build()
   }
@@ -139,6 +140,7 @@ class AgentChatStore(context: Context?) {
     it.interruptRunningSessions()
     it.interruptRunningTurns()
     it.failRunningBlocks()
+    it.stallOpenApprovals()
   }
 
   /**
@@ -250,20 +252,45 @@ class AgentChatStore(context: Context?) {
             "question" -> flushText()
             "approval" -> {
               flushText()
-              // Only denied approvals need explaining to the model.
-              if (b.status == "denied") {
-                val callId = "call_" + b.uuid.take(12)
-                val command = b.argsJson
-                val escaped = command.replace("\\", "\\\\").replace("\"", "\\\"")
-                result.add(
-                  ChatHistoryMessage(
-                    "assistant_tool_call", "", toolName = "run_command",
-                    toolArgs = "{\"command\": \"$escaped\"}", toolCallId = callId, rowId = m.rowId
+              when (b.status) {
+                "denied" -> {
+                  // Only a refusal needs explaining to the model — and only a
+                  // refusal, so the transcript can never claim the user vetoed
+                  // something they never decided about.
+                  val callId = "call_" + b.uuid.take(12)
+                  val command = b.argsJson
+                  val escaped = command.replace("\\", "\\\\").replace("\"", "\\\"")
+                  result.add(
+                    ChatHistoryMessage(
+                      "assistant_tool_call", "", toolName = "run_command",
+                      toolArgs = "{\"command\": \"$escaped\"}", toolCallId = callId, rowId = m.rowId
+                    )
                   )
-                )
-                result.add(
-                  ChatHistoryMessage("tool", "User denied permission to run: $command", toolName = "run_command", toolCallId = callId, rowId = m.rowId)
-                )
+                  result.add(
+                    ChatHistoryMessage("tool", "User denied permission to run: $command", toolName = "run_command", toolCallId = callId, rowId = m.rowId)
+                  )
+                }
+                "stalled" -> {
+                  // A parked request: the tool never ran, so nothing is replayed
+                  // as its result.
+                  val callId = "call_" + b.uuid.take(12)
+                  val command = b.argsJson
+                  val escaped = command.replace("\\", "\\\\").replace("\"", "\\\"")
+                  result.add(
+                    ChatHistoryMessage(
+                      "assistant_tool_call", "", toolName = "run_command",
+                      toolArgs = "{\"command\": \"$escaped\"}", toolCallId = callId, rowId = m.rowId
+                    )
+                  )
+                  result.add(
+                    ChatHistoryMessage(
+                      "tool",
+                      "The user stopped the turn before deciding on: $command. " +
+                        "It was never run. Ask again if the task still needs it.",
+                      toolName = "run_command", toolCallId = callId, rowId = m.rowId
+                    )
+                  )
+                }
               }
             }
             // "error" blocks are UI diagnostics; the failing request itself is retried.

@@ -478,7 +478,7 @@ class WorkspaceFileToolTest {
           id = "t", command = "delete $path", title = "delete", impactDescription = "delete $path", isDestructive = true
         )
       )
-      if (ok) null else com.agentisco.agent.tool.ToolResult(false, error = "User rejected the file deletion.")
+      if (ok) null else com.agentisco.agent.tool.ToolResult(false, error = "The user did not allow the deletion.")
     }
     val result = runBlocking { DeleteFileTool(gate).execute(args("""{"path": "gone.txt"}"""), ctx) }
     assertFalse(result.success)
