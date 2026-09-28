@@ -184,7 +184,10 @@ class ProviderConfigStoreTest {
     // key reloaded as "No API key" forever.
     val first = newStore()
     first.upsertProvider(
-      AIProvider("p-hf", "Hugging Face", "https://router.huggingface.co/v1", LLMProtocol.OPENAI_CHAT_COMPLETIONS),
+      AIProvider(
+        "p-hf", "Hugging Face", "https://router.huggingface.co/v1",
+        LLMProtocol.OPENAI_CHAT_COMPLETIONS, hasApiKey = true
+      ),
       "hf-key"
     )
 
@@ -194,7 +197,7 @@ class ProviderConfigStoreTest {
     assertEquals("hf-key", second.getApiKey("p-hf"))
 
     // Clearing the key has to flip it back, so the label tracks the truth.
-    second.upsertProvider(reloaded.copy(hasApiKey = true), "")
+    second.upsertProvider(reloaded.copy(hasApiKey = false), "")
     assertFalse(newStore().getProviders().single().hasApiKey)
   }
 
@@ -206,7 +209,10 @@ class ProviderConfigStoreTest {
     val dir = context.getDir("agentisco", Context.MODE_PRIVATE)
 
     newStore().upsertProvider(
-      AIProvider("p-hf", "Hugging Face", "https://router.huggingface.co/v1", LLMProtocol.OPENAI_CHAT_COMPLETIONS),
+      AIProvider(
+        "p-hf", "Hugging Face", "https://router.huggingface.co/v1",
+        LLMProtocol.OPENAI_CHAT_COMPLETIONS, hasApiKey = true
+      ),
       "hf-key"
     )
     // Rewrite the config the pre-fix way: every field except hasApiKey.
@@ -228,7 +234,10 @@ class ProviderConfigStoreTest {
   fun `hasApiKey flag stays out of the persisted provider file`() {
     // The flag is persisted, but the secret itself must never be.
     newStore().upsertProvider(
-      AIProvider("p-hf", "Hugging Face", "https://router.huggingface.co/v1", LLMProtocol.OPENAI_CHAT_COMPLETIONS),
+      AIProvider(
+        "p-hf", "Hugging Face", "https://router.huggingface.co/v1",
+        LLMProtocol.OPENAI_CHAT_COMPLETIONS, hasApiKey = true
+      ),
       "hf-secret-value"
     )
 

@@ -338,8 +338,10 @@ class ExampleRobolectricTest {
     File(dir, "providers.json").delete()
     File(dir, "credentials.json").delete()
 
+    // Store carries the real context; the repository keeps its null context so
+    // the test never touches Room or the proot rootfs (see other tests here).
     val store = com.agentisco.data.local.ProviderConfigStore(context)
-    val repo = WorkspaceRepository(context = context, providerStore = store)
+    val repo = WorkspaceRepository(providerStore = store)
 
     repo.saveProvider("KeyProvider", "https://keyed/v1", LLMProtocol.OPENAI_CHAT_COMPLETIONS, "sk-live-key")
     // A provider saved with a key reads the key back through the repository.
