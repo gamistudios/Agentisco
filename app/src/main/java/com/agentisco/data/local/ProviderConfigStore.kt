@@ -48,6 +48,17 @@ class ProviderConfigStore(private val context: Context? = null) {
     selectedIdCache = null
     credentialsCache.clear()
 
+    // Credentials load first: the provider fallback for hasApiKey (older
+    // installs whose providers.json carries no flag) reads this map while the
+    // config is being parsed below.
+    val creds = credentialsFile?.takeIf { it.exists() }?.readText()
+    if (creds != null) {
+      runCatching {
+        val obj = JSONObject(creds)
+        for (key in obj.keys()) credentialsCache[key] = obj.getString(key)
+      }
+    }
+
     val cfg = configFile?.takeIf { it.exists() }?.readText()
     if (cfg != null) {
       runCatching {
@@ -56,14 +67,6 @@ class ProviderConfigStore(private val context: Context? = null) {
         defaultTaskModelIdCache = obj.optString("defaultTaskModelId").takeIf { it.isNotEmpty() }
         providersCache = obj.getJSONArray("providers").toProviderList()
         modelsCache = obj.getJSONArray("models").toModelList()
-      }
-    }
-
-    val creds = credentialsFile?.takeIf { it.exists() }?.readText()
-    if (creds != null) {
-      runCatching {
-        val obj = JSONObject(creds)
-        for (key in obj.keys()) credentialsCache[key] = obj.getString(key)
       }
     }
   }
