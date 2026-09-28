@@ -12,59 +12,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
-
-fun AgentBlockEntity.toTurnBlock(): TurnBlock? = when (kind) {
-  "text" -> TextBlock(uuid, summary, status == "streaming")
-  "reasoning" -> ReasoningBlock(uuid, summary, status == "streaming")
-  "approval", "question" -> ApprovalBlock(
-    id = uuid,
-    approvalId = name, // approval runtime id stored in `name`
-    command = argsJson,
-    title = summary,
-    impact = detail,
-    resolved = status != "pending",
-    allowed = status == "allowed",
-    isQuestion = kind == "question",
-    // Only an actual answer lives in `detail`; a declined/stalled question still
-    // has the question text there, which must never render as an answer.
-    answer = if (kind == "question" && status == "allowed") detail else "",
-    // Never decided: the dialog was dismissed, or the turn was stopped. Kept
-    // apart from `denied` so the UI never implies the user refused.
-    stalled = status == "stalled",
-    // The reason for a refusal lives in `detail`, which held the impact text
-    // while the request was still pending — so a card that was never decided
-    // keeps showing what the action would have done, and a denial shows the
-    // user's own words instead.
-    rationale = if (status == "denied") detail else "",
-    options = emptyList()
-  )
-  "tool" -> ActionBlock(
-    id = uuid,
-    name = name,
-    argsJson = argsJson,
-    running = status == "running",
-    success = when (status) {
-      "success" -> true
-      "failed" -> false
-      else -> null
-    },
-    summary = summary,
-    detail = detail,
-    exitCode = exitCode,
-    callId = callId.orEmpty(),
-    cancelled = false
-  )
-  "error" -> ErrorBlock(uuid, summary)
-  "compaction" -> CompactionBlock(
-    id = uuid,
-    summary = summary,
-    summaryText = detail,
-    tokensBefore = 0,
-    tokensAfter = 0,
-    contextWindow = 0
-  )
-  else -> null
-}
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
@@ -229,6 +176,59 @@ class ChatStoreTurnVisibilityTest {
    * A denial the user explained must be read back as that explanation: the model
    * acts on the reason, so a round trip through SQLite cannot drop or mangle it.
    */
+  fun AgentBlockEntity.toTurnBlock(): TurnBlock? = when (kind) {
+    "text" -> TextBlock(uuid, summary, status == "streaming")
+    "reasoning" -> ReasoningBlock(uuid, summary, status == "streaming")
+    "approval", "question" -> ApprovalBlock(
+      id = uuid,
+      approvalId = name, // approval runtime id stored in `name`
+      command = argsJson,
+      title = summary,
+      impact = detail,
+      resolved = status != "pending",
+      allowed = status == "allowed",
+      isQuestion = kind == "question",
+      // Only an actual answer lives in `detail`; a declined/stalled question still
+      // has the question text there, which must never render as an answer.
+      answer = if (kind == "question" && status == "allowed") detail else "",
+      // Never decided: the dialog was dismissed, or the turn was stopped. Kept
+      // apart from `denied` so the UI never implies the user refused.
+      stalled = status == "stalled",
+      // The reason for a refusal lives in `detail`, which held the impact text
+      // while the request was still pending — so a card that was never decided
+      // keeps showing what the action would have done, and a denial shows the
+      // user's own words instead.
+      rationale = if (status == "denied") detail else "",
+      options = emptyList()
+    )
+    "tool" -> ActionBlock(
+      id = uuid,
+      name = name,
+      argsJson = argsJson,
+      running = status == "running",
+      success = when (status) {
+        "success" -> true
+        "failed" -> false
+        else -> null
+      },
+      summary = summary,
+      detail = detail,
+      exitCode = exitCode,
+      callId = callId.orEmpty(),
+      cancelled = false
+    )
+    "error" -> ErrorBlock(uuid, summary)
+    "compaction" -> CompactionBlock(
+      id = uuid,
+      summary = summary,
+      summaryText = detail,
+      tokensBefore = 0,
+      tokensAfter = 0,
+      contextWindow = 0
+    )
+    else -> null
+  }
+  @Test
   @Test
   fun `a denied approval keeps the reason the user typed`() = runBlocking {
     val sessionId = "sess-deny"
