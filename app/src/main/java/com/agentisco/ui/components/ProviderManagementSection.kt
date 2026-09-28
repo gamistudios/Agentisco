@@ -338,7 +338,14 @@ private fun ProviderFormDialog(
           singleLine = true, modifier = Modifier.fillMaxWidth().testTag("input_provider_url")
         )
         Text("Protocol", color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Medium)
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        // FlowRow, not Row: on a narrow screen a fixed Row squeezes every chip
+        // until the label wraps one character per line ("G/e/m/i/n/i").
+        @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+        FlowRow(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(6.dp),
+          verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
           LLMProtocol.entries.forEach { p ->
             Surface(
               onClick = { protocol = p },
@@ -348,7 +355,8 @@ private fun ProviderFormDialog(
             ) {
               Text(
                 p.displayName, color = if (protocol == p) ElectricBlueGlow else TextSecondary,
-                fontSize = 10.sp, modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                fontSize = 10.sp, maxLines = 1,
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
               )
             }
           }
