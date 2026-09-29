@@ -151,18 +151,35 @@ jobs:
           IS_RELEASE=false
           TAG=""
 
-          # 1. "release vX.Y.Z" in the commit message -> exact version.
-          EXPLICIT="$(printf '%s' "$COMMIT_MSG" \
-            | grep -ioE '(^|[[:space:]])release[[:space:]]+v[0-9]+\.[0-9]+\.[0-9]+' \
-            | head -n 1 \
-            | grep -oiE 'v[0-9]+\.[0-9]+\.[0-9]+' || true)"
+          # The release keyword only counts at the very BEGINNING of the commit
+          # message (first line) or the very END (last line). A "release" word
+          # buried in the middle of a subject or in the body is ignored.
+          # Blank lines and Co-authored-by / Signed-off-by trailers are skipped
+          # when locating the last line.
+          CLEAN_MSG="$(printf '%s\n' "$COMMIT_MSG" | tr -d '\r' \
+            | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
+            | grep -v '^$' || true)"
+          FIRST_LINE="$(printf '%s\n' "$CLEAN_MSG" | sed -n '1p')"
+          LAST_LINE="$(printf '%s\n' "$CLEAN_MSG" \
+            | grep -viE '^(co-authored-by|signed-off-by):' | tail -n 1 || true)"
+
+          VER_RE='v[0-9]+\.[0-9]+\.[0-9]+'
+          EXPLICIT=""
+
+          # 1. "release vX.Y.Z" at the start or end -> exact version.
+          if printf '%s' "$FIRST_LINE" | grep -qiE "^release[[:space:]]+${VER_RE}([[:space:]]|\$)"; then
+            EXPLICIT="$(printf '%s' "$FIRST_LINE" | grep -oiE "${VER_RE}" | head -n 1)"
+          elif printf '%s' "$LAST_LINE" | grep -qiE "(^|[[:space:]])release[[:space:]]+${VER_RE}\$"; then
+            EXPLICIT="$(printf '%s' "$LAST_LINE" | grep -oiE "${VER_RE}\$" | head -n 1)"
+          fi
 
           if [ -n "$EXPLICIT" ]; then
             IS_RELEASE=true
             # Normalise to the vMAJOR.MINOR.PATCH tag format used by this repo.
             TAG="v$(printf '%s' "$EXPLICIT" | cut -c2-)"
-          elif printf '%s' "$COMMIT_MSG" | grep -qiE '(^|[[:space:]])release([[:space:]]|$)'; then
-            # 2. bare "release" -> auto-increment.
+          elif printf '%s' "$FIRST_LINE" | grep -qiE '^release([[:space:]]|$)' \
+            || printf '%s' "$LAST_LINE" | grep -qiE '(^|[[:space:]])release$'; then
+            # 2. bare "release" at the start or end -> auto-increment.
             IS_RELEASE=true
           fi
 
