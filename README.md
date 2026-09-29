@@ -2,7 +2,7 @@
 
 A full AI coding agent, developer workspace, and code editor running entirely on Android. Agentisco ships a Debian Linux userland inside the app via `proot` (no root required), drives it with an LLM agent that has 21 real tools, and gives you an IDE-grade editor and Git client over the results — all offline-capable except for the LLM calls themselves.
 
-- **Package:** `com.agentisco` · **Current version:** 2.1.0 (versionCode 1; CI assigns release versions from git tags)
+- **Package:** `com.agentisco` · **Current version:** 2.2.0 (versionCode 1; CI assigns release versions from git tags)
 - **Platforms:** Android 7.0+ (minSdk 24), `arm64-v8a` and `armeabi-v7a`
 - **UI:** Jetpack Compose, dark-only custom theme
 
