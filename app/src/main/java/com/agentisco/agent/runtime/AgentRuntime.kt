@@ -125,8 +125,9 @@ class AgentRuntime(
     val TOOL_PLAYBOOK = """
 Tools available:
   Explore   glob_files (names), search_files (fixed text), regex_search (patterns),
-           list_files, directory_tree, file_info, read_file, read_files,
-           delegate (hand open-ended research to a read-only sub-agent)
+           list_files, directory_tree, file_info, read_file, read_files
+  Team     delegate (hand a slice of work to another agent: explore, uiux, frontend,
+           backend, debugger, qa, security, general)
   Change   edit_files (several exact-snippet edits, one call), edit_file,
            write_file (a whole new or replaced file), create_file, create_directory,
            move_file, copy_file, delete_file
@@ -139,10 +140,14 @@ Tools available:
 Method:
   1. Locate before you edit: glob_files / search_files to find the file, then read_file
      to see the current content. Never edit a file you have not read in this conversation.
-  2. Answering would mean reading a dozen files you are not going to change: call delegate
-     with a complete brief and let a read-only sub-agent read them. It returns a report
-     instead of putting every file into this conversation. It sees no history, cannot
-     change anything and cannot ask the user, so the brief has to carry everything.
+  2. Work that would cost more files in this conversation than it is worth, or that
+     belongs in a specialist's lane: call delegate with the narrowest role that covers
+     it. explore only reads and reports; every other role implements, runs and tests its
+     own work in this same workspace. A delegated agent sees none of this history,
+     cannot delegate and cannot ask the user, so the brief must carry the goal, the
+     starting paths, what is already done and what the report must contain. They may run
+     beside each other, so give each one a slice that does not overlap another agent's
+     files, and expect a report - not the files themselves - back.
   3. Prefer edit_files for any change inside an existing file: pass every edit of one
      related change in a single call. old_string must be copied verbatim from read_file
      output, including indentation; it must be unique unless replace_all is true.
@@ -304,6 +309,12 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
     history: List<ChatHistoryMessage> = emptyList(),
     resume: Boolean = false,
     /**
+     * Set for a delegated run: the agent takes this role's responsibility, lane
+     * and reporting duty, and the user-facing plan-mode wording does not apply to
+     * it - there is no user watching this run to present a plan to.
+     */
+    role: com.agentisco.agent.model.AgentRole? = null,
+    /**
      * Compaction budget for this run: the selected model's real context window
      * plus the user's Settings choices. Null derives it from the model.
      */
@@ -336,7 +347,8 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
       sink = sink,
       prompt = prompt,
       resume = resume,
-      planMode = permissions().planMode
+      planMode = permissions().planMode,
+      role = role
     )
     val messages = transcript.messages
     val rowIds = transcript.rowIds
@@ -570,15 +582,18 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
 
   /**
    * Runs one delegated task in a fresh runtime over the same workspace and
-   * returns only its report. The child gets [AgentToolRegistry.forDelegation]
-   * plus plan-mode permissions, so the same gate that implements plan mode for
-   * the user is what keeps a sub-agent from changing anything.
+   * returns only its report. The [role] decides what the child is allowed to be:
+   * a research role gets [AgentToolRegistry.forDelegation]'s planning set and the
+   * plan-mode gate, every other role works with the real tools under exactly the
+   * permissions the user gave the agent that delegated to it.
    *
    * It has no chat session and no compaction sink: nothing it does is persisted,
    * and cancelling the parent turn cancels this call with the coroutine it runs
    * inside.
    */
   suspend fun runSubagent(
+    role: com.agentisco.agent.model.AgentRole,
+    description: String,
     prompt: String,
     project: Project,
     provider: AIProvider,
@@ -588,37 +603,44 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
     terminalSession: TerminalSession,
     onEvent: (AgentStreamEvent) -> Unit = {}
   ): SubagentOutcome {
-    val child = AgentRuntime(fileSystem, terminalManager, gitManager, llmService, toolRegistry.forDelegation()) { null }
+    val child = AgentRuntime(fileSystem, terminalManager, gitManager, llmService, toolRegistry.forDelegation(role)) { null }
     val result = child.executeTask(
-      prompt = SubagentTool.brief(prompt),
+      prompt = "${role.name} task (${description.ifBlank { "delegated work" }}): $prompt",
+      role = role,
       project = project,
       provider = provider,
       model = model,
       apiKey = apiKey,
-      permissions = { SubagentTool.childPermissions(parentPermissions) },
+      permissions = { SubagentTool.childPermissions(role, parentPermissions) },
       terminalSession = terminalSession,
       // A delegated run owns no dialog: the user is watching the parent's turn and
       // one approval channel cannot serve two runs. Anything it would ask about is
-      // refused at once, which its tools report honestly.
+      // refused at once, which its tools report honestly - so a specialist never
+      // quietly gets a permission the user would have been asked for.
       onRequestApproval = { child.resolvePendingApproval(allowed = false) },
-      onEvent = { event -> relay(event, onEvent) }
+      onEvent = { event -> relay(role, event, onEvent) }
     )
     return SubagentOutcome(
       success = result.success,
       summary = result.summary,
-      error = result.summary.takeIf { !result.success }
+      error = result.summary.takeIf { !result.success },
+      modifiedFiles = result.modifiedFiles
     )
   }
 
   /**
    * Surfaces a delegated run without pretending it is the parent's own work: its
-   * tool calls arrive as status lines, and its hidden reasoning and report text
-   * never enter the parent's answer.
+   * tool calls arrive as status lines naming the agent that made them, and its
+   * hidden reasoning and report text never enter the parent's answer.
    */
-  private fun relay(event: AgentStreamEvent, onEvent: (AgentStreamEvent) -> Unit) {
+  private fun relay(
+    role: com.agentisco.agent.model.AgentRole,
+    event: AgentStreamEvent,
+    onEvent: (AgentStreamEvent) -> Unit
+  ) {
     when (event) {
-      is AgentStreamEvent.ToolStarted -> onEvent(AgentStreamEvent.Status("Sub-agent ${event.name}"))
-      is AgentStreamEvent.Status -> onEvent(AgentStreamEvent.Status("Sub-agent: ${event.text}"))
+      is AgentStreamEvent.ToolStarted -> onEvent(AgentStreamEvent.Status("${role.name}: ${event.name}"))
+      is AgentStreamEvent.Status -> onEvent(AgentStreamEvent.Status("${role.name}: ${event.text}"))
       else -> Unit
     }
   }
@@ -640,7 +662,8 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
     sink: CompactSink?,
     prompt: String,
     resume: Boolean,
-    planMode: Boolean = false
+    planMode: Boolean = false,
+    role: com.agentisco.agent.model.AgentRole? = null
   ): Transcript {
     val messages = mutableListOf<LlmMessage>()
     // Persisted rowId each message came from (0 = produced by this run), so a
@@ -651,7 +674,7 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
       rowIds.add(rowId)
     }
 
-    add(LlmMessage(LlmRole.SYSTEM, buildSystemPrompt(project, useTools, planMode)))
+    add(LlmMessage(LlmRole.SYSTEM, buildSystemPrompt(project, useTools, planMode, role)))
 
     val priorCompaction = sessionId?.let { sink?.latestCompaction(it) }
     val compactedThrough = priorCompaction?.summarizedThroughRowId ?: 0L
@@ -1083,7 +1106,8 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
   private fun buildSystemPrompt(
     project: Project,
     toolsAvailable: Boolean,
-    planMode: Boolean
+    planMode: Boolean,
+    role: com.agentisco.agent.model.AgentRole? = null
   ): String {
     val files = fileSystem.getFileTree(project, maxDepth = 3)
     val paths = StringBuilder()
@@ -1101,10 +1125,17 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
       appendLine()
       appendLine("Workspace files:")
       appendLine(paths.toString().take(4000))
+      if (role != null) {
+        // Which seat on the team this run occupies: its lane, its limits, its duty.
+        appendLine()
+        appendLine(role.prompt())
+      }
       if (toolsAvailable) {
         appendLine()
         append(TOOL_PLAYBOOK)
-        if (planMode) {
+        // The wording is for the turn whose user decides whether to implement it;
+        // a research role is told to report by its own role block.
+        if (planMode && role == null) {
           appendLine()
           append(PLAN_MODE_ADDENDUM)
         }

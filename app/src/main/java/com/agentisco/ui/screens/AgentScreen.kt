@@ -1828,7 +1828,7 @@ private fun friendlyToolLabel(name: String, argsJson: String): Pair<String, Stri
     "file_info" -> "Inspecting" to arg("path")
     "directory_tree" -> "Listing tree" to arg("path").ifBlank { "workspace" }
     "task_plan" -> "Planning" to ""
-    "delegate" -> "Delegating" to arg("description").ifBlank { "research" }
+    "delegate" -> "Delegating to ${arg("role")}" to arg("description")
     "write_file" -> "Writing" to arg("path")
     "edit_file" -> "Editing" to arg("path")
     "edit_files" -> "Editing files" to "${args?.optJSONArray("edits")?.length() ?: 0} change(s)"

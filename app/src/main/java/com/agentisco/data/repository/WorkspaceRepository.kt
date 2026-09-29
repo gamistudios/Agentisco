@@ -281,16 +281,18 @@ class WorkspaceRepository(
     // Delegated research is run by the runtime, which owns the model call. The
     // lookup here stays silent: a sub-agent with no model reports that to the
     // agent, it does not open the model sheet in the middle of a turn.
-    subagentLauncher = com.agentisco.agent.tool.SubagentLauncher { _, prompt, project, terminal ->
+    subagentLauncher = com.agentisco.agent.tool.SubagentLauncher { role, description, prompt, project, terminal ->
       val model = _selectedModel.value
       val connection = model?.let { resolveProviderForModel(it) }
       if (model == null || connection == null) {
         com.agentisco.agent.tool.SubagentOutcome(
           success = false,
-          error = "No selected model with a usable API key, so the sub-agent could not start."
+          error = "No selected model with a usable API key, so the ${role.name} could not start."
         )
       } else {
         agentRuntime.runSubagent(
+          role = role,
+          description = description,
           prompt = prompt,
           project = project,
           provider = connection.first,

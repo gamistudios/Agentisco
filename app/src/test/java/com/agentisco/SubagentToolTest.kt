@@ -7,6 +7,8 @@ import com.agentisco.agent.llm.LlmService
 import com.agentisco.agent.llm.LlmStreamEvent
 import com.agentisco.agent.llm.LlmToolCall
 import com.agentisco.agent.model.AgentPermissions
+import com.agentisco.agent.model.AgentRole
+import com.agentisco.agent.model.AgentRoles
 import com.agentisco.agent.model.AgentStreamEvent
 import com.agentisco.agent.model.PermissionMode
 import com.agentisco.agent.runtime.AgentRuntime
@@ -14,6 +16,7 @@ import com.agentisco.agent.tool.AgentToolRegistry
 import com.agentisco.agent.tool.PlanMode
 import com.agentisco.agent.tool.SubagentLauncher
 import com.agentisco.agent.tool.SubagentOutcome
+import com.agentisco.agent.tool.SubagentTool
 import com.agentisco.agent.tool.ToolArgumentError
 import com.agentisco.data.model.Project
 import com.agentisco.data.model.TerminalSession
@@ -39,13 +42,14 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * Delegation: one agent asking another to read the repository so that the
- * reading does not cost the asking agent its own context.
+ * The agent team: one engine, several seats.
  *
- * The contract proven here is the containment, not the cleverness: a delegated
- * run gets a tool list with nothing in it that can change the workspace, it runs
- * under the plan-mode gate as a backstop, it cannot delegate again, and its
- * private reasoning never leaks into the parent's answer.
+ * A role changes what an agent is told to care about and how far its reach goes.
+ * Two properties are proven rather than assumed: research cannot write even when
+ * the agent that delegated to it could, and a specialist does real work under
+ * exactly the user's own permissions - never more. Every run is contained by
+ * construction (tool list, gate, no approval channel of its own, no delegation),
+ * which is what lets several of them work in one workspace at a time.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -62,6 +66,7 @@ class SubagentToolTest {
   private class RecordingLauncher(
     var outcome: SubagentOutcome = SubagentOutcome(success = true, summary = "Report body")
   ) : SubagentLauncher {
+    var role: AgentRole? = null
     var description = ""
     var prompt = ""
     var project: Project? = null
@@ -69,12 +74,14 @@ class SubagentToolTest {
     var calls = 0
 
     override suspend fun launch(
+      role: AgentRole,
       description: String,
       prompt: String,
       project: Project,
       terminal: TerminalSession
     ): SubagentOutcome {
       calls++
+      this.role = role
       this.description = description
       this.prompt = prompt
       this.project = project
@@ -83,7 +90,10 @@ class SubagentToolTest {
     }
   }
 
-  private fun registryWith(launcher: SubagentLauncher?): AgentToolRegistry {
+  private fun registryWith(
+    launcher: SubagentLauncher?,
+    roles: () -> List<AgentRole> = { AgentRoles.builtIn }
+  ): AgentToolRegistry {
     val fileSystem = ProjectFileSystem(File(ws.root, "fsbase_${System.nanoTime()}"))
     return AgentToolRegistry(
       fileSystem = fileSystem,
@@ -93,7 +103,8 @@ class SubagentToolTest {
       onStageFile = {},
       onStageAll = {},
       onUnstageAll = {},
-      subagentLauncher = launcher
+      subagentLauncher = launcher,
+      subagentRoles = roles
     )
   }
 
@@ -102,24 +113,63 @@ class SubagentToolTest {
     return runBlocking { tool.execute(tool.parseAndValidate(json), contextFor(ws)) }
   }
 
+  private fun delegation(role: String, description: String = "trace the value", prompt: String = "do it") =
+    """{"role":"$role","description":"$description","prompt":"$prompt"}"""
+
   // ---- The tool ----
 
   @Test
-  fun `the brief and the workspace reach the launcher`() {
+  fun `the role, the brief and the workspace reach the launcher`() {
     val launcher = RecordingLauncher()
     val result = delegate(
       launcher,
-      """{"description":"trace auth references","prompt":"List every file that reads the old auth helper."}"""
+      delegation("backend", "implement the refund endpoint", "Add refund handling to OrderService.")
     )
     assertTrue(result.output, result.success)
     assertEquals(1, launcher.calls)
-    assertEquals("trace auth references", launcher.description)
-    assertEquals("List every file that reads the old auth helper.", launcher.prompt)
+    assertEquals(AgentRoles.BACKEND, launcher.role)
+    assertEquals("implement the refund endpoint", launcher.description)
+    assertEquals("Add refund handling to OrderService.", launcher.prompt)
     assertEquals(ws.project, launcher.project)
     assertEquals("term-1", launcher.terminal?.id)
-    assertEquals("trace auth references", result.metadata["delegation"])
+    assertEquals("backend", result.metadata["role"])
+    assertTrue(result.output, result.output.contains("Report from the Backend Engineer (implement the refund endpoint):"))
     assertTrue(result.output, result.output.contains("Report body"))
-    assertTrue(result.output, result.output.contains("Delegated task (trace auth references) finished"))
+  }
+
+  @Test
+  fun `an unknown role is refused with the roster instead of a silent fallback`() {
+    val launcher = RecordingLauncher()
+    val result = delegate(launcher, delegation("devops", "deploy it"))
+    assertFalse(result.success)
+    assertEquals("nothing launches for a role the team does not have", 0, launcher.calls)
+    assertTrue(result.error!!, result.error!!.contains("no agent role \"devops\""))
+    // The list it needs to correct itself.
+    assertTrue(result.error!!, result.error!!.contains("backend"))
+    assertTrue(result.error!!, result.error!!.contains("explore"))
+  }
+
+  @Test
+  fun `a custom role the user defines is delegable at once`() {
+    val custom = AgentRole(
+      id = "embedded",
+      name = "Firmware Engineer",
+      purpose = "Own the register-level drivers.",
+      responsibilities = listOf("SPI and I2C drivers"),
+      handsOff = listOf("the UI"),
+      craft = listOf("mind the watchdog"),
+      builtIn = false
+    )
+    val launcher = RecordingLauncher()
+    val registry = registryWith(launcher) { AgentRoles.builtIn + custom }
+    val tool = registry.get("delegate") as SubagentTool
+    assertTrue(tool.description, tool.description.contains("embedded"))
+
+    val result = runBlocking {
+      tool.execute(tool.parseAndValidate(delegation("embedded", "bit read")), contextFor(ws))
+    }
+    assertTrue(result.output, result.success)
+    assertEquals(custom, launcher.role)
   }
 
   @Test
@@ -127,64 +177,60 @@ class SubagentToolTest {
     val huge = buildString { repeat(60_000) { append("x") } }
     val result = delegate(
       RecordingLauncher(SubagentOutcome(success = true, summary = huge)),
-      """{"description":"sweep","prompt":"read everything"}"""
+      delegation("explore", "sweep")
     )
     assertTrue(result.success)
     assertTrue("must be capped: ${result.output.length}", result.output.length < huge.length)
-    // Honest truncation: name the budget and how to get the rest.
     assertTrue(result.output, result.output.contains("showing 40000 of 60000 characters"))
     assertTrue(result.output, result.output.contains("narrower follow-up delegation"))
+  }
+
+  /** The parent must know what the run dirtied, without the child describing its own diff. */
+  @Test
+  fun `the files a specialist changed are counted by the runtime`() {
+    val result = delegate(
+      RecordingLauncher(
+        SubagentOutcome(success = true, summary = "done", modifiedFiles = listOf("src/App.tsx", "src/api.kt"))
+      ),
+      delegation("frontend", "wire the form")
+    )
+    assertTrue(result.output, result.output.contains("Files it changed: src/App.tsx, src/api.kt"))
+    assertEquals("2", result.metadata["files"])
+
+    val research = delegate(
+      RecordingLauncher(SubagentOutcome(success = true, summary = "found nothing", modifiedFiles = emptyList())),
+      delegation("explore", "sweep")
+    )
+    assertFalse(research.output, research.output.contains("Files it changed"))
+    assertEquals("0", research.metadata["files"])
   }
 
   @Test
   fun `a failed delegation tells the agent to do the work itself`() {
     val result = delegate(
       RecordingLauncher(SubagentOutcome(success = false, error = "No selected model with a usable API key.")),
-      """{"description":"trace","prompt":"find it"}"""
+      delegation("general", "trace", "find it")
     )
     assertFalse(result.success)
     assertTrue(result.error!!, result.error!!.contains("No selected model with a usable API key."))
     assertTrue(result.error!!, result.error!!.contains("Do the work yourself"))
-    // A failure is not a report: nothing pretends the sub-agent answered.
     assertEquals("", result.output)
-  }
-
-  @Test
-  fun `an empty report is returned as empty, not invented`() {
-    val result = delegate(
-      RecordingLauncher(SubagentOutcome(success = true, summary = "")),
-      """{"description":"quick look","prompt":"count the files"}"""
-    )
-    assertTrue(result.success)
-    assertTrue(result.output, result.output.endsWith("Report:\n"))
   }
 
   @Test
   fun `arguments are schema-checked before anything is launched`() {
     val launcher = RecordingLauncher()
-    for (json in listOf("{}", """{"description":"only this"}""", """{"prompt":"only this"}""")) {
-      val failure = runCatching {
-        runBlocking {
-          SubagentTool(launcher).parseAndValidate(json)
-        }
-      }.exceptionOrNull()
+    for (json in listOf(
+      "{}",
+      """{"role":"explore"}""",
+      """{"role":"explore","description":"only this"}""",
+      """{"role":"explore","prompt":"only this","description":""}"""
+    )) {
+      val failure = runCatching { SubagentTool(launcher).parseAndValidate(json) }.exceptionOrNull()
       assertTrue("$json must be rejected", failure is ToolArgumentError)
     }
     assertEquals("nothing reaches the launcher with bad args", 0, launcher.calls)
   }
-
-  @Test
-  fun `the tool is named for what it does and says what it cannot do`() {
-    val tool = SubagentTool(RecordingLauncher())
-    assertEquals("delegate", tool.name)
-    assertEquals(listOf("description", "prompt"), tool.params.map { it.name })
-    assertTrue(tool.description, tool.description.contains("cannot change anything"))
-    assertTrue(tool.description, tool.description.contains("none of this conversation"))
-    // Delegation is not implementation.
-    assertTrue(tool.description, tool.description.contains("Do not use it for a change"))
-  }
-
-  // ---- What the child may use ----
 
   @Test
   fun `delegate is offered only when a runtime can run it`() {
@@ -193,14 +239,24 @@ class SubagentToolTest {
   }
 
   @Test
-  fun `a delegated run is offered nothing that can change the workspace`() {
-    val childRegistry = registryWith(RecordingLauncher()).forDelegation()
-    val names = childRegistry.tools.map { it.name }.toSet()
+  fun `the tool says what a delegated agent cannot do`() {
+    val tool = SubagentTool(RecordingLauncher())
+    assertEquals("delegate", tool.name)
+    assertEquals(listOf("role", "description", "prompt"), tool.params.map { it.name })
+    assertTrue(tool.description, tool.description.contains("explore is read-only"))
+    assertTrue(tool.description, tool.description.contains("cannot ask the user"))
+    assertTrue(tool.description, tool.description.contains("beside each other"))
+    assertTrue(tool.description, tool.description.contains("does not overlap another agent's files"))
+  }
 
-    // Every offered tool is one the planning gate allows...
+  // ---- What each role may use ----
+
+  @Test
+  fun `research is offered nothing that can change the workspace`() {
+    val names = registryWith(RecordingLauncher()).forDelegation(AgentRoles.EXPLORE).tools.map { it.name }.toSet()
+
     assertTrue("offered beyond the planning set: ${names - PlanMode.delegatedToolNames}",
       names.all { it in PlanMode.delegatedToolNames })
-    // ...and a sub-agent cannot fork itself.
     assertFalse("delegate", "delegate" in names)
     for (mutating in listOf(
       "edit_file", "edit_files", "write_file", "create_file", "delete_file", "move_file",
@@ -208,9 +264,7 @@ class SubagentToolTest {
       "write_terminal_input"
     )) {
       assertFalse("must not be offered: $mutating", mutating in names)
-      assertNull(childRegistry.get(mutating))
     }
-    // Research stays available, which is the whole point of delegating.
     for (reading in listOf("read_file", "read_files", "search_files", "glob_files", "list_files", "git_log", "web_search")) {
       assertTrue("must be offered: $reading", reading in names)
     }
@@ -219,36 +273,95 @@ class SubagentToolTest {
   }
 
   @Test
-  fun `the child policy researches and never writes`() {
-    val child = SubagentTool.childPermissions(
-      AgentPermissions(
-        planMode = false,
-        fileEditing = PermissionMode.ALLOW_ALL,
-        terminalCommands = PermissionMode.ALLOW_ALL,
-        deleteFiles = true
-      )
-    )
-    assertTrue(child.planMode)
-    assertEquals(PermissionMode.NEVER_ALLOW, child.fileEditing)
-    assertFalse(child.deleteFiles)
-    assertEquals(SubagentTool.MAX_CHILD_ITERATIONS, child.maxToolIterations)
-    assertEquals(PermissionMode.ALLOW_SAFE, child.terminalCommands)
+  fun `a specialist is offered the working tools and never another delegation`() {
+    val parent = registryWith(RecordingLauncher())
+    assertTrue(parent.tools.map { it.name }.contains("delegate"))
 
-    // A user who forbade commands is not overridden by delegation.
-    val strict = SubagentTool.childPermissions(AgentPermissions(terminalCommands = PermissionMode.NEVER_ALLOW))
-    assertEquals(PermissionMode.NEVER_ALLOW, strict.terminalCommands)
+    for (role in AgentRoles.builtIn.filter { !it.readOnly }) {
+      val names = parent.forDelegation(role).tools.map { it.name }.toSet()
+      for (working in listOf("edit_file", "edit_files", "write_file", "run_command", "build", "test", "git_commit")) {
+        assertTrue("${role.id} must be able to $working", working in names)
+      }
+      assertFalse("${role.id} must not delegate again", "delegate" in names)
+    }
   }
 
   @Test
-  fun `the brief tells the sub-agent to report instead of converse`() {
-    val brief = SubagentTool.brief("Find every caller of legacyAuth().")
-    assertTrue(brief, brief.startsWith("Find every caller of legacyAuth()."))
-    assertTrue(brief, brief.contains("You are a sub-agent"))
-    assertTrue(brief, brief.contains("You cannot change anything"))
-    // The report has to stand on its own for the agent that asked.
-    assertTrue(brief, brief.contains("file paths"))
-    assertTrue(brief, brief.contains("under about 400 words"))
-    assertTrue(brief, brief.contains("Do not narrate your steps"))
+  fun `research never writes and a specialist works under the user's own limits`() {
+    val parent = AgentPermissions(
+      planMode = false,
+      fileEditing = PermissionMode.ALLOW_ALL,
+      terminalCommands = PermissionMode.ALLOW_ALL,
+      deleteFiles = true,
+      gitPush = true,
+      maxToolIterations = 200
+    )
+    val research = SubagentTool.childPermissions(AgentRoles.EXPLORE, parent)
+    assertTrue(research.planMode)
+    assertEquals(PermissionMode.NEVER_ALLOW, research.fileEditing)
+    assertFalse(research.deleteFiles)
+    assertEquals(PermissionMode.ALLOW_SAFE, research.terminalCommands)
+    assertEquals(AgentRoles.EXPLORE.maxToolIterations, research.maxToolIterations)
+
+    val engineer = SubagentTool.childPermissions(AgentRoles.BACKEND, parent)
+    assertFalse(engineer.planMode)
+    // It does real work, but gains no permission the user did not already give.
+    assertEquals(PermissionMode.ALLOW_ALL, engineer.fileEditing)
+    assertEquals(PermissionMode.ALLOW_ALL, engineer.terminalCommands)
+    assertTrue(engineer.deleteFiles)
+    assertEquals(AgentRoles.BACKEND.maxToolIterations, engineer.maxToolIterations)
+
+    // Nothing on the team pushes, whatever the user's own setting.
+    assertFalse(engineer.gitPush)
+    assertFalse(research.gitPush)
+
+    // A user who forbade commands is not overridden by delegation.
+    val strict = SubagentTool.childPermissions(
+      AgentRoles.QA,
+      AgentPermissions(terminalCommands = PermissionMode.NEVER_ALLOW, fileEditing = PermissionMode.NEVER_ALLOW)
+    )
+    assertEquals(PermissionMode.NEVER_ALLOW, strict.terminalCommands)
+    assertEquals(PermissionMode.NEVER_ALLOW, strict.fileEditing)
+  }
+
+  // ---- The roster ----
+
+  @Test
+  fun `the built-in team is eight distinct seats`() {
+    val ids = AgentRoles.builtIn.map { it.id }
+    assertEquals(listOf("general", "explore", "uiux", "frontend", "backend", "debugger", "qa", "security"), ids)
+    assertEquals(ids.size, ids.toSet().size)
+    assertEquals(ids.size, AgentRoles.builtIn.map { it.name }.toSet().size)
+
+    // Only research is read-only.
+    assertEquals(listOf("explore"), AgentRoles.builtIn.filter { it.readOnly }.map { it.id })
+
+    AgentRoles.builtIn.forEach { role ->
+      assertTrue("${role.id} needs a purpose", role.purpose.isNotBlank())
+      assertTrue("${role.id} has a lane", role.responsibilities.size >= 2)
+      assertTrue("${role.id} names what it stays out of", role.handsOff.isNotEmpty())
+      assertTrue("${role.id} has standards", role.craft.isNotEmpty())
+      assertTrue("${role.id} is capped", role.maxToolIterations in 8..60)
+      assertTrue(role.prompt(), role.prompt().contains("You are the ${role.name} agent"))
+    }
+  }
+
+  @Test
+  fun `every role prompt teaches the lane, the concurrency and the report`() {
+    val uiux = AgentRoles.UIUX.prompt()
+    assertTrue(uiux, uiux.contains("implement, not just recommend"))
+    assertTrue(uiux, uiux.contains("Other agents may be working in this same workspace"))
+    assertTrue(uiux, uiux.contains("Verify only what is yours"))
+    assertTrue(uiux, uiux.contains("Hand-offs"))
+    // A designer is told to build, not to hand back advice.
+    assertTrue(uiux, uiux.contains("Inspect the screens that exist"))
+
+    val research = AgentRoles.EXPLORE.prompt()
+    assertTrue(research, research.contains("You are read-only"))
+    assertFalse(research, research.contains("implement, not just recommend"))
+    // Research answers with evidence; an engineer answers with a diff and a test run.
+    assertTrue(research, research.contains("The evidence"))
+    assertTrue(uiux, uiux.contains("Files you modified"))
   }
 
   // ---- Through two real runtimes ----
@@ -297,14 +410,19 @@ class SubagentToolTest {
     }
   }
 
-  private class PairingRun(val dir: File, val service: ScriptedService, val events: List<AgentStreamEvent>)
+  private class PairingRun(val dir: File, val service: ScriptedService, val events: List<AgentStreamEvent>) {
+    val file get() = File(dir, "src/App.tsx")
+    /** The child's requests: everything between the parent's first call and its last. */
+    val childFirst get() = service.requests[1]
+    val parentFinal get() = service.requests.last()
+  }
 
   /**
-   * Parent and child share one [LlmService], so the script below is the whole
-   * conversation of both: the parent delegates, the child tries to edit and
-   * reports, the parent answers.
+   * Parent and child share one [LlmService], so the script is the whole
+   * conversation of both: the parent delegates, the child works, the parent
+   * answers.
    */
-  private fun delegationRun(): PairingRun {
+  private fun delegationRun(role: AgentRole, childTurns: List<Turn>): PairingRun {
     val dir = File(ws.root, "project_${System.nanoTime()}")
     File(dir, "src").mkdirs()
     File(dir, "src/App.tsx").writeText("export const value = 1\n")
@@ -317,16 +435,8 @@ class SubagentToolTest {
 
     val service = ScriptedService(
       listOf(
-        Turn.Call("delegate", """{"description":"trace the value","prompt":"Find where value is read."}"""),
-        // The sub-agent, told to report, reaches for a write anyway.
-        Turn.Call("edit_file", """{"path":"src/App.tsx","old_string":"value = 1","new_string":"value = 2"}"""),
-        // So it tries the one command that is offered to it and still forbidden.
-        Turn.Call("run_command", """{"command":"npm install left-pad"}"""),
-        // And it tries to pull the user into a run that owns no dialog.
-        Turn.Call("ask_user", """{"question":"which package?","options":["left-pad","center-pad"]}"""),
-        Turn.Answer("Report: value is read at src/App.tsx:1."),
-        Turn.Answer("The report is in.")
-      )
+        Turn.Call("delegate", delegation(role.id, "trace the value", "Find where value is read and set it to 2."))
+      ) + childTurns + Turn.Answer("The report is in.")
     )
 
     // The launcher needs the runtime it belongs to, so it resolves it lazily.
@@ -340,8 +450,10 @@ class SubagentToolTest {
       onStageFile = {},
       onStageAll = {},
       onUnstageAll = {},
-      subagentLauncher = SubagentLauncher { _, prompt, childProject, childTerminal ->
+      subagentLauncher = SubagentLauncher { childRole, description, prompt, childProject, childTerminal ->
         runtime!!.runSubagent(
+          role = childRole,
+          description = description,
           prompt = prompt,
           project = childProject,
           provider = provider,
@@ -355,7 +467,7 @@ class SubagentToolTest {
           ),
           terminalSession = childTerminal,
           // The relay inside runSubagent turns these into status lines, so this is
-          // the same stream the parent reports on — exactly how the repository wires it.
+          // the same stream the parent reports on - exactly how the repository wires it.
           onEvent = { event -> events.add(event) }
         )
       }
@@ -386,78 +498,125 @@ class SubagentToolTest {
     return PairingRun(dir, service, events)
   }
 
-  @Test
-  fun `a sub-agent cannot edit even when the parent could`() {
-    val run = delegationRun()
-    // The delegated turn wanted to write; the workspace stayed as it was.
-    assertEquals("export const value = 1\n", File(run.dir, "src/App.tsx").readText())
-    assertEquals(6, run.service.requests.size)
+  private val editTurn = Turn.Call(
+    "edit_file",
+    """{"path":"src/App.tsx","old_string":"value = 1","new_string":"value = 2"}"""
+  )
 
-    // First defence: the tool is not even in the child's list.
+  @Test
+  fun `research cannot edit even when the agent that delegated to it could`() {
+    val run = delegationRun(
+      AgentRoles.EXPLORE,
+      listOf(
+        // Told to be read-only, it reaches for a write anyway: not even offered.
+        editTurn,
+        // So it tries the one command that is offered and still forbidden.
+        Turn.Call("run_command", """{"command":"npm install left-pad"}"""),
+        Turn.Answer("Report: value is read at src/App.tsx:1.")
+      )
+    )
+    assertEquals("export const value = 1\n", run.file.readText())
+    assertEquals(5, run.service.requests.size)
+
     val unknown = run.service.requests[2].messages.last { it.role == LlmRole.TOOL }.content
     assertTrue(unknown, unknown.contains("is not an available tool"))
     assertFalse(unknown, unknown.contains("write_file,"))
 
-    // Second defence, for what is offered: the plan-mode gate keeps run_command read-only.
     val refused = run.service.requests[3].messages.last { it.role == LlmRole.TOOL }.content
     assertTrue(refused, refused.contains("only read-only shell commands"))
 
-    // The parent still got its report, so the run was not wasted.
-    val report = run.service.requests.last().messages.last { it.role == LlmRole.TOOL }.content
-    assertTrue(report, report.contains("Delegated task (trace the value) finished"))
+    val report = run.parentFinal.messages.last { it.role == LlmRole.TOOL }.content
+    assertTrue(report, report.contains("Report from the Explore / Research Engineer (trace the value):"))
     assertTrue(report, report.contains("value is read at src/App.tsx:1"))
   }
 
+  /** The point of the team: a specialist does the edit and says what it verified. */
   @Test
-  fun `the sub-agent starts from the brief and no history`() {
-    val run = delegationRun()
-    val childFirst = run.service.requests[1]
-    val briefMessage = childFirst.messages.first { it.role == LlmRole.USER }.content
-    assertTrue(briefMessage, briefMessage.contains("Find where value is read."))
-    assertTrue(briefMessage, briefMessage.contains("You are a sub-agent"))
-    // Only its own system prompt and brief: the parent's conversation is not resent.
-    assertEquals(2, childFirst.messages.size)
+  fun `a specialist implements the change the parent delegated`() {
+    val run = delegationRun(
+      AgentRoles.BACKEND,
+      listOf(
+        editTurn,
+        Turn.Answer("Changed value to 2 in src/App.tsx and re-read the file to confirm.")
+      )
+    )
+    assertEquals("export const value = 2\n", run.file.readText())
 
-    // The child is offered the reading tools, never the writing ones.
-    val offered = childFirst.tools.map { it.name }.toSet()
-    assertTrue(offered.toString(), "read_file" in offered)
-    assertFalse(offered.toString(), "edit_file" in offered)
-    assertFalse(offered.toString(), "delegate" in offered)
-
-    // And the parent's own tool list still has delegation.
-    val parentOffered = run.service.requests[0].tools.map { it.name }.toSet()
-    assertTrue(parentOffered.toString(), "delegate" in parentOffered)
-    assertTrue(parentOffered.toString(), "edit_file" in parentOffered)
+    val report = run.parentFinal.messages.last { it.role == LlmRole.TOOL }.content
+    assertTrue(report, report.contains("Report from the Backend Engineer"))
+    assertTrue(report, report.contains("Files it changed: src/App.tsx"))
   }
 
   @Test
-  fun `the sub-agent works in the background instead of talking over the answer`() {
-    val run = delegationRun()
-    val status = run.events.filterIsInstance<AgentStreamEvent.Status>().map { it.text }
-    assertTrue(status.toString(), status.any { it.startsWith("Sub-agent") })
+  fun `the child starts from its role and none of the parents history`() {
+    val run = delegationRun(AgentRoles.UIUX, listOf(Turn.Answer("Styled the header.")))
+    val child = run.childFirst
+    assertEquals(2, child.messages.size)
 
-    // The child's text is a tool result for the parent, never streamed as the answer.
+    val system = child.messages.first { it.role == LlmRole.SYSTEM }.content
+    assertTrue(system, system.contains("You are the UI / UX Designer agent working on this project"))
+    assertTrue(system, system.contains("Other agents may be working in this same workspace"))
+    assertTrue(system, system.contains("Finish with a report, not a conversation"))
+    // The wording aimed at a user-facing planning turn would send it to task_plan
+    // and ask_user, neither of which a delegated run can use.
+    assertFalse(system, system.contains("Plan mode is ON"))
+    // and the shared tool method still applies to a specialist.
+    assertTrue(system, system.contains("old_string must be copied verbatim"))
+
+    val task = child.messages.first { it.role == LlmRole.USER }.content
+    assertTrue(task, task.contains("Find where value is read and set it to 2."))
+    assertTrue(task, task.startsWith("UI / UX Designer task (trace the value)"))
+
+    val offered = child.tools.map { it.name }.toSet()
+    assertTrue(offered.toString(), "edit_file" in offered)
+    assertFalse(offered.toString(), "delegate" in offered)
+
+    val parentOffered = run.service.requests[0].tools.map { it.name }.toSet()
+    assertTrue(parentOffered.toString(), "delegate" in parentOffered)
+  }
+
+  @Test
+  fun `research is told it is read-only and given the planning gate`() {
+    val run = delegationRun(AgentRoles.EXPLORE, listOf(Turn.Answer("Nothing to change here.")))
+    val system = run.childFirst.messages.first { it.role == LlmRole.SYSTEM }.content
+    assertTrue(system, system.contains("You are read-only"))
+    assertTrue(system, system.contains("The evidence"))
+    assertFalse(system, system.contains("Plan mode is ON for this turn"))
+  }
+
+  @Test
+  fun `a delegated agent works in the background instead of talking over the answer`() {
+    val run = delegationRun(
+      AgentRoles.DEBUGGER,
+      listOf(Turn.Answer("Root cause was the missing null check."))
+    )
+    val status = run.events.filterIsInstance<AgentStreamEvent.Status>().map { it.text }
+    assertTrue(status.toString(), status.any { it.startsWith("Debugger:") })
+
     val streamed = run.events.filterIsInstance<AgentStreamEvent.Token>().map { it.text }
-    assertFalse(streamed.toString(), streamed.any { it.contains("Report: value is read") })
+    assertFalse(streamed.toString(), streamed.any { it.contains("Root cause was") })
     assertTrue(streamed.toString(), streamed.contains("The report is in."))
 
-    // The delegation shows up as one tool of the parent's own turn.
     val delegation = run.events.filterIsInstance<AgentStreamEvent.ToolFinished>().single { it.name == "delegate" }
     assertTrue(delegation.summary, delegation.success)
   }
 
   @Test
-  fun `a sub-agent never gets the user's approval dialog`() {
-    val run = delegationRun()
-    // The child did ask; the ask was answered without a dialog, so the turn could
-    // not hang waiting for a user who is watching the parent.
-    val askOutcome = run.service.requests[4].messages.last { it.role == LlmRole.TOOL }.content
-    assertTrue(askOutcome, askOutcome.contains("did not answer") || askOutcome.contains("not approved"))
+  fun `a delegated agent never gets the user's approval dialog`() {
+    val run = delegationRun(
+      AgentRoles.SECURITY,
+      listOf(
+        // A specialist may try to pull the user into a decision - and must be
+        // answered without a dialog the user never saw, so it cannot hang.
+        Turn.Call("ask_user", """{"question":"rotate the signing key now?","options":["now","after release"]}"""),
+        Turn.Answer("Assumed after release and reported it as a hand-off.")
+      )
+    )
     assertTrue(
       "no approval may reach the parent from a delegated run",
       run.events.none { it is AgentStreamEvent.ApprovalRequested }
     )
-    // and the run still finished with a report.
-    assertTrue(run.service.requests.last().messages.last { it.role == LlmRole.TOOL }.content.contains("Report:"))
+    val asked = run.service.requests[2].messages.last { it.role == LlmRole.TOOL }.content
+    assertTrue(asked, asked.contains("did not answer"))
   }
 }

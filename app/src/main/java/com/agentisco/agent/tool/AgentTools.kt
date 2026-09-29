@@ -36,7 +36,10 @@ class AgentToolRegistry(
   private val webClient: okhttp3.OkHttpClient? = null,
   /** Set when a runtime exists to run delegated work; without it there is no `delegate` tool. */
   private val subagentLauncher: SubagentLauncher? = null,
-  /** When non-null, only these tools are offered - the list a delegated run gets. */
+  /** The team the delegate tool offers, including any custom agent the user defined. */
+  private val subagentRoles: () -> List<com.agentisco.agent.model.AgentRole> =
+    { com.agentisco.agent.model.AgentRoles.builtIn },
+  /** When non-null, only these tools are offered - the list a research run gets. */
   private val restrictTo: Set<String>? = null
 ) {
 
@@ -73,7 +76,7 @@ class AgentToolRegistry(
     WebFetchTool(webClient),
     WebSearchTool(webClient),
     AskUserTool()
-  ) + extraTools + listOfNotNull(subagentLauncher?.let(::SubagentTool))
+  ) + extraTools + listOfNotNull(subagentLauncher?.let { SubagentTool(it, subagentRoles) })
 
   /**
    * A delegated run is offered only its own tool set, so a sub-agent cannot even
@@ -91,11 +94,12 @@ class AgentToolRegistry(
   fun get(name: String): AgentTool? = byName[name]
 
   /**
-   * The same collaborators offering only what a delegated run may use: no
-   * mutating tool, no `delegate` (a sub-agent that could delegate would multiply
-   * one request into an unbounded number of model calls), and no launcher at all.
+   * The same collaborators offering what one role may use: a research role gets
+   * only the planning set, every other role gets the working set minus
+   * `delegate` - a sub-agent that could delegate would multiply one request into
+   * an unbounded number of model calls.
    */
-  fun forDelegation(): AgentToolRegistry = AgentToolRegistry(
+  fun forDelegation(role: com.agentisco.agent.model.AgentRole): AgentToolRegistry = AgentToolRegistry(
     fileSystem = fileSystem,
     gitManager = gitManager,
     terminalManager = terminalManager,
@@ -104,7 +108,9 @@ class AgentToolRegistry(
     onStageAll = onStageAll,
     onUnstageAll = onUnstageAll,
     webClient = webClient,
-    restrictTo = PlanMode.delegatedToolNames
+    restrictTo =
+      if (role.readOnly) PlanMode.delegatedToolNames
+      else offered.map { it.name }.toSet() - "delegate"
   )
 }
 
