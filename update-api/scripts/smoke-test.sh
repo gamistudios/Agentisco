@@ -124,6 +124,17 @@ for path in / /health /ready /v1/updates/debug/latest /v1/updates/release/latest
 done
 check "7 responses scanned, none leak" "$([[ "$leaked" == no ]] && echo yes || echo no)"
 
+log "== the internal channel is served but never announced =="
+announced=no
+for path in / /health /ready; do
+  curl -sS "$BASE$path" | grep -qi 'debug' && announced=yes
+done
+check "no public surface names the debug channel" "$([[ "$announced" == no ]] && echo yes || echo no)"
+status="$(curl -sS -o /dev/null -w '%{http_code}' "$BASE/v1/updates/debug/latest")"
+check "the debug route still answers (HTTP $status)" "$([[ "$status" == 200 ]] && echo yes || echo no)"
+body="$(curl -sS "$BASE/v1/updates/beta/latest")"
+check "a mistyped channel does not name the valid ones" "$(printf '%s' "$body" | grep -qi debug && echo no || echo yes)"
+
 log "== structured logs carry no secret =="
 check "the token never reaches the log" "$(grep -q 'mock-github-token' "$WORK/server.log" && echo no || echo yes)"
 

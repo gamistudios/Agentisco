@@ -82,6 +82,21 @@ for channel in debug release; do
     *github*|*"gamistudios"*) fail "$channel download URL leaks the repository: $url" ;;
   esac
 
+  log "  waiting for the artifact to reach the cache (up to ${CACHE_WAIT_SECONDS:-900}s)"
+  waited=0
+  while [[ "$cached" != "true" && "$waited" -lt "${CACHE_WAIT_SECONDS:-900}" ]]; do
+    sleep 10
+    waited=$((waited + 10))
+    curl -sS -o "$STORAGE/$channel.json" "$BASE/v1/updates/$channel/latest"
+    cached="$(sed -n 's/.*"cached":[[:space:]]*\([a-z]*\).*/\1/p' "$STORAGE/$channel.json")"
+  done
+  log "  cached=$cached after ${waited}s"
+  if [[ "$cached" != "true" ]]; then
+    fail "$channel never finished caching; the sync log says:"
+    grep -E "apk|cache|sync" "$STORAGE/server.log" | tail -n 8
+    continue
+  fi
+
   log "  downloading through the API"
   if ! curl -fsS -o "$STORAGE/$channel.apk" "$url"; then
     fail "$channel download"
@@ -102,14 +117,28 @@ for channel in debug release; do
   echo "$headers" | grep -qi 'content-type: application/vnd.android.package-archive' || fail "$channel wrong content type"
 done
 
-log "== nothing a client sees may mention GitHub or the private repository =="
+log "== nothing a client sees may reach the private repository =="
+# The product name is public and appears in asset names, and a changelog bullet
+# may legitimately say "GitHub". What must never appear is an upstream address, a
+# repository coordinate, an upstream field or the credential.
+LEAK_PATTERN="github\\.com|api\\.github|ghcr\\.io|/repos/|browser_download_url|${GITHUB_OWNER}|${GITHUB_TOKEN}"
 for path in / /health /ready /v1/updates/debug/latest /v1/updates/release/latest /v1/updates/beta/latest /v1/nope; do
   body="$(curl -sS "$BASE$path" || true)"
-  if printf '%s' "$body" | grep -Eqi 'github|/repos/|'"$GITHUB_TOKEN"; then
+  if printf '%s' "$body" | grep -Eqi "$LEAK_PATTERN"; then
     fail "$path leaks private information"
+    printf '%s' "$body" | grep -Eoi "$LEAK_PATTERN" | sort -u | sed 's/^/    /'
   fi
 done
 log "  checked 7 responses"
+
+log "== the internal channel is served but never announced =="
+for path in / /health /ready; do
+  body="$(curl -sS "$BASE$path" || true)"
+  if printf '%s' "$body" | grep -qi 'debug'; then
+    fail "$path announces the debug channel"
+  fi
+done
+log "  no public surface names debug"
 
 log "== unknown channel and version are refused cleanly =="
 curl -sS -o /dev/null -w '  beta channel -> %{http_code}\n' "$BASE/v1/updates/beta/latest"

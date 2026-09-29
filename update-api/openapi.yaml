@@ -1,0 +1,493 @@
+openapi: 3.1.0
+info:
+  title: Agentisco Update API
+  version: 1.0.0
+  description: |
+    The only public interface between Agentisco clients and the artifact source.
+    Clients address channels and versions; they never name a repository, an owner
+    or an upstream host, and no response carries one.
+
+    Every endpoint is anonymous: the credential that reads the upstream repository
+    lives on the server only. Metadata responses are `Cache-Control: no-store`;
+    the APK response is `public, max-age=31536000, immutable` because its URL is
+    pinned to a tag whose bytes never change.
+
+    One channel is published here. Other channels may be served to builds that
+    already know their name, but they are not advertised.
+servers:
+  - url: https://updates.agentisco.test
+    description: production
+  - url: http://127.0.0.1:8080
+    description: local development
+tags:
+  - name: updates
+    description: Version metadata a client compares against its own build
+  - name: artifacts
+    description: The cached APK bytes, with resume support
+  - name: operations
+    description: Liveness, readiness and the service index
+
+paths:
+  /:
+    get:
+      tag: operations
+      summary: Service index
+      description: |
+        Serves the public landing page when ENABLE_LANDING=true, otherwise this
+        JSON index.
+      responses:
+        "200":
+          description: Landing page, or the endpoint index
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  service:
+                    type: string
+                    examples: ["agentisco-update-api"]
+                  endpoints:
+                    type: array
+                    items:
+                      type: string
+                    examples: [["/v1/updates/release/latest", "/v1/download/release/latest", "/health", "/ready"]]
+
+  /v1/updates/{channel}/latest:
+    get:
+      tags: [updates]
+      summary: The newest release of one channel
+      description: |
+        Channel resolution is per channel and deterministic: the answer is the
+        newest release that actually carries that channel's APK asset, never the
+        globally newest release.
+
+        With `versionCode`, the response also carries the direct
+        `updateAvailable` comparison. Without it, the full metadata document is
+        returned.
+
+        A release is published here as soon as it is known, even when its bytes
+        are still being cached; `cached` tells the two states apart.
+      parameters:
+        - $ref: "#/components/parameters/Channel"
+        - name: versionCode
+          in: query
+          required: false
+          description: The client's own version code, as computed from its version name.
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
+        - $ref: "#/components/parameters/IfNoneMatch"
+      responses:
+        "200":
+          description: The channel's newest release
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/UpdateInfo"
+                  - $ref: "#/components/schemas/CheckResult"
+        "304":
+          $ref: "#/components/responses/NotModified"
+        "400":
+          description: An unknown channel, or a versionCode that is not a non-negative integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                invalid_channel:
+                  value:
+                    error:
+                      code: invalid_channel
+                      message: channel is not a supported update channel
+                invalid_version_code:
+                  value:
+                    error:
+                      code: invalid_version_code
+                      message: versionCode must be a non-negative integer
+        "404":
+          description: This channel has never had a release published
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error:
+                  code: no_release
+                  message: no release has been published for this channel yet
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          description: The metadata store is unreadable; clients keep their last known state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error:
+                  code: metadata_unavailable
+                  message: update metadata is temporarily unavailable
+
+  /v1/download/{channel}/{version}:
+    get:
+      tags: [artifacts]
+      summary: Download a cached APK
+      description: |
+        Bytes are always read from the local cache; a request can never be turned
+        into a stream from the upstream repository. The URL is pinned to a tag
+        (the metadata hands out the exact one) so a resumed transfer can not be
+        repointed at a different artifact mid-flight.
+
+        `Range` is honoured, `If-Range`/`If-Match` validate against the SHA-256
+        ETag, and a miss starts exactly one background fetch shared by every
+        waiting client.
+      operationId: downloadApk
+      parameters:
+        - $ref: "#/components/parameters/Channel"
+        - $ref: "#/components/parameters/Version"
+        - name: Range
+          in: header
+          required: false
+          schema:
+            type: string
+          examples:
+            tail:
+              value: "bytes=4194304-"
+            first-megabyte:
+              value: "bytes=0-1048575"
+        - name: If-Range
+          in: header
+          required: false
+          description: The ETag of the partial download being resumed.
+          schema:
+            type: string
+        - name: If-None-Match
+          in: header
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The whole artifact
+          headers:
+            Content-Type:
+              schema:
+                type: string
+                examples: ["application/vnd.android.package-archive"]
+            Content-Length:
+              schema:
+                type: integer
+                format: int64
+            Accept-Ranges:
+              schema:
+                type: string
+                examples: [bytes]
+            ETag:
+              description: The quoted SHA-256 of the artifact.
+              schema:
+                type: string
+            Last-Modified:
+              schema:
+                type: string
+            Content-Disposition:
+              schema:
+                type: string
+                examples: ['attachment; filename="Agentisco-v1.4.0-release.apk"']
+            Cache-Control:
+              schema:
+                type: string
+                examples: ["public, max-age=31536000, immutable"]
+          content:
+            application/vnd.android.package-archive:
+              schema:
+                type: string
+                contentEncoding: binary
+        "206":
+          description: The requested byte range
+          content:
+            application/vnd.android.package-archive:
+              schema:
+                type: string
+                contentEncoding: binary
+        "304":
+          $ref: "#/components/responses/NotModified"
+        "400":
+          description: An unknown channel or an empty version
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: No release is known for that version, or it is not cached and not current
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error:
+                  code: unknown_version
+                  message: no release is known for that version
+        "416":
+          description: The requested range lies outside the artifact
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          description: |
+            The release is known but its bytes are not cached yet. Exactly one
+            background fetch was started; retry after the advertised delay.
+          headers:
+            Retry-After:
+              description: Seconds until the cache fill is worth checking again.
+              schema:
+                type: integer
+                examples: [30]
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error:
+                  code: artifact_not_cached
+                  message: the update is being cached, retry shortly
+
+  /health:
+    get:
+      tags: [operations]
+      summary: Liveness
+      description: |
+        True whenever the process is serving. GitHub being unreachable must never
+        make the service look dead while it is still answering clients.
+      responses:
+        "200":
+          description: The process is alive
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    examples: [ok]
+                  time:
+                    type: string
+                    format: date-time
+                  uptime_seconds:
+                    type: integer
+                    format: int64
+                  sync_interval_s:
+                    type: integer
+                    format: int64
+
+  /ready:
+    get:
+      tags: [operations]
+      summary: Readiness
+      description: |
+        200 once the metadata store is readable and at least one channel has
+        completed a synchronisation. Stays 200 through an upstream outage: the
+        last known good release remains servable, which is the point of the cache.
+      responses:
+        "200":
+          description: Updates can be served
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    examples: [ready]
+                  time:
+                    type: string
+                    format: date-time
+                  syncing:
+                    type: boolean
+                  channels:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        channel:
+                          type: string
+                          examples: [release]
+                        current_tag:
+                          type: string
+                        status:
+                          type: string
+                          enum: [ok, no_change, unavailable, error]
+                        last_attempt_at:
+                          type: string
+                          format: date-time
+                        last_success_at:
+                          type: string
+                          format: date-time
+        "503":
+          description: Nothing is servable yet
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    examples: [not_ready]
+                  reason:
+                    type: string
+                    examples: ["metadata store unavailable"]
+
+components:
+  parameters:
+    Channel:
+      name: channel
+      in: path
+      required: true
+      description: |
+        The update channel. Only values this deployment publishes are documented
+        here; the path accepts no owner or repository, by design.
+      schema:
+        type: string
+        examples: [release]
+    Version:
+      name: version
+      in: path
+      required: true
+      description: "`latest`, or an exact release tag such as `v1.4.0`."
+      schema:
+        type: string
+        examples: ["latest", "v1.4.0"]
+    IfNoneMatch:
+      name: If-None-Match
+      in: header
+      required: false
+      schema:
+        type: string
+
+  responses:
+    NotModified:
+      description: The caller already holds the current document.
+    RateLimited:
+      description: The per-client token budget is exhausted.
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error:
+              code: rate_limited
+              message: too many requests, slow down
+
+  schemas:
+    UpdateInfo:
+      type: object
+      description: |
+        The metadata document an Android client consumes. Field names follow the
+        existing client so switching the base URL is the only change it makes.
+      required:
+        - channel
+        - versionCode
+        - versionName
+        - tagName
+        - apkName
+        - size
+        - sha256
+        - releaseNotes
+        - publishedAt
+        - syncedAt
+        - downloadUrl
+        - cached
+      properties:
+        channel:
+          type: string
+          examples: [release]
+        versionCode:
+          type: integer
+          format: int64
+          description: |
+            MAJOR*10000 + MINOR*100 + PATCH, the same rule the client applies to
+            its own version name. Comparison is always numeric.
+          examples: [10400]
+        versionName:
+          type: string
+          examples: ["1.4.0"]
+        tagName:
+          type: string
+          examples: ["v1.4.0"]
+        apkName:
+          type: string
+          examples: ["Agentisco-v1.4.0-release.apk"]
+        size:
+          type: integer
+          format: int64
+          description: Exact byte count the client must receive.
+        sha256:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+          description: |
+            Hex digest of the artifact, published by the release and re-computed
+            by this service while caching it.
+        releaseNotes:
+          type: string
+          description: |
+            The changelog, in the format the client already parses, with every
+            upstream repository reference removed.
+        publishedAt:
+          type: string
+          format: date-time
+        syncedAt:
+          type: string
+          format: date-time
+        downloadUrl:
+          type: string
+          format: uri
+          description: |
+            Absolute URL on this service, pinned to the tag. It never points at
+            an upstream host.
+        cached:
+          type: boolean
+          description: Whether the APK bytes are already on this server.
+    CheckResult:
+      type: object
+      description: Returned when the client sends its own versionCode.
+      allOf:
+        - $ref: "#/components/schemas/UpdateInfo"
+        - type: object
+          properties:
+            updateAvailable:
+              type: boolean
+            currentVersionCode:
+              type: integer
+              format: int64
+            latestVersionCode:
+              type: integer
+              format: int64
+            latestVersionName:
+              type: string
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              description: |
+                Stable machine-readable code: invalid_channel, invalid_version,
+                invalid_version_code, no_release, unknown_version,
+                artifact_not_cached, cache_unavailable, metadata_unavailable,
+                rate_limited, not_found, internal_error.
+            message:
+              type: string
+              description: |
+                Short fixed text. Never an upstream payload, a path, a credential
+                or a stack trace.

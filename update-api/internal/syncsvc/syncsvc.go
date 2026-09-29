@@ -281,17 +281,33 @@ func (s *Syncer) syncChannel(ctx context.Context, channel model.Channel, started
 		"asset", record.ApkName,
 		"bytes", record.Size)
 
+	previous, hadPrevious, err := s.meta.CurrentRelease(ctx, channel)
+	if err != nil {
+		return err
+	}
+	status := metastore.SyncOK
+	if hadPrevious && previous.Tag == record.Tag {
+		status = metastore.SyncNoChange
+	}
+
+	// The metadata is promoted before the bytes are fetched: a client on a slow
+	// link must be able to compare its version the moment the release is known,
+	// and the download endpoint tells the truth about caching either way.
+	if err := s.meta.SetCurrent(ctx, channel, record.Tag, started, status); err != nil {
+		return err
+	}
+	s.logger.Info("sync channel current",
+		"channel", channel.String(),
+		"tag", record.Tag,
+		"version_code", record.VersionCode,
+		"status", string(status),
+		"cached", false)
+
 	cached, err := s.ensureObject(ctx, channel, record)
 	if err != nil {
-		// The release is known even if its bytes could not be fetched, so it is
-		// promoted with cached=false: clients can still check their version, and
-		// the next pass (or an on-demand fill) retries the transfer.
 		s.logger.Warn("apk cache failed",
 			"channel", channel.String(), "tag", record.Tag, "error", publicError(err))
 		if setErr := s.meta.SetCacheState(ctx, channel, record.Tag, metastore.CachePending, ""); setErr != nil {
-			return setErr
-		}
-		if setErr := s.meta.SetCurrent(ctx, channel, record.Tag, started, metastore.SyncOK); setErr != nil {
 			return setErr
 		}
 		return s.meta.RecordAttempt(ctx, channel, started, metastore.SyncUnavailable, err.Error())
@@ -302,23 +318,8 @@ func (s *Syncer) syncChannel(ctx context.Context, channel model.Channel, started
 	if err := s.meta.SetCacheState(ctx, channel, record.Tag, metastore.CacheCached, cached); err != nil {
 		return err
 	}
-	previous, hadPrevious, err := s.meta.CurrentRelease(ctx, channel)
-	if err != nil {
-		return err
-	}
-	status := metastore.SyncOK
-	if hadPrevious && previous.Tag == record.Tag {
-		status = metastore.SyncNoChange
-	}
-	if err := s.meta.SetCurrent(ctx, channel, record.Tag, started, status); err != nil {
-		return err
-	}
-	s.logger.Info("sync channel current",
-		"channel", channel.String(),
-		"tag", record.Tag,
-		"version_code", record.VersionCode,
-		"status", string(status),
-		"cached", true)
+	s.logger.Info("apk ready for download",
+		"channel", channel.String(), "tag", record.Tag, "bytes", record.Size)
 
 	s.prune(ctx, channel)
 	if hadPrevious && previous.Tag != record.Tag {

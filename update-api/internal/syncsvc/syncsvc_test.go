@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -450,6 +451,77 @@ func TestConcurrentFillsShareOneTransfer(t *testing.T) {
 	}
 	if done.key == "" {
 		t.Fatal("first fill published no object")
+	}
+}
+
+// failingAssets serves listings normally and refuses every asset download until
+// it is switched off again - the poor connection a large APK meets in reality.
+type failingAssets struct {
+	inner   *ghfake.Server
+	failing atomic.Bool
+}
+
+func (f *failingAssets) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if f.failing.Load() && strings.Contains(r.URL.Path, "/releases/assets/") {
+		http.Error(w, "synthetic download failure", http.StatusBadGateway)
+		return
+	}
+	f.inner.ServeHTTP(w, r)
+}
+
+// TestMetadataIsPublishedWhileTheBytesFailToArrive: a client must be able to ask
+// "is there a new version?" even while the artifact is still undelivered.
+func TestMetadataIsPublishedWhileTheBytesFailToArrive(t *testing.T) {
+	fake := ghfake.New(harnessToken)
+	fake.AddRelease("v2.0.42", "v2.0.42", "notes", time.Now(),
+		ghfake.AssetInput{Name: "Agentisco-v2.0.42-debug.apk", Bytes: ghfake.SyntheticAPK("debug", 1<<10)})
+	link := &failingAssets{inner: fake, failing: atomic.Bool{}}
+	link.failing.Store(true)
+	h := newHarness(t, link)
+
+	h.syncer.pass(context.Background())
+
+	current, ok, err := h.meta.CurrentRelease(context.Background(), model.ChannelDebug)
+	if err != nil || !ok {
+		t.Fatalf("an undeliverable apk hid its version (ok=%v err=%v)", ok, err)
+	}
+	if current.Tag != "v2.0.42" || current.VersionCode != 20042 {
+		t.Fatalf("wrong release promoted: %+v", current)
+	}
+	if current.CacheState == metastore.CacheCached {
+		t.Fatal("metadata claimed the bytes were cached")
+	}
+	if snapshot, snapErr := h.meta.ChannelSnapshot(context.Background(), model.ChannelDebug); snapErr != nil {
+		t.Fatalf("snapshot: %v", snapErr)
+	} else if snapshot.CurrentTag == "" {
+		t.Fatal("the channel stopped advertising the release that failed to download")
+	}
+
+	entries, err := filepath.Glob(filepath.Join(h.syncer.objects.(*objectstore.FileStore).Root, "staging", "*", "*.apk"))
+	if err != nil {
+		t.Fatalf("glob staging: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("failed pass left scratch files: %v", entries)
+	}
+
+	// The next pass retries the transfer, and the same row turns cached without the
+	// tag or version changing.
+	link.failing.Store(false)
+	h.syncer.pass(context.Background())
+
+	recovered, ok, err := h.meta.CurrentRelease(context.Background(), model.ChannelDebug)
+	if err != nil || !ok {
+		t.Fatalf("retry pass lost the release (ok=%v err=%v)", ok, err)
+	}
+	if recovered.Tag != "v2.0.42" {
+		t.Fatalf("retry changed the promoted tag to %s", recovered.Tag)
+	}
+	if recovered.CacheState != metastore.CacheCached || recovered.ObjectKey == "" {
+		t.Fatalf("retry must cache the apk, got %+v", recovered)
+	}
+	if _, statErr := h.objects.Stat(context.Background(), recovered.ObjectKey); statErr != nil {
+		t.Fatalf("object missing after retry: %v", statErr)
 	}
 }
 
