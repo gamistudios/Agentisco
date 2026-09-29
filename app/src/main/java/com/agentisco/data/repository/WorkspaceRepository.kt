@@ -60,6 +60,32 @@ class WorkspaceRepository(
   private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
   private val appContext: Context? = context?.applicationContext
 
+  /**
+   * What this process is busy with, when an application owns it. Registering here is
+   * what raises the foreground service, so an agent turn, a build stage or a rootfs
+   * download survives the screen going off. A repository built for tests has no
+   * application and simply does not track anything.
+   */
+  private val workRegistry: com.agentisco.background.WorkRegistry? =
+    (context?.applicationContext as? com.agentisco.AgentiscoApplication)?.workRegistry
+
+  /**
+   * The process-level background coordinator: the settings behind it, its permission
+   * checklist and the work a previous process lost.
+   */
+  val backgroundExecution: com.agentisco.background.BackgroundExecution? =
+    (context?.applicationContext as? com.agentisco.AgentiscoApplication)?.backgroundExecution
+
+  /** The registry record for the turn currently running, if any. */
+  private var agentTurnWorkId: String? = null
+
+  /**
+   * Cancels the coroutine driving the turn. The turn is launched by the UI layer and
+   * owns the transcript writes, so only the UI can stop its job; this is how the
+   * notification's Stop action reaches it.
+   */
+  var agentTurnStopRequested: (() -> Unit)? = null
+
   /** SQLite-backed persistence for agent sessions/messages/turn-blocks. */
   val chatStore = AgentChatStore(context)
 
@@ -295,6 +321,11 @@ class WorkspaceRepository(
     val bootstrap = debianBootstrap?.takeIf { it.isBootstrapped() } ?: return@TerminalProcessManager null
     val bins = nativeBinaries ?: return@TerminalProcessManager null
     ProotArgsBuilder(bins, bootstrap.rootfsDir)
+  }.also { manager ->
+    // Every scripted Linux command - an agent tool call, a Run & Build stage, a dev
+    // server - is a child of this process, so the moment one is live the app owes
+    // itself a foreground service to keep the whole tree running.
+    manager.onRunningChanged = { commands -> syncRunningCommands(commands) }
   }
 
   /** Real execution + state behind the Run & Build Center. */
@@ -2487,7 +2518,21 @@ class WorkspaceRepository(
   /** Runs the rootfs bootstrap (download → verify → extract → configure). */
   fun startLinuxBootstrap() {
     val bootstrap = debianBootstrap ?: return
-    repositoryScope.launch { bootstrap.bootstrap() }
+    repositoryScope.launch {
+      // Unpacking a rootfs is minutes of network and I/O, and the screen is
+      // usually off by the time it gets to the slow part.
+      workRegistry?.begin(
+        id = LINUX_BOOTSTRAP_WORK_ID,
+        kind = com.agentisco.background.WorkKind.BOOTSTRAP,
+        label = "Setting up the Linux environment",
+        detail = "Downloading and unpacking the Debian rootfs"
+      )
+      try {
+        bootstrap.bootstrap()
+      } finally {
+        workRegistry?.end(LINUX_BOOTSTRAP_WORK_ID)
+      }
+    }
   }
 
   fun selectTerminalSession(id: String) {
@@ -2620,6 +2665,81 @@ class WorkspaceRepository(
     llmService.cancelActive()
   }
 
+  /**
+   * Publishes this turn as live work for as long as it runs. A turn is the longest
+   * thing the app does - minutes of streaming and commands - and it is the reason the
+   * foreground service exists.
+   */
+  private fun beginAgentTurnWork(label: String) {
+    val registry = workRegistry ?: return
+    val id = "agent-turn-${System.currentTimeMillis()}"
+    agentTurnWorkId = id
+    registry.begin(
+      id = id,
+      kind = com.agentisco.background.WorkKind.AGENT_TURN,
+      label = label,
+      detail = "Starting…",
+      canceller = { stopAgentTurnFromBackground() }
+    )
+    // A turn that starts with the app on screen is the last moment a notification
+    // permission can still be asked politely.
+    backgroundExecution?.evaluateNotificationsPrompt()
+  }
+
+  private fun endAgentTurnWork() {
+    val id = agentTurnWorkId ?: return
+    agentTurnWorkId = null
+    workRegistry?.end(id)
+  }
+
+  /**
+   * Stops the running turn the way the chat's Stop button does. The notification's
+   * action reaches the turn through here because the coroutine driving it belongs to
+   * the UI layer that writes the transcript.
+   */
+  fun stopAgentTurnFromBackground() {
+    cancelAgentGeneration()
+    if (_pendingApproval.value != null) {
+      // Never a denial: the user stopped the turn, they did not refuse the action.
+      resolveApproval(allowed = false, termination = true)
+    }
+    interruptTerminal()
+    agentTurnStopRequested?.invoke()
+  }
+
+  /** The commands live in the rootfs right now, newest not tracked - any will do. */
+  private var runningCommands: List<String> = emptyList()
+
+  /**
+   * Keeps exactly one registry record for the scripted Linux commands: agent tool
+   * calls, build stages and dev servers alike. They are child processes of this app,
+   * so while one of them runs the process must not be allowed to be cached away.
+   */
+  private fun syncRunningCommands(commands: List<TerminalProcessManager.RunningCommand>) {
+    runningCommands = commands.map { it.id }
+    val registry = workRegistry ?: return
+    if (commands.isEmpty()) {
+      registry.end(TERMINAL_WORK_ID)
+      return
+    }
+    // A build stage is a scripted command with a friendlier name in the notification.
+    val isBuild = commands.any { it.id.startsWith("buildrun-") }
+    val label = if (isBuild) "Build is running" else "Linux command is running"
+    val head = commands.first().command.lineSequence().firstOrNull().orEmpty().take(60)
+    val detail = if (commands.size == 1) head else "$head (+${commands.size - 1} more)"
+    if (registry.has(TERMINAL_WORK_ID)) {
+      registry.setProgress(TERMINAL_WORK_ID, label = label, detail = detail)
+    } else {
+      registry.begin(
+        id = TERMINAL_WORK_ID,
+        kind = com.agentisco.background.WorkKind.TERMINAL,
+        label = label,
+        detail = detail,
+        canceller = { runningCommands.firstOrNull()?.let { terminalManager.interrupt(it) } }
+      )
+    }
+  }
+
   /** SIGKILLs one specific running tool call (the task keeps running). */
   fun cancelToolCall(callId: String) {
     agentRuntime.cancelToolCall(callId)
@@ -2638,6 +2758,15 @@ class WorkspaceRepository(
   fun requestApproval(approval: PendingApproval) {
     _approvalDeferred.value = false
     _pendingApproval.value = approval
+    // A turn parked on a decision looks exactly like one that is grinding, so the
+    // background notification has to say the user is the reason it stopped.
+    agentTurnWorkId?.let { id ->
+      workRegistry?.setAttention(
+        id,
+        needed = true,
+        reason = "${approval.title} ${approval.command.take(70)}".trim()
+      )
+    }
   }
 
   /**
@@ -2669,6 +2798,7 @@ class WorkspaceRepository(
   ) {
     _pendingApproval.value = null
     _approvalDeferred.value = false
+    agentTurnWorkId?.let { workRegistry?.setAttention(it, needed = false) }
     agentRuntime.resolvePendingApproval(allowed, answer, rationale, termination)
   }
 
@@ -2775,6 +2905,9 @@ class WorkspaceRepository(
     _agentResponse.value = ""
     _agentWorkingDurationSeconds.value = 0
     resetContextUsage()
+    beginAgentTurnWork(
+      prompt.lineSequence().firstOrNull { it.isNotBlank() }?.take(60)?.ifBlank { null } ?: "Agent task"
+    )
 
     val currentSession = _terminalSessions.value.firstOrNull { it.id == _activeTerminalSessionId.value }
       ?: _terminalSessions.value.first()
@@ -2797,7 +2930,11 @@ class WorkspaceRepository(
       onEvent = { event ->
         _agentEvents.tryEmit(event)
         when (event) {
-          is com.agentisco.agent.model.AgentStreamEvent.Status -> _agentStatusText.value = event.text
+          is com.agentisco.agent.model.AgentStreamEvent.Status -> {
+            _agentStatusText.value = event.text
+            // The notification says what the turn is doing, not just that it exists.
+            agentTurnWorkId?.let { workRegistry?.setProgress(it, detail = event.text.take(100)) }
+          }
           is com.agentisco.agent.model.AgentStreamEvent.Token -> _agentResponse.value += event.text
           is com.agentisco.agent.model.AgentStreamEvent.ContextCompacted ->
             _agentStatusText.value = event.boundary.describe()
@@ -2822,6 +2959,9 @@ class WorkspaceRepository(
       _isAgentWorking.value = false
       _pendingApproval.value = null
       _approvalDeferred.value = false
+      // This is what lets the foreground service down: no turn, no notification,
+      // no wake lock. It runs on every exit path, including a cancelled one.
+      endAgentTurnWork()
     }
     refreshFiles()
 
@@ -2904,6 +3044,12 @@ class WorkspaceRepository(
 
     /** Most git output the app keeps in memory for one command. */
     private const val MAX_GIT_OUTPUT_CHARS = 2_000_000
+
+    /** Registry record for the scripted Linux commands live right now. */
+    private const val TERMINAL_WORK_ID = "linux-commands"
+
+    /** Registry record for the one-shot Debian rootfs bootstrap. */
+    private const val LINUX_BOOTSTRAP_WORK_ID = "linux-bootstrap"
 
     /** System prompt for the Run & Build AI auto-configuration pass. */
     private const val AI_BUILD_CONFIG_SYSTEM_PROMPT =

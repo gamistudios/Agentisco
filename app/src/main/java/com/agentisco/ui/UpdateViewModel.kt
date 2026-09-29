@@ -21,7 +21,14 @@ import kotlinx.coroutines.launch
  */
 class UpdateViewModel(
     private val updateRepository: UpdateRepository,
-    private val preferencesStore: UserPreferencesStore
+    private val preferencesStore: UserPreferencesStore,
+    /**
+     * The process-level background owner. The download is launched on its scope
+     * rather than this view model's, because closing the update dialog is not a
+     * reason to throw away a partially transferred APK; null in tests, where the
+     * view model's own scope is good enough.
+     */
+    private val background: com.agentisco.background.BackgroundExecution? = null
 ) : ViewModel() {
 
     data class UpdateUiState(
@@ -104,12 +111,24 @@ class UpdateViewModel(
         }
     }
 
-    /** Starts (or resumes) the APK download; auto-launches the installer when done. */
+    /**
+     * Starts (or resumes) the APK download on the background scope, then hands
+     * the APK to the installer. A download the user started stays alive even if
+     * this dialog closes or the app goes away — the foreground service keeps it
+     * company. When it finishes while backgrounded, a big process cannot start
+     * the installer, so the ready APK is announced through a notification
+     * instead and the tap performs the launch.
+     */
     fun startDownload() {
         downloadJob?.cancel()
-        downloadJob = viewModelScope.launch {
-            if (updateRepository.downloadUpdate()) {
+        val scope = background?.workScope ?: viewModelScope
+        downloadJob = scope.launch {
+            if (!updateRepository.downloadUpdate()) return@launch
+            background?.dismissInstallReadyNotification()
+            if (background == null || background.isAppForeground.value) {
                 updateRepository.installDownloadedApk()
+            } else {
+                background.showInstallReadyNotification(updateRepository.verifiedInstallIntent())
             }
         }
     }
@@ -121,6 +140,7 @@ class UpdateViewModel(
     fun cancelDownload() {
         updateRepository.cancelDownload()
         downloadJob?.cancel()
+        background?.dismissInstallReadyNotification()
     }
 
     /**
@@ -130,6 +150,7 @@ class UpdateViewModel(
     fun deleteDownloadedFile() {
         updateRepository.deleteDownloadedUpdate()
         downloadJob?.cancel()
+        background?.dismissInstallReadyNotification()
         _uiState.update {
             it.copy(
                 downloadedApkPath = null,

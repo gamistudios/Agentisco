@@ -68,6 +68,15 @@ class UpdateRepository(
     private val _updateProgress = MutableStateFlow(0f)
     val updateProgress: StateFlow<Float> = _updateProgress.asStateFlow()
 
+    /**
+     * The download is tracked as process-level work: it belongs to neither screen,
+     * and a multi-megabyte APK does not stop being useful because the user closed
+     * the update dialog.
+     */
+    private val workRegistry: com.agentisco.background.WorkRegistry? by lazy {
+        (context.applicationContext as? com.agentisco.AgentiscoApplication)?.workRegistry
+    }
+
     private val _updateError = MutableStateFlow<String?>(null)
     val updateError: StateFlow<String?> = _updateError.asStateFlow()
 
@@ -243,6 +252,40 @@ class UpdateRepository(
     }
 
     /**
+     * Downloads the pending release APK as tracked background work, so closing the
+     * update dialog - or the app - does not throw away minutes of transfer.
+     */
+    suspend fun downloadUpdate(): Boolean {
+        val registry = workRegistry
+        val version = _availableUpdate.value?.versionName
+        registry?.begin(
+          id = UPDATE_DOWNLOAD_WORK_ID,
+          kind = com.agentisco.background.WorkKind.UPDATE_DOWNLOAD,
+          label = "Downloading an update",
+          detail = if (version.isNullOrBlank()) "Starting" else "v$version",
+          canceller = { cancelDownload() }
+        )
+        return try {
+            runDownload()
+        } finally {
+            registry?.end(UPDATE_DOWNLOAD_WORK_ID)
+        }
+    }
+
+    /**
+     * Publishes download progress and mirrors it into the background notification, so
+     * a user who left the app can still see the transfer moving.
+     */
+    private fun publishProgress(fraction: Float) {
+        _updateProgress.value = fraction
+        workRegistry?.setProgress(
+            id = UPDATE_DOWNLOAD_WORK_ID,
+            label = "Downloading an update",
+            detail = if (fraction <= 0f) "Starting" else "${(fraction * 100).toInt()}% of the APK"
+        )
+    }
+
+    /**
      * Downloads the pending release APK, resuming from the bytes really present on
      * disk.
      *
@@ -255,7 +298,7 @@ class UpdateRepository(
      * multi-part/resumed transfer is proven present), and really our APK. Anything
      * else surfaces an error through [updateError] and removes the unusable file.
      */
-    suspend fun downloadUpdate(): Boolean = withContext(Dispatchers.IO) {
+    private suspend fun runDownload(): Boolean = withContext(Dispatchers.IO) {
         val update = _availableUpdate.value ?: return@withContext false
         val file = updateFile()
         // Resume markers written by older builds are no longer trusted; a stale one
@@ -312,8 +355,7 @@ class UpdateRepository(
 
                     val startOffset = offset
                     val startedAtZero = startOffset == 0L
-                    _updateProgress.value =
-                        UpdateDownloadVerifier.progress(startOffset, expectedSize)
+                    publishProgress(UpdateDownloadVerifier.progress(startOffset, expectedSize))
 
                     RandomAccessFile(file, "rw").use { raf ->
                         raf.seek(startOffset)
@@ -328,9 +370,11 @@ class UpdateRepository(
                             if (read == -1) break
                             raf.write(buffer, 0, read)
                             bytesCopied += read
-                            _updateProgress.value = UpdateDownloadVerifier.progress(
-                                bytesOnDisk = startOffset + bytesCopied,
-                                expectedSize = expectedSize
+                            publishProgress(
+                                UpdateDownloadVerifier.progress(
+                                    bytesOnDisk = startOffset + bytesCopied,
+                                    expectedSize = expectedSize
+                                )
                             )
                         }
                     }
@@ -345,10 +389,12 @@ class UpdateRepository(
                         throw Exception(decision.reason ?: "Download verification failed")
                     }
 
-                    _updateProgress.value = UpdateDownloadVerifier.progress(
-                        bytesOnDisk = bytesOnDisk,
-                        expectedSize = expectedSize,
-                        verified = true
+                    publishProgress(
+                        UpdateDownloadVerifier.progress(
+                            bytesOnDisk = bytesOnDisk,
+                            expectedSize = expectedSize,
+                            verified = true
+                        )
                     )
                     writeMarker(update)
                     _downloadedApkPath.value = file.absolutePath
@@ -480,9 +526,23 @@ class UpdateRepository(
     }
 
     fun installDownloadedApk(): Boolean {
-        val path = _downloadedApkPath.value ?: return false
+        val intent = verifiedInstallIntent() ?: return false
+        return runCatching {
+            context.startActivity(intent)
+            true
+        }.getOrDefault(false)
+    }
+
+    /**
+     * The installer intent for the verified APK on disk, or null when there is no
+     * usable file. Split out because an app that is not on screen may not start a
+     * screen: a download that finishes while the user is elsewhere has to hand this
+     * over as a notification action, where their tap is what opens the installer.
+     */
+    fun verifiedInstallIntent(): Intent? {
+        val path = _downloadedApkPath.value ?: return null
         val realPath = File(path)
-        if (!realPath.exists()) return false
+        if (!realPath.exists()) return null
 
         // Final gate in front of the package installer: whatever marked the file
         // ready, it must still be the expected size, hash to the release digest when
@@ -501,26 +561,21 @@ class UpdateRepository(
             _updateProgress.value = 0f
             _updateError.value = decision.reason ?: UpdateDownloadVerifier.NOT_AN_APK_REASON
             _updateState.value = UpdateState.AVAILABLE
-            return false
+            return null
         }
 
-        return try {
+        return runCatching {
             val uri = FileProvider.getUriForFile(
                 context,
                 "${context.packageName}.updateprovider",
                 realPath
             )
-            val intent = Intent(Intent.ACTION_VIEW).apply {
+            Intent(Intent.ACTION_VIEW).apply {
                 setDataAndType(uri, "application/vnd.android.package-archive")
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
-            context.startActivity(intent)
-            true
-        } catch (e: Exception) {
-            e.printStackTrace()
-            false
-        }
+        }.getOrNull()
     }
 
     fun formatLastCheck(timestampMs: Long): String {
@@ -541,5 +596,6 @@ class UpdateRepository(
         private const val MAX_ATTEMPTS = 5
         private const val RETRY_DELAY_MS = 2_000L
         private const val BUFFER_SIZE = 64 * 1024
+        private const val UPDATE_DOWNLOAD_WORK_ID = "update-download"
     }
 }

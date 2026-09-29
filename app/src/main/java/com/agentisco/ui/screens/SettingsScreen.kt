@@ -1,5 +1,7 @@
 package com.agentisco.ui.screens
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -237,6 +239,8 @@ fun SettingsScreen(
         }
       }
     }
+
+    item { BackgroundExecutionCard(viewModel) }
 
     // AI Providers & Models — managed on their own screen. The provider list
     // grows long (10+ providers is normal), so embedding it here buried every
@@ -531,6 +535,184 @@ fun SettingsScreen(
  * Debug-only shortcut back to [com.agentisco.ui.components.CrashLogDialog], so
  * a captured crash can be re-opened after dismissing the launch-time popup.
  */
+/**
+ * Everything that decides whether Agentisco survives leaving the screen: the
+ * master switch, the two battery-conscious knobs under it, and the live
+ * permission checklist that only the user can complete.
+ */
+@Composable
+private fun BackgroundExecutionCard(viewModel: WorkspaceViewModel) {
+  val context = LocalContext.current
+  val allowed by viewModel.allowBackgroundExecution.collectAsState()
+  val wakeLock by viewModel.backgroundWakeLockEnabled.collectAsState()
+  val terminalHold by viewModel.terminalHeld.collectAsState()
+  val requirements by viewModel.backgroundRequirements.collectAsState()
+  val interrupted by viewModel.interruptedBackgroundWork.collectAsState()
+
+  // The notification ask is a runtime permission, so it has to be raised by the
+  // screen the user is looking at — BackgroundPermissions cannot do it.
+  val requestNotifications = rememberLauncherForActivityResult(
+    ActivityResultContracts.RequestPermission()
+  ) { granted ->
+    if (granted) viewModel.dismissNotificationsPrompt() else viewModel.markNotificationsAsked()
+  }
+
+  Card(
+    modifier = Modifier
+      .fillMaxWidth()
+      .clip(RoundedCornerShape(12.dp))
+      .border(1.dp, DarkBorder, RoundedCornerShape(12.dp)),
+    colors = CardDefaults.cardColors(containerColor = DarkSurface)
+  ) {
+    Column(modifier = Modifier.padding(14.dp)) {
+      Text("Background execution", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+      Text(
+        "Keep agent turns, Linux builds, terminal servers and downloads running after you leave the screen.",
+        color = TextMuted,
+        fontSize = 11.sp,
+        lineHeight = 14.sp
+      )
+      Spacer(modifier = Modifier.height(6.dp))
+
+      ToggleRow(
+        title = "Run while backgrounded",
+        subtitle = "Raises a foreground service with an ongoing notification for as long as work is live, and stops it the moment nothing is running.",
+        checked = allowed,
+        tag = "switch_background_execution",
+        onCheckedChange = { viewModel.setAllowBackgroundExecution(it) }
+      )
+
+      if (allowed) {
+        ToggleRow(
+          title = "Keep the CPU awake",
+          subtitle = "A partial wake lock for work that computes — a turn running tools, a build, apt. Never for a download, and never longer than six hours in one stretch.",
+          checked = wakeLock,
+          tag = "switch_background_wakelock",
+          onCheckedChange = { viewModel.setBackgroundWakeLockEnabled(it) }
+        )
+        ToggleRow(
+          title = "Keep the terminal awake",
+          subtitle = "Hold the CPU for a shell you started by hand, so a dev server you launched keeps serving. Turn it off when you are done with it.",
+          checked = terminalHold,
+          tag = "switch_terminal_hold",
+          onCheckedChange = { viewModel.setTerminalHeld(it) }
+        )
+      }
+
+      HorizontalDivider(color = DarkBorderSubtle, modifier = Modifier.padding(vertical = 10.dp))
+
+      requirements.forEach { requirement ->
+        BackgroundRequirementRow(
+          requirement = requirement,
+          onAction = { action ->
+            if (action == com.agentisco.background.RequirementAction.REQUEST_NOTIFICATIONS) {
+              requestNotifications.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+            } else {
+              viewModel.performBackgroundAction(context, action)
+            }
+          }
+        )
+      }
+
+      if (interrupted.isNotEmpty()) {
+        HorizontalDivider(color = DarkBorderSubtle, modifier = Modifier.padding(vertical = 10.dp))
+        Column(
+          modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(WarningAmberBg.copy(alpha = 0.45f))
+            .padding(10.dp)
+            .testTag("card_interrupted_work")
+        ) {
+          Text(
+            "Interrupted while Agentisco was closed",
+            color = WarningAmber,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold
+          )
+          interrupted.forEach { entry ->
+            Text(
+              entry.label,
+              color = TextSecondary,
+              fontSize = 11.sp,
+              fontFamily = FontFamily.Monospace
+            )
+          }
+          Text(
+            "Nothing was restarted automatically — resuming spends your data and your API quota.",
+            color = TextMuted,
+            fontSize = 11.sp,
+            lineHeight = 14.sp
+          )
+          TextButton(onClick = { viewModel.acknowledgeInterruptedWork() }) {
+            Text("Dismiss", color = ElectricBlueGlow, fontSize = 12.sp)
+          }
+        }
+      }
+    }
+  }
+}
+
+@Composable
+private fun BackgroundRequirementRow(
+  requirement: com.agentisco.background.BackgroundRequirement,
+  onAction: (com.agentisco.background.RequirementAction) -> Unit
+) {
+  val statusColor = when {
+    requirement.status == com.agentisco.background.RequirementStatus.GRANTED -> TerminalGreen
+    requirement.status == com.agentisco.background.RequirementStatus.ACTION_REQUIRED && requirement.blocking -> DangerRed
+    requirement.status == com.agentisco.background.RequirementStatus.ACTION_REQUIRED -> WarningAmber
+    else -> TextMuted
+  }
+  Row(
+    modifier = Modifier
+      .fillMaxWidth()
+      .padding(vertical = 5.dp),
+    horizontalArrangement = Arrangement.SpaceBetween,
+    verticalAlignment = Alignment.CenterVertically
+  ) {
+    Column(modifier = Modifier.weight(1f)) {
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(requirement.title, color = TextPrimary, fontSize = 13.sp)
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+          when (requirement.status) {
+            com.agentisco.background.RequirementStatus.GRANTED -> "OK"
+            com.agentisco.background.RequirementStatus.ACTION_REQUIRED -> "Needs action"
+            com.agentisco.background.RequirementStatus.NOT_SUPPORTED -> "Not needed"
+            com.agentisco.background.RequirementStatus.DISABLED_BY_USER -> "Off"
+          },
+          color = statusColor,
+          fontSize = 10.sp,
+          fontWeight = FontWeight.Bold
+        )
+      }
+      Text(
+        requirement.description,
+        color = TextMuted,
+        fontSize = 11.sp,
+        lineHeight = 14.sp
+      )
+    }
+    if (requirement.action != com.agentisco.background.RequirementAction.NONE) {
+      Spacer(modifier = Modifier.width(8.dp))
+      Text(
+        if (requirement.status == com.agentisco.background.RequirementStatus.GRANTED) "Settings" else "Fix",
+        color = ElectricBlueGlow,
+        fontSize = 12.sp,
+        fontWeight = FontWeight.Bold,
+        modifier = Modifier
+          .clip(RoundedCornerShape(6.dp))
+          .border(1.dp, DarkBorder, RoundedCornerShape(6.dp))
+          .background(DarkSurfaceElevated)
+          .padding(horizontal = 8.dp, vertical = 4.dp)
+          .clickable { onAction(requirement.action) }
+          .testTag("btn_requirement_${requirement.key.name.lowercase()}")
+      )
+    }
+  }
+}
+
 @Composable
 private fun DebugDiagnosticsCard(onShowCrashLog: () -> Unit) {
   Card(

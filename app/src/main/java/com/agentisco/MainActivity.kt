@@ -1,9 +1,14 @@
 package com.agentisco
 
+import android.Manifest
+import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -23,6 +28,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.agentisco.BuildConfig
+import com.agentisco.background.WorkNotifications
 import com.agentisco.core.model.AppDestination
 import com.agentisco.data.repository.UpdateRepository
 import com.agentisco.data.repository.WorkspaceRepository
@@ -36,13 +42,29 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
+
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     enableEdgeToEdge()
+    recordWorkNotificationEntry()
     setContent {
       AgentiscoTheme {
         AgentIDEApp()
       }
+    }
+  }
+
+  // singleTop: a notification tap while the app is alive arrives here rather than
+  // creating a second instance.
+  override fun onNewIntent(intent: Intent) {
+    super.onNewIntent(intent)
+    setIntent(intent)
+    recordWorkNotificationEntry()
+  }
+
+  private fun recordWorkNotificationEntry() {
+    if (intent?.action == WorkNotifications.ACTION_OPEN) {
+      (application as AgentiscoApplication).backgroundExecution.markOpenedFromNotification()
     }
   }
 }
@@ -64,7 +86,11 @@ fun AgentIDEApp(
     viewModel(
       factory = viewModelFactory {
         initializer {
-          UpdateViewModel(app.updateRepository, app.userPreferencesStore)
+          UpdateViewModel(
+            updateRepository = app.updateRepository,
+            preferencesStore = app.userPreferencesStore,
+            background = app.backgroundExecution
+          )
         }
       }
     )
@@ -99,6 +125,35 @@ fun AgentIDEApp(
   // Kick off a background update check when the auto-update toggle allows it.
   LaunchedEffect(Unit) {
     updateViewModel.checkForUpdates(isAuto = true)
+  }
+
+  // Android 13+ hides the "still working" notification until the user grants it,
+  // but a permission dialog on app start is rude. BackgroundExecution therefore
+  // raises this flag only once real work is running; the ask happens then, and
+  // never again after a refusal.
+  val notificationsPromptRequested by viewModel.notificationsPromptRequested.collectAsState()
+  val requestNotifications = rememberLauncherForActivityResult(
+    ActivityResultContracts.RequestPermission()
+  ) { granted ->
+    if (granted) viewModel.dismissNotificationsPrompt() else viewModel.markNotificationsAsked()
+  }
+  LaunchedEffect(notificationsPromptRequested) {
+    if (!notificationsPromptRequested) return@LaunchedEffect
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+      requestNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+    } else {
+      viewModel.markNotificationsAsked()
+    }
+  }
+
+  // Entered from a work notification: show the settings card that explains the
+  // interruption and its remedies, which is also where the notice is dismissed.
+  val openedFromNotification by viewModel.openedFromNotification.collectAsState()
+  LaunchedEffect(openedFromNotification) {
+    if (openedFromNotification) {
+      viewModel.navigateTo(AppDestination.SETTINGS)
+      viewModel.acknowledgeOpenedFromNotification()
+    }
   }
 
   // Handle system back navigation

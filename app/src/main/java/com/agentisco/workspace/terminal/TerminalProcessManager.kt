@@ -18,8 +18,35 @@ class TerminalProcessManager(
   private val argsBuilderProvider: () -> ProotArgsBuilder?
 ) {
 
-  private val activeProcesses = ConcurrentHashMap<String, Process>()
+  private val activeProcesses = ConcurrentHashMap<String, Running>()
   private val backgrounds = ConcurrentHashMap<String, BackgroundRun>()
+
+  /**
+   * Called whenever the set of live commands changes, with the commands themselves.
+   * The app keeps a foreground service up while any of them runs, so a build the
+   * agent started does not get killed the moment the screen goes off.
+   */
+  var onRunningChanged: ((List<RunningCommand>) -> Unit)? = null
+
+  /** One live command: the id [interrupt] accepts, and the command line it runs. */
+  data class RunningCommand(val id: String, val command: String)
+
+  /** A child process of this app plus the command it is running. */
+  private class Running(val process: Process, val label: String)
+
+  private fun track(key: String, process: Process, label: String) {
+    activeProcesses[key] = Running(process, label)
+    notifyRunning()
+  }
+
+  private fun untrack(key: String) {
+    if (activeProcesses.remove(key) != null) notifyRunning()
+  }
+
+  private fun notifyRunning() {
+    val callback = onRunningChanged ?: return
+    callback(activeProcesses.map { (key, running) -> RunningCommand(key, running.label) })
+  }
 
   /** A command the agent started and did not wait for. */
   private class BackgroundRun(val command: String) {
@@ -71,7 +98,7 @@ class TerminalProcessManager(
       val processBuilder = ProcessBuilder(launched.argv).redirectErrorStream(false)
       processBuilder.environment().putAll(launched.env)
       val process = processBuilder.start()
-      activeProcesses[session.id] = process
+      track(session.id, process, clean)
 
       val stdoutThread = Thread {
         try {
@@ -93,10 +120,10 @@ class TerminalProcessManager(
       val exitCode = process.waitFor()
       stdoutThread.join(1000)
       stderrThread.join(1000)
-      activeProcesses.remove(session.id)
+      untrack(session.id)
       return@withContext exitCode
     } catch (e: Exception) {
-      activeProcesses.remove(session.id)
+      untrack(session.id)
       onLine(TerminalLine("Failed to run command in Linux environment: ${e.localizedMessage}", TerminalLineType.STDERR))
       return@withContext -1
     }
@@ -124,7 +151,7 @@ class TerminalProcessManager(
       val processBuilder = ProcessBuilder(launched.argv).redirectErrorStream(false)
       processBuilder.environment().putAll(launched.env)
       val process = processBuilder.start()
-      activeProcesses[runId] = process
+      track(runId, process, clean)
       val collect = { stream: java.io.InputStream ->
         Thread {
           try {
@@ -141,7 +168,7 @@ class TerminalProcessManager(
           null
         }
         synchronized(run) { run.exitCode = code }
-        activeProcesses.remove(runId)
+        untrack(runId)
       }.start()
       return@withContext runId
     } catch (e: Exception) {
@@ -155,7 +182,7 @@ class TerminalProcessManager(
     val run = backgrounds[id] ?: return null
     val (tail, furtherHidden) = run.tail(maxLines)
     val exit = synchronized(run) { run.exitCode }
-    val running = activeProcesses[id]?.isAlive ?: (exit == null)
+    val running = activeProcesses[id]?.process?.isAlive ?: (exit == null)
     return BackgroundStatus(
       id = id,
       command = run.command,
@@ -173,10 +200,10 @@ class TerminalProcessManager(
       .mapNotNull { readBackground(it, 0) }
 
   fun interrupt(sessionId: String): Boolean {
-    val process = activeProcesses[sessionId]
-    return if (process != null && process.isAlive) {
-      process.destroyForcibly()
-      activeProcesses.remove(sessionId)
+    val running = activeProcesses[sessionId]
+    return if (running != null && running.process.isAlive) {
+      running.process.destroyForcibly()
+      untrack(sessionId)
       true
     } else false
   }
@@ -187,9 +214,9 @@ class TerminalProcessManager(
    * EOF and quit instead of reading the answer.
    */
   fun writeInput(sessionId: String, input: String): Boolean {
-    val process = activeProcesses[sessionId] ?: return false
-    if (!process.isAlive) return false
-    return writeLine(process.outputStream, input)
+    val running = activeProcesses[sessionId] ?: return false
+    if (!running.process.isAlive) return false
+    return writeLine(running.process.outputStream, input)
   }
 
   internal fun writeLine(stdin: java.io.OutputStream, input: String): Boolean =
@@ -199,10 +226,8 @@ class TerminalProcessManager(
       true
     }.getOrDefault(false)
 
-  fun isRunning(sessionId: String): Boolean {
-    val p = activeProcesses[sessionId]
-    return p != null && p.isAlive
-  }
+  fun isRunning(sessionId: String): Boolean =
+    activeProcesses[sessionId]?.process?.isAlive == true
 
   /** Builds the proot argv + environment both execution paths need. */
   private fun launch(command: String, projectDir: File?, onError: (String) -> Unit): Launched? {

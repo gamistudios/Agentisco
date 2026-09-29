@@ -72,6 +72,68 @@ class WorkspaceViewModel(
 
   val isAgentWorking: StateFlow<Boolean> = repository.isAgentWorking
   val agentStatusText: StateFlow<String> = repository.agentStatusText
+
+  // ---- Background execution ----
+  private val background = repository.backgroundExecution
+
+  val backgroundRequirements: StateFlow<List<com.agentisco.background.BackgroundRequirement>> =
+    background?.requirements ?: MutableStateFlow(emptyList())
+
+  val allowBackgroundExecution: StateFlow<Boolean> =
+    background?.allowBackgroundExecution ?: MutableStateFlow(false)
+
+  val backgroundWakeLockEnabled: StateFlow<Boolean> =
+    background?.wakeLockEnabled ?: MutableStateFlow(false)
+
+  val terminalHeld: StateFlow<Boolean> = background?.terminalHeld ?: MutableStateFlow(false)
+
+  /** Work a previous process was running when it died, offered back once. */
+  val interruptedBackgroundWork: StateFlow<List<com.agentisco.background.JournalEntry>> =
+    background?.interruptedWork ?: MutableStateFlow(emptyList())
+
+  /** True while the UI should ask for notification permission. */
+  val notificationsPromptRequested: StateFlow<Boolean> =
+    background?.notificationsPromptRequested ?: MutableStateFlow(false)
+
+  /** True when a work notification, not the launcher icon, brought the user back. */
+  val openedFromNotification: StateFlow<Boolean> =
+    background?.openedFromNotification ?: MutableStateFlow(false)
+
+  fun setAllowBackgroundExecution(enabled: Boolean) {
+    background?.setAllowBackgroundExecution(enabled)
+  }
+
+  fun setBackgroundWakeLockEnabled(enabled: Boolean) {
+    background?.setWakeLockEnabled(enabled)
+  }
+
+  fun setTerminalHeld(enabled: Boolean) {
+    background?.setTerminalHold(enabled)
+  }
+
+  fun markNotificationsAsked() {
+    background?.markNotificationsAsked()
+  }
+
+  fun dismissNotificationsPrompt() {
+    background?.resolveNotificationsPrompt()
+  }
+
+  /** The tap already landed where it promised; the flag must not fire twice. */
+  fun acknowledgeOpenedFromNotification() {
+    background?.acknowledgeOpenedFromNotification()
+  }
+
+  /** The user has seen the interruption in the app; the notice is spent. */
+  fun acknowledgeInterruptedWork() {
+    background?.consumeInterruptedWork()
+  }
+
+  fun performBackgroundAction(
+    context: android.content.Context,
+    action: com.agentisco.background.RequirementAction
+  ): Boolean = background?.let { com.agentisco.background.BackgroundPermissions.perform(context, action) } ?: false
+
   val agentSteps: StateFlow<List<AgentTaskStep>> = repository.agentSteps
   val toolExecutions: StateFlow<List<ToolExecution>> = repository.toolExecutions
   val pendingApproval: StateFlow<PendingApproval?> = repository.pendingApproval
@@ -267,6 +329,9 @@ class WorkspaceViewModel(
   }
 
   init {
+    // The notification's Stop action asks the repository to end the turn; only this
+    // view model can cancel the coroutine that drives it, so the hook lives here.
+    repository.agentTurnStopRequested = { agentJob?.cancel() }
     viewModelScope.launch {
       repository.agentEvents.collect { event -> onAgentEvent(event) }
     }

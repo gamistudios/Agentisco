@@ -20,9 +20,33 @@ class AgentiscoApplication : Application() {
   /** Update-API backed checker/downloader (resumable, verified against the asset digest). */
   val updateRepository: UpdateRepository by lazy { UpdateRepository(this) }
 
+  /**
+   * Identifies this process start. The work journal records it with every running
+   * task, so the next start can tell "still going over here" from "died with the
+   * last process" - only the latter is worth interrupting the user about.
+   */
+  val processToken: String = java.util.UUID.randomUUID().toString()
+
+  /** Everything Agentisco is busy on right now, whoever launched it. */
+  val workRegistry: com.agentisco.background.WorkRegistry by lazy {
+    com.agentisco.background.WorkRegistry()
+  }
+
+  /** Foreground service, wake lock, permission checklist and recovery for [workRegistry]. */
+  val backgroundExecution: com.agentisco.background.BackgroundExecution by lazy {
+    com.agentisco.background.BackgroundExecution(
+      appContext = this,
+      prefs = userPreferencesStore,
+      registry = workRegistry,
+      journal = com.agentisco.background.WorkJournal(this),
+      processToken = processToken
+    )
+  }
+
   override fun onCreate() {
     super.onCreate()
     installCrashCapture()
+    backgroundExecution.start()
   }
 
   /** Returns the previous run's captured crash log, or null if there was none. */
