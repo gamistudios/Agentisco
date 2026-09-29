@@ -7,7 +7,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.agentisco.AgentiscoApplication
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -17,8 +17,10 @@ import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 
 /**
- * The service's own promises: it only goes foreground when there is live work, it
- * says what that work is, and a Stop button reaches exactly the task it names.
+ * The service's own promises: every start command is answered with startForeground,
+ * because Android crashes the app over a missing one, whatever the registry looks
+ * like by the time the service gets there; it says what the live work is; and a Stop
+ * button reaches exactly the task it names.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -103,9 +105,37 @@ class AgentWorkServiceTest {
   }
 
   @Test
-  fun `an empty registry raises no foreground notification`() {
+  fun `a start that arrives after its work has gone still answers the platform contract`() {
+    // Android gives a service reached through startForegroundService() about ten
+    // seconds to call startForeground(), and tells the service nothing about which of
+    // its starts were delivered that way. Skipping the call is what a quick Linux
+    // command used to cause by finishing before the service was even created, and the
+    // system answers minutes later with ForegroundServiceDidNotStartInTimeException on
+    // the main thread.
     val service = startWith()
-    assertNull("no work, no service notice", foregroundNotification(service))
+    val notice = foregroundNotification(service)
+
+    assertNotNull("the contract is answered even with nothing left to show", notice)
+    assertEquals(
+      "Nothing is running",
+      notice!!.extras.getCharSequence(android.app.Notification.EXTRA_TEXT)?.toString()
+    )
+    assertTrue("the service that found no work stops itself", shadowOf(service).isStoppedBySelf)
+  }
+
+  @Test
+  fun `a second start re-raises the service instead of quietly updating the notice`() {
+    registry.begin("a", WorkKind.AGENT_TURN, "first task")
+    val service = startWith()
+    registry.begin("b", WorkKind.TERMINAL, "second task")
+
+    startWith()
+
+    assertEquals(
+      "each start re-arms the platform's deadline, so each one is answered in full",
+      "2 tasks running",
+      foregroundNotification(service)?.extras?.getCharSequence(android.app.Notification.EXTRA_TITLE)?.toString()
+    )
   }
 
   @Test

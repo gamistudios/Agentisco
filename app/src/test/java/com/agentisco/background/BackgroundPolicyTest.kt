@@ -31,19 +31,53 @@ class BackgroundPolicyTest {
   // ——— the foreground service ———
 
   @Test
-  fun `the service only runs while work is live and the user allowed background work`() {
-    val live = listOf(work("a", WorkKind.AGENT_TURN))
-    assertTrue(
-      "live work must raise the service",
-      BackgroundPolicy.shouldRunForegroundService(live, allowBackgroundExecution = true)
+  fun `the service is raised for live work only once the app has left the screen`() {
+    val turn = listOf(work("a", WorkKind.AGENT_TURN))
+    assertEquals(
+      "work with nobody watching has to be protected",
+      ServiceDecision.START,
+      BackgroundPolicy.foregroundServiceDecision(
+        turn, allowBackgroundExecution = true, appVisible = false
+      )
     )
-    assertFalse(
-      "an empty registry must not leave a service running",
-      BackgroundPolicy.shouldRunForegroundService(emptyList(), allowBackgroundExecution = true)
+    assertEquals(
+      "a visible app is already the top priority process, and one already running is " +
+        "left alone rather than torn down for the length of a glance",
+      ServiceDecision.NONE,
+      BackgroundPolicy.foregroundServiceDecision(
+        turn, allowBackgroundExecution = true, appVisible = true
+      )
     )
-    assertFalse(
+    assertEquals(
       "the master switch wins over everything",
-      BackgroundPolicy.shouldRunForegroundService(live, allowBackgroundExecution = false)
+      ServiceDecision.STOP,
+      BackgroundPolicy.foregroundServiceDecision(
+        turn, allowBackgroundExecution = false, appVisible = false
+      )
+    )
+  }
+
+  @Test
+  fun `an empty registry always stops the service`() {
+    listOf(true, false).forEach { visible ->
+      assertEquals(
+        "nothing is running, so nothing may claim to be (appVisible=$visible)",
+        ServiceDecision.STOP,
+        BackgroundPolicy.foregroundServiceDecision(
+          emptyList(), allowBackgroundExecution = true, appVisible = visible
+        )
+      )
+    }
+  }
+
+  @Test
+  fun `a terminal the user asked to keep awake is protected even in the foreground`() {
+    assertEquals(
+      "the hold is a promise about the CPU, not a command that happens to be running",
+      ServiceDecision.START,
+      BackgroundPolicy.foregroundServiceDecision(
+        listOf(work("h", WorkKind.TERMINAL_HOLD)), allowBackgroundExecution = true, appVisible = true
+      )
     )
   }
 

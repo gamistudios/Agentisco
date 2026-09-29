@@ -21,9 +21,14 @@ import kotlinx.coroutines.launch
  * Keeps Agentisco's process - and therefore the agent turn, the Linux commands it
  * spawns and any download it owns - alive once the app leaves the screen.
  *
- * The service exists for exactly as long as [WorkRegistry] holds work: [BackgroundExecution]
- * starts it when the first record appears and this stops itself when the last one
- * closes, so an idle app never carries a foreground service.
+ * The service covers the stretch when [WorkRegistry] holds work and no Agentisco
+ * screen is up: [BackgroundExecution] starts it as the app leaves the screen, and this
+ * stops itself when the last record closes, so an idle app never carries a foreground
+ * service and a visible one never needs one.
+ *
+ * Every command it receives is answered with [ServiceCompat.startForeground] before
+ * anything else is decided, because Android cannot be asked how a start was delivered
+ * and punishes the guess wrong with a crash.
  *
  * Recovery after a kill is deliberately not this service's job: a restarted process
  * cannot rebuild a coroutine, a socket or a child process that died with it, so
@@ -62,13 +67,20 @@ class AgentWorkService : Service() {
       if (id != null) live?.cancel(id)
     }
     val work = live?.active?.value.orEmpty()
+    // A plain start cannot be told apart from a foreground start, and the platform
+    // offers no way to ask, so every command answers with startForeground() before it
+    // decides anything else. Skipping that is the
+    // ForegroundServiceDidNotStartInTimeException crash, and it is reachable for real:
+    // a quick Linux command ends while this service is still being created, so the
+    // start arrives to find nothing left to protect.
+    publish(work, fromStartCommand = true)
     if (work.isEmpty()) {
+      // The idle notice exists only to satisfy that contract, and leaves with the
+      // service in the same instant it appeared.
       stopForegroundCompat()
       stopSelf()
       return START_NOT_STICKY
     }
-    // The system requires startForeground() right after a start command.
-    apply(work)
     watch(live!!)
     return START_NOT_STICKY
   }
@@ -92,21 +104,26 @@ class AgentWorkService : Service() {
           stopForegroundCompat()
           stopSelf()
         } else {
-          apply(work)
+          publish(work, fromStartCommand = false)
         }
       }
     }
   }
 
-  private fun apply(work: List<ActiveWork>) {
+  /**
+   * Puts the current work on screen. A start command re-raises the service, because
+   * the platform arms its deadline for each one; a change that only arrives through
+   * the collector updates the notification the service is already standing on.
+   */
+  private fun publish(work: List<ActiveWork>, fromStartCommand: Boolean) {
     val holds = holdWakeLockIfNeeded(work)
-    if (foregrounded) {
+    if (foregrounded && !fromStartCommand) {
       notificationManager()?.notify(
         WorkNotifications.WORK_NOTIFICATION_ID,
         WorkNotifications.buildWorkNotification(this, work, holds)
       )
     } else {
-      enterForeground(work)
+      enterForeground(work, holds)
     }
     postAttentionNotification(work)
   }
@@ -129,14 +146,13 @@ class AgentWorkService : Service() {
     }
   }
 
-  private fun enterForeground(work: List<ActiveWork>) {
+  private fun enterForeground(work: List<ActiveWork>, wakeLockHeld: Boolean) {
     WorkNotifications.ensureChannels(this)
-    val holds = wakeLock?.isHeld == true
     val started = runCatching {
       ServiceCompat.startForeground(
         this,
         WorkNotifications.WORK_NOTIFICATION_ID,
-        WorkNotifications.buildWorkNotification(this, work, holds),
+        WorkNotifications.buildWorkNotification(this, work, wakeLockHeld),
         // Android 14 is where the type constant exists; below it the platform does
         // not consult the type of an app that targets SDK 28.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
@@ -146,8 +162,11 @@ class AgentWorkService : Service() {
         }
       )
     }.isSuccess
-    foregrounded = started
-    if (!started) app?.backgroundExecution?.reportForegroundServiceAllowed(false)
+    if (started) {
+      foregrounded = true
+    } else if (!foregrounded) {
+      app?.backgroundExecution?.reportForegroundServiceAllowed(false)
+    }
   }
 
   /**

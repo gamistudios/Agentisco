@@ -31,8 +31,31 @@ object BackgroundPolicy {
   /** Hard ceiling on how long one uninterrupted run may hold the CPU. */
   const val WAKE_LOCK_BUDGET_MS = 6 * 60 * 60_000L
 
-  fun shouldRunForegroundService(active: List<ActiveWork>, allowBackgroundExecution: Boolean): Boolean =
-    allowBackgroundExecution && active.isNotEmpty()
+  /**
+   * Whether the foreground service is owed right now.
+   *
+   * A service earns its ongoing notification only once the app has left the screen:
+   * while an activity is visible the process already sits at the top of the priority
+   * list, and Agentisco runs a short Linux command every few seconds. Raising and
+   * tearing down a service for each of those makes the notification flicker, and it
+   * opens the window in which a command ends before the service has even been created
+   * - which Android answers with ForegroundServiceDidNotStartInTimeException.
+   *
+   * [ServiceDecision.NONE] deliberately leaves a service that is already running
+   * alone, so a turn that was protected when the app went off screen stays protected
+   * when the user glances at it again.
+   */
+  fun foregroundServiceDecision(
+    active: List<ActiveWork>,
+    allowBackgroundExecution: Boolean,
+    appVisible: Boolean
+  ): ServiceDecision {
+    if (!allowBackgroundExecution || active.isEmpty()) return ServiceDecision.STOP
+    if (!appVisible) return ServiceDecision.START
+    // The manual hold is a promise about the CPU rather than incidental work, so it
+    // is kept whatever the screen is doing.
+    return if (active.any { it.kind == WorkKind.TERMINAL_HOLD }) ServiceDecision.START else ServiceDecision.NONE
+  }
 
   fun shouldHoldWakeLock(
     active: List<ActiveWork>,
@@ -108,3 +131,6 @@ object BackgroundPolicy {
 
   fun isRecoverable(startedAt: Long, now: Long): Boolean = now - startedAt in 0L..RECOVERY_WINDOW_MS
 }
+
+/** Whether [AgentWorkService] should be started, stopped, or left as it is. */
+enum class ServiceDecision { START, STOP, NONE }

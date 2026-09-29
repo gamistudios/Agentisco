@@ -129,6 +129,12 @@ class BackgroundExecution(
       }
     }
     scope.launch {
+      // Service owed depends on who is looking at the screen, so leaving it has to
+      // re-decide on its own: a turn started in the foreground and then minimised
+      // would otherwise run with nothing holding the process down.
+      _isAppForeground.collect { syncService(registry.active.value) }
+    }
+    scope.launch {
       prefs.preferences.collect { values ->
         _allowBackgroundExecution.value = values.allowBackgroundExecution
         _wakeLockEnabled.value = values.backgroundWakeLock
@@ -268,15 +274,22 @@ class BackgroundExecution(
   }
 
   private fun syncService(active: List<ActiveWork>) {
-    val shouldRun = BackgroundPolicy.shouldRunForegroundService(
-      active = active,
-      allowBackgroundExecution = _allowBackgroundExecution.value
-    )
-    if (shouldRun) {
-      runCatching { ContextCompat.startForegroundService(appContext, serviceIntent()) }
-        .onFailure { reportForegroundServiceAllowed(false) }
-    } else {
-      runCatching { appContext.stopService(serviceIntent()) }
+    when (
+      BackgroundPolicy.foregroundServiceDecision(
+        active = active,
+        allowBackgroundExecution = _allowBackgroundExecution.value,
+        appVisible = _isAppForeground.value
+      )
+    ) {
+      // The start is repeated for work that is already protected rather than tracked
+      // here, because the registry is the only honest source of what is live and a
+      // process cannot query the platform for what it asked for last.
+      ServiceDecision.START ->
+        runCatching { ContextCompat.startForegroundService(appContext, serviceIntent()) }
+          .onFailure { reportForegroundServiceAllowed(false) }
+
+      ServiceDecision.STOP -> runCatching { appContext.stopService(serviceIntent()) }
+      ServiceDecision.NONE -> Unit
     }
   }
 
