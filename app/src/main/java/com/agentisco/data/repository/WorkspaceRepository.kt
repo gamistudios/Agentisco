@@ -277,6 +277,26 @@ class WorkspaceRepository(
    */
   private val teamBoard = com.agentisco.agent.runtime.AgentTeamBoard()
 
+  /**
+   * The user's own specialists. Read here rather than in a screen because the
+   * roster is what the agent addresses: `delegate` can only name a seat the
+   * registry already knows, so a saved agent joins the team at the moment it is
+   * saved, with no restart.
+   */
+  val customAgentStore = com.agentisco.data.local.CustomAgentStore(context)
+  private val _customAgents = MutableStateFlow(customAgentStore.get())
+  val customAgents: StateFlow<List<com.agentisco.agent.model.AgentRole>> = _customAgents.asStateFlow()
+
+  /** Built-in seats first, then the user's: the whole team one run may delegate to. */
+  fun agentRoster(): List<com.agentisco.agent.model.AgentRole> =
+    com.agentisco.agent.model.AgentRoles.roster(_customAgents.value)
+
+  fun saveCustomAgent(agent: com.agentisco.agent.model.AgentRole): List<com.agentisco.agent.model.AgentRole> =
+    customAgentStore.save(agent).also { _customAgents.value = it }
+
+  fun removeCustomAgent(id: String): List<com.agentisco.agent.model.AgentRole> =
+    customAgentStore.remove(id).also { _customAgents.value = it }
+
   private val toolRegistry: com.agentisco.agent.tool.AgentToolRegistry =
     com.agentisco.agent.tool.AgentToolRegistry(
     fileSystem = fileSystem,
@@ -290,7 +310,20 @@ class WorkspaceRepository(
     // lookup here stays silent: a sub-agent with no model reports that to the
     // agent, it does not open the model sheet in the middle of a turn.
     subagentLauncher = com.agentisco.agent.tool.SubagentLauncher { role, description, prompt, project, terminal ->
-      val model = _selectedModel.value
+      // A specialist may be pinned to a model. If that model is no longer
+      // configured the run still goes ahead on the user's current choice, and
+      // says so in the turn's own status stream rather than failing quietly.
+      val pinned = role.modelId.takeIf { it.isNotBlank() }?.let { wanted ->
+        _aiModels.value.firstOrNull { it.id == wanted || it.modelId == wanted }
+      }
+      if (role.modelId.isNotBlank() && pinned == null) {
+        _agentEvents.tryEmit(
+          com.agentisco.agent.model.AgentStreamEvent.Status(
+            "${role.name} is set to model \"${role.modelId}\", which is not configured - running it on the selected model."
+          )
+        )
+      }
+      val model = pinned ?: _selectedModel.value
       val connection = model?.let { resolveProviderForModel(it) }
       if (model == null || connection == null) {
         com.agentisco.agent.tool.SubagentOutcome(
@@ -312,7 +345,8 @@ class WorkspaceRepository(
           onEvent = { event -> _agentEvents.tryEmit(event) }
         )
       }
-    }
+    },
+    subagentRoles = { agentRoster() }
   )
 
   /**

@@ -117,7 +117,11 @@ class SubagentTool(
   }
 
   private fun rosterText(): String =
-    "Roles on this team:\n" + roster().joinToString("\n") { "  ${it.id}: ${it.purpose}" }
+    "Roles on this team:\n" + roster().joinToString("\n") { role ->
+      // The scope matters to the one choosing: it says where this agent works, so
+      // two delegations can be given slices that do not collide.
+      "  ${role.id}: ${role.purpose}" + if (role.scope.isNotBlank()) " (works in: ${role.scope})" else ""
+    }
 
   companion object {
     /** The policy a delegated run executes under, per role. */

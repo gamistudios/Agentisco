@@ -97,7 +97,9 @@ class AgentToolRegistry(
    * The same collaborators offering what one role may use: a research role gets
    * only the planning set, every other role gets the working set minus
    * `delegate` - a sub-agent that could delegate would multiply one request into
-   * an unbounded number of model calls.
+   * an unbounded number of model calls. A role with its own [toolNames], which is
+   * how a user-defined specialist arrives, gets that list narrowed to the same
+   * reach, never widened by it.
    */
   fun forDelegation(role: com.agentisco.agent.model.AgentRole): AgentToolRegistry = AgentToolRegistry(
     fileSystem = fileSystem,
@@ -108,10 +110,26 @@ class AgentToolRegistry(
     onStageAll = onStageAll,
     onUnstageAll = onUnstageAll,
     webClient = webClient,
-    restrictTo =
-      if (role.readOnly) PlanMode.delegatedToolNames
-      else offered.map { it.name }.toSet() - "delegate"
+    restrictTo = delegatedToolsFor(role)
   )
+
+  /**
+   * The reach of one delegated run: research is limited to what the planning gate
+   * lets through, anything else gets the working set minus `delegate`.
+   */
+  fun delegableToolNames(role: com.agentisco.agent.model.AgentRole): Set<String> =
+    if (role.readOnly) PlanMode.delegatedToolNames else offered.map { it.name }.toSet() - "delegate"
+
+  /**
+   * What the role is actually given. A role that names its own tools - a
+   * user-defined specialist - only ever narrows [delegableToolNames]: a name that
+   * does not exist, or that a sub-agent may not have, buys nothing.
+   */
+  private fun delegatedToolsFor(role: com.agentisco.agent.model.AgentRole): Set<String> {
+    val reachable = delegableToolNames(role)
+    val chosen = role.toolNames.map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+    return if (chosen.isEmpty()) reachable else reachable intersect chosen
+  }
 }
 
 // ================= Filesystem tools =================

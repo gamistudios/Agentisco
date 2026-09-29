@@ -26,11 +26,33 @@ data class AgentRole(
   val readOnly: Boolean = false,
   val maxToolIterations: Int = 40,
   /** Built-in roles ship with the app; custom ones come from the user. */
-  val builtIn: Boolean = true
+  val builtIn: Boolean = true,
+  /**
+   * A user's own brief for this agent. When it is set it replaces the built-in
+   * identity block - who the agent is and what it cares about - while the team
+   * rules and the reporting duty still apply: a custom agent joins the same team,
+   * so it is still told about its siblings and still owes a report.
+   */
+  val systemPrompt: String = "",
+  /**
+   * The tools this agent is given. Empty means "everything a delegated agent may
+   * have"; a filled list is an intersection, never an extension - naming a tool
+   * that does not exist, or `delegate`, buys nothing.
+   */
+  val toolNames: List<String> = emptyList(),
+  /** The part of the project this agent owns, shown to it and to the delegating agent. */
+  val scope: String = "",
+  /** A model chosen for this agent; blank means whatever the user has selected. */
+  val modelId: String = ""
 ) {
 
+  /** True when the user wrote the identity instead of the app. */
+  val isCustom: Boolean get() = systemPrompt.isNotBlank()
+
   /** The identity block: who this agent is and how far its reach goes. */
-  fun identity(): String = buildString {
+  fun identity(): String = if (isCustom) customIdentity() else builtInIdentity()
+
+  private fun builtInIdentity(): String = buildString {
     appendLine("You are the $name agent working on this project.")
     appendLine(purpose)
     appendLine()
@@ -40,6 +62,24 @@ data class AgentRole(
     handsOff.forEach { appendLine("- $it") }
     appendLine("How you work:")
     craft.forEach { appendLine("- $it") }
+    limitsLine()
+  }
+
+  /**
+   * The user's words, with the two facts they cannot write out of the agent: the
+   * slice of the project it was given, and whether it may change anything.
+   */
+  private fun customIdentity(): String = buildString {
+    appendLine(systemPrompt.trim())
+    if (scope.isNotBlank()) {
+      appendLine()
+      appendLine("Your scope in this project: $scope")
+      appendLine("- Stay inside it. Work outside that area belongs to another agent or to the user.")
+    }
+    limitsLine()
+  }
+
+  private fun StringBuilder.limitsLine() {
     if (readOnly) {
       appendLine("You are read-only: the app refuses every change you attempt, so never probe for a workaround.")
     } else {
@@ -266,4 +306,46 @@ object AgentRoles {
   /** Case-insensitive, so a model that writes "Backend" still gets the backend agent. */
   fun resolve(roster: List<AgentRole>, id: String): AgentRole? =
     roster.firstOrNull { it.id.equals(id.trim(), ignoreCase = true) }
+
+  /**
+   * The team one run may delegate to: the built-in seats, then the user's own.
+   * A custom agent can never replace a built-in one - the ids are how the model
+   * addresses a seat, and two seats with one name would be a coin toss.
+   */
+  fun roster(custom: List<AgentRole> = emptyList()): List<AgentRole> =
+    builtIn + custom.filter { candidate ->
+      candidate.id.isNotBlank() && builtIn.none { it.id.equals(candidate.id, ignoreCase = true) }
+    }
+
+  /**
+   * A user-defined specialist. It is the same data the built-in seats are made of,
+   * so everything built on a role - delegation, tool reach, permissions, the prompt,
+   * the team board - applies to it without knowing it is custom.
+   */
+  fun custom(
+    id: String,
+    name: String,
+    /** What the delegating agent reads to decide whether to use this one. */
+    purpose: String,
+    systemPrompt: String,
+    scope: String = "",
+    toolNames: List<String> = emptyList(),
+    modelId: String = "",
+    readOnly: Boolean = false,
+    maxToolIterations: Int = 40
+  ): AgentRole = AgentRole(
+    id = id,
+    name = name,
+    purpose = purpose,
+    responsibilities = emptyList(),
+    handsOff = emptyList(),
+    craft = emptyList(),
+    readOnly = readOnly,
+    maxToolIterations = maxToolIterations,
+    builtIn = false,
+    systemPrompt = systemPrompt,
+    toolNames = toolNames,
+    scope = scope,
+    modelId = modelId
+  )
 }
