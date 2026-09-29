@@ -4,9 +4,7 @@ import com.agentisco.core.model.AppDestination
 import com.agentisco.settings.model.LLMProtocol
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
-import com.agentisco.data.model.DiffLineType
 import com.agentisco.data.repository.WorkspaceRepository
-import com.agentisco.workspace.git.DiffEngine
 import com.agentisco.workspace.git.GitRepositoryManager
 import com.agentisco.workspace.filesystem.ProjectFileSystem
 import com.agentisco.ui.WorkspaceViewModel
@@ -41,23 +39,6 @@ class ExampleRobolectricTest {
     // Fresh installs start with an empty provider catalog and no selected model
     assertNull(viewModel.selectedModel.value)
     assertTrue(viewModel.providers.value.isEmpty())
-  }
-
-  @Test
-  fun `diff engine calculates additions and deletions accurately`() {
-    val original = "line1\nline2\nline3"
-    val modified = "line1\nline2 modified\nline3\nline4"
-    val diff = DiffEngine.computeDiff("test.txt", original, modified)
-
-    assertNotNull(diff)
-    assertEquals("test.txt", diff?.filePath)
-    assertTrue(diff!!.additionsCount >= 2)
-    assertTrue(diff.deletionsCount >= 1)
-
-    val addedLines = diff.lines.filter { it.type == DiffLineType.ADDED }
-    val removedLines = diff.lines.filter { it.type == DiffLineType.REMOVED }
-    assertTrue(addedLines.any { it.text.contains("line2 modified") })
-    assertTrue(removedLines.any { it.text.contains("line2") })
   }
 
   @Test

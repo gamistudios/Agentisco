@@ -1,9 +1,13 @@
 package com.agentisco
 
 import com.agentisco.ui.components.DiffKind
+import com.agentisco.ui.components.MAX_DIFF_CHARS
+import com.agentisco.ui.components.MAX_DIFF_LINES
 import com.agentisco.ui.components.computeLineDiff
 import com.agentisco.ui.components.diffStats
+import com.agentisco.ui.components.isDiffable
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -72,5 +76,32 @@ class LineDiffTest {
       ),
       diff.map { it.kind }
     )
+  }
+
+  @Test
+  fun `a pair over the ceilings is refused instead of exhausting the heap`() {
+    val huge = "x".repeat(MAX_DIFF_CHARS + 1)
+    assertFalse(isDiffable(huge, "x"))
+    assertFalse(isDiffable("x", huge))
+    assertEquals(emptyList<Any>(), computeLineDiff(huge, "x"))
+    assertEquals(emptyList<Any>(), computeLineDiff("x", huge))
+  }
+
+  @Test
+  fun `a pure addition of every line under the ceiling is still diffed`() {
+    // The shape that crashed: one side empty, so every line of the other is added.
+    val added = (1..MAX_DIFF_LINES).joinToString("\n") { "line $it" }
+    assertTrue(isDiffable("", added))
+    val diff = computeLineDiff("", added)
+    assertEquals(MAX_DIFF_LINES, diff.size)
+    assertEquals(listOf(DiffKind.ADDED), diff.map { it.kind }.distinct())
+    assertEquals(listOf(1, 2, MAX_DIFF_LINES), listOf(diff.first().newNo, diff[1].newNo, diff.last().newNo))
+  }
+
+  @Test
+  fun `one line above the ceiling is not diffed`() {
+    val added = (1..MAX_DIFF_LINES + 1).joinToString("\n") { "line $it" }
+    assertFalse(isDiffable("", added))
+    assertEquals(emptyList<Any>(), computeLineDiff("", added))
   }
 }

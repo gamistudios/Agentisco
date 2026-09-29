@@ -219,6 +219,7 @@ class WorkspaceRepository(
 
   private suspend fun runGitCommandUnlocked(projectPath: String, args: String): com.agentisco.workspace.git.GitRunResult {
     val out = StringBuilder()
+    var truncated = false
     val runnerSession = TerminalSession(
       id = "git-runner-" + projectPath.hashCode(),
       name = "git",
@@ -226,7 +227,12 @@ class WorkspaceRepository(
     )
     val code = terminalManager.executeCommand(
       runnerSession, args,
-      { line -> out.appendLine(line.text) },
+      { line ->
+        // Whatever is asked of git, its whole output must never sit in memory: a
+        // `git show` of a bundle is megabytes per line. Callers that need the full
+        // body check [GitRunResult.truncated] and degrade instead.
+        if (out.length < MAX_GIT_OUTPUT_CHARS) out.appendLine(line.text) else truncated = true
+      },
       projectDir = File(projectPath).takeIf { it.isDirectory }
     )
     val outputStr = out.toString()
@@ -234,7 +240,7 @@ class WorkspaceRepository(
       val hostRes = runHostGit(projectPath, args)
       if (hostRes != null) return hostRes
     }
-    return com.agentisco.workspace.git.GitRunResult(code, outputStr)
+    return com.agentisco.workspace.git.GitRunResult(code, outputStr, truncated)
   }
 
   private suspend fun runHostGit(projectPath: String, args: String): com.agentisco.workspace.git.GitRunResult? =
@@ -246,19 +252,38 @@ class WorkspaceRepository(
         val env = pb.environment()
         env["GIT_TERMINAL_PROMPT"] = "0"
         val process = pb.start()
-        val stdout = process.inputStream.bufferedReader().readText()
-        val stderr = process.errorStream.bufferedReader().readText()
+        val stdout = readCapped(process.inputStream)
+        val stderr = readCapped(process.errorStream)
         val code = process.waitFor()
         val combined = when {
-          stderr.isBlank() -> stdout
-          stdout.isBlank() -> stderr
-          else -> "$stdout\n$stderr"
+          stderr.first.isBlank() -> stdout.first
+          stdout.first.isBlank() -> stderr.first
+          else -> "${stdout.first}\n${stderr.first}"
         }
-        com.agentisco.workspace.git.GitRunResult(code, combined)
+        com.agentisco.workspace.git.GitRunResult(code, combined, stdout.second || stderr.second)
       } catch (e: Exception) {
         null
       }
     }
+
+  /**
+   * Drains a process stream while keeping at most [MAX_GIT_OUTPUT_CHARS] of it;
+   * the stream is still read to the end so the process cannot block on a full
+   * pipe. Second half of the pair says content was dropped.
+   */
+  private fun readCapped(stream: java.io.InputStream): Pair<String, Boolean> {
+    val sb = StringBuilder()
+    var truncated = false
+    stream.bufferedReader().use { reader ->
+      val buffer = CharArray(8192)
+      while (true) {
+        val read = reader.read(buffer)
+        if (read < 0) break
+        if (sb.length < MAX_GIT_OUTPUT_CHARS) sb.appendRange(buffer, 0, read) else truncated = true
+      }
+    }
+    return sb.toString() to truncated
+  }
 
   // (Terminal stack initialized above — the projects root depends on it.)
   private val prootSessionManager: ProotSessionManager? = context?.let { ctx ->
@@ -2876,6 +2901,9 @@ class WorkspaceRepository(
   companion object {
     /** Minimum gap between full commit-history reloads triggered by file-watcher churn. */
     private const val HISTORY_MIN_RELOAD_INTERVAL_MS = 1200L
+
+    /** Most git output the app keeps in memory for one command. */
+    private const val MAX_GIT_OUTPUT_CHARS = 2_000_000
 
     /** System prompt for the Run & Build AI auto-configuration pass. */
     private const val AI_BUILD_CONFIG_SYSTEM_PROMPT =

@@ -6,18 +6,27 @@ import com.agentisco.data.model.FileDiff
 import com.agentisco.data.model.GitCommit
 import com.agentisco.data.model.Project
 import com.agentisco.ui.components.computeLineDiff
+import com.agentisco.ui.components.isDiffable
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
 /** Result of one `git` invocation inside the project workspace. */
-data class GitRunResult(val exitCode: Int, val output: String) {
+data class GitRunResult(val exitCode: Int, val output: String, val truncated: Boolean = false) {
   val success: Boolean get() = exitCode == 0
 }
 
 /** Result of a commit attempt: either the new commit, or git's failure output. */
 data class GitCommitResult(val commit: GitCommit?, val errorOutput: String?)
+
+/** Largest working file the diff pass will read into memory (it is a phone heap). */
+private const val MAX_DIFF_BYTES = 1_000_000L
+
+/** Upper bound on files described by one diff pass, so a flood of changes stays cheap. */
+private const val MAX_DIFFED_FILES = 250
 
 /**
  * Real git manager, executed in the workspace context.
@@ -294,79 +303,159 @@ class GitRepositoryManager(
     }
   }
 
-  /** Unified structured diffs computed from git and disk contents. */
-  suspend fun computeAllDiffs(project: Project, stagedOnly: Boolean? = null): List<FileDiff> {
-    if (!isGitRepository(project)) return emptyList()
+  /**
+   * Unified structured diffs computed from git and disk contents.
+   *
+   * Every file in a working tree can be a generated bundle or a lockfile, so the
+   * work is bounded three ways: nothing bigger than [MAX_DIFF_BYTES] is read into
+   * memory, only [MAX_DIFFED_FILES] files are described, and the diff itself is
+   * skipped for binary or oversized content - git's own line counts still report
+   * the change. It runs off the main thread: this is a heap-and-CPU pass over the
+   * whole repo, not a UI calculation.
+   */
+  suspend fun computeAllDiffs(project: Project, stagedOnly: Boolean? = null): List<FileDiff> =
+    withContext(Dispatchers.Default) {
+      if (!isGitRepository(project)) return@withContext emptyList()
 
-    val porcelain = parsePorcelain(git(project, "git status --porcelain=v1 -uall").output)
-    val filtered = when (stagedOnly) {
-      true -> porcelain.filter { it.isStaged }
-      false -> porcelain.filter { !it.isStaged }
-      null -> porcelain
-    }
+      val porcelain = parsePorcelain(git(project, "git status --porcelain=v1 -uall").output)
+      val filtered = when (stagedOnly) {
+        true -> porcelain.filter { it.isStaged }
+        false -> porcelain.filter { !it.isStaged }
+        null -> porcelain
+      }
+      val lineStats = changedLineStats(project)
 
-    val diffs = mutableListOf<FileDiff>()
-    val processedPaths = mutableSetOf<String>()
+      val diffs = mutableListOf<FileDiff>()
+      val processedPaths = mutableSetOf<String>()
 
-    for (item in filtered) {
-      if (processedPaths.contains(item.path)) continue
-      processedPaths.add(item.path)
+      for (item in filtered) {
+        if (processedPaths.contains(item.path)) continue
+        processedPaths.add(item.path)
+        if (diffs.size >= MAX_DIFFED_FILES) break
 
-      val currentFile = File(project.path, item.path)
-      if (currentFile.length() > 600_000) continue
-
-      val oldContent = if (item.isUntracked) {
-        ""
-      } else {
-        val shown = if (item.isStaged) {
-          git(project, "git show HEAD:${shellQuote(item.path)} 2>/dev/null")
-        } else {
-          git(project, "git show :${shellQuote(item.path)} 2>/dev/null")
-            .takeIf { it.success } ?: git(project, "git show HEAD:${shellQuote(item.path)} 2>/dev/null")
+        val stats = lineStats[item.path] ?: (0 to 0)
+        val currentFile = File(project.path, item.path)
+        if (currentFile.length() > MAX_DIFF_BYTES) {
+          diffs.add(undiffed(item.path, stats, "File too large to diff"))
+          continue
         }
-        if (shown.success) shown.output else ""
-      }
+        // An asset the workspace refuses to decode as text would diff as garbage,
+        // and the git side of it would be decoded anyway.
+        if (currentFile.isFile && com.agentisco.editor.model.FileViewer.mustNotDecodeAsText(currentFile.name)) {
+          diffs.add(undiffed(item.path, stats, "Binary file"))
+          continue
+        }
 
-      val newContent = if (item.isStaged) {
-        val indexContent = git(project, "git show :${shellQuote(item.path)} 2>/dev/null")
-        if (indexContent.success) indexContent.output
-        else if (currentFile.isFile) fileSystem.readFile(project, item.path)
-        else ""
-      } else {
-        if (currentFile.isFile) fileSystem.readFile(project, item.path) else ""
-      }
+        val oldResult: GitRunResult? = if (item.isUntracked) null else {
+          if (item.isStaged) {
+            git(project, "git show HEAD:${shellQuote(item.path)} 2>/dev/null")
+          } else {
+            git(project, "git show :${shellQuote(item.path)} 2>/dev/null")
+              .takeIf { it.success } ?: git(project, "git show HEAD:${shellQuote(item.path)} 2>/dev/null")
+          }
+        }
+        val newResult: GitRunResult? = if (item.isStaged) {
+          git(project, "git show :${shellQuote(item.path)} 2>/dev/null")
+        } else {
+          null
+        }
+        // A read that hit the output cap holds half a file; diffing that would
+        // invent changes, so the file is described instead.
+        if (oldResult?.truncated == true || newResult?.truncated == true) {
+          diffs.add(undiffed(item.path, stats, "File too large to diff"))
+          continue
+        }
 
-      val diffLines = computeLineDiff(oldContent, newContent)
-      val adds = diffLines.count { it.kind == com.agentisco.ui.components.DiffKind.ADDED }
-      val dels = diffLines.count { it.kind == com.agentisco.ui.components.DiffKind.REMOVED }
+        val oldContent = if (item.isUntracked) {
+          ""
+        } else if (oldResult?.success == true) {
+          oldResult.output
+        } else {
+          ""
+        }
 
-      val convertedLines = diffLines.map { dl ->
-        DiffLine(
-          type = when (dl.kind) {
-            com.agentisco.ui.components.DiffKind.ADDED -> DiffLineType.ADDED
-            com.agentisco.ui.components.DiffKind.REMOVED -> DiffLineType.REMOVED
-            com.agentisco.ui.components.DiffKind.CONTEXT -> DiffLineType.UNCHANGED
-            com.agentisco.ui.components.DiffKind.ELIDED -> DiffLineType.UNCHANGED
-          },
-          oldLineNo = dl.oldNo,
-          newLineNo = dl.newNo,
-          text = dl.text
+        val newContent = if (item.isStaged) {
+          if (newResult?.success == true) newResult.output
+          else if (currentFile.isFile) fileSystem.readFile(project, item.path)
+          else ""
+        } else {
+          if (currentFile.isFile) fileSystem.readFile(project, item.path) else ""
+        }
+
+        if (looksBinary(oldContent) || looksBinary(newContent)) {
+          diffs.add(undiffed(item.path, stats, "Binary file"))
+          continue
+        }
+        if (!isDiffable(oldContent, newContent)) {
+          diffs.add(undiffed(item.path, stats, "Too many lines to diff"))
+          continue
+        }
+
+        val diffLines = computeLineDiff(oldContent, newContent)
+        val adds = diffLines.count { it.kind == com.agentisco.ui.components.DiffKind.ADDED }
+        val dels = diffLines.count { it.kind == com.agentisco.ui.components.DiffKind.REMOVED }
+
+        val convertedLines = diffLines.map { dl ->
+          DiffLine(
+            type = when (dl.kind) {
+              com.agentisco.ui.components.DiffKind.ADDED -> DiffLineType.ADDED
+              com.agentisco.ui.components.DiffKind.REMOVED -> DiffLineType.REMOVED
+              com.agentisco.ui.components.DiffKind.CONTEXT -> DiffLineType.UNCHANGED
+              com.agentisco.ui.components.DiffKind.ELIDED -> DiffLineType.UNCHANGED
+            },
+            oldLineNo = dl.oldNo,
+            newLineNo = dl.newNo,
+            text = dl.text
+          )
+        }
+
+        diffs.add(
+          FileDiff(
+            filePath = item.path,
+            additionsCount = adds,
+            deletionsCount = dels,
+            lines = convertedLines,
+            originalContent = oldContent,
+            newContent = newContent
+          )
         )
       }
-
-      diffs.add(
-        FileDiff(
-          filePath = item.path,
-          additionsCount = adds,
-          deletionsCount = dels,
-          lines = convertedLines,
-          originalContent = oldContent,
-          newContent = newContent
-        )
-      )
+      diffs
     }
-    return diffs
+
+  /**
+   * A file the pass refuses to expand line by line, described instead: git's own
+   * counts stay accurate and the note says why there is no body.
+   */
+  private fun undiffed(path: String, stats: Pair<Int, Int>, reason: String): FileDiff = FileDiff(
+    filePath = path,
+    additionsCount = stats.first,
+    deletionsCount = stats.second,
+    lines = listOf(DiffLine(DiffLineType.UNCHANGED, null, null, reason))
+  )
+
+  /**
+   * Per-file added/removed line counts straight from git, which costs a couple of
+   * small outputs instead of two copies of every file.
+   */
+  private suspend fun changedLineStats(project: Project): Map<String, Pair<Int, Int>> {
+    val stats = mutableMapOf<String, Pair<Int, Int>>()
+    for (args in listOf("git diff --numstat", "git diff --cached --numstat")) {
+      val result = git(project, "$args 2>/dev/null")
+      if (!result.success || result.truncated) continue
+      result.output.lineSequence().forEach { line ->
+        val parts = line.split("\t")
+        if (parts.size < 3) return@forEach
+        val adds = parts[0].toIntOrNull() ?: return@forEach
+        val dels = parts[1].toIntOrNull() ?: return@forEach
+        stats[parts[2].trim().removePrefix("a/").removePrefix("b/")] = adds to dels
+      }
+    }
+    return stats
   }
+
+  /** A NUL byte near the start is how git itself decides a file is not text. */
+  private fun looksBinary(content: String): Boolean = content.take(8000).indexOf('\u0000') >= 0
 
   // ---- Staging Operations ----
 

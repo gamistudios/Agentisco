@@ -25,13 +25,36 @@ fun diffStats(lines: List<DiffLine>): Pair<Int, Int> {
 }
 
 /**
+ * Ceilings for one line diff. A repo file can be a minified bundle or a
+ * generated lockfile, and building a diff line for every one of its lines costs
+ * more heap than a phone app is given: the crash this prevents was an
+ * OutOfMemoryError inside the LCS backtrack. Over the ceiling the diff is simply
+ * not computed and the caller says so.
+ */
+const val MAX_DIFF_CHARS = 1_000_000
+const val MAX_DIFF_LINES = 8_000
+
+/** Lines in [text] without building the list a diff would need. */
+private fun lineCount(text: String): Int = if (text.isEmpty()) 0 else text.count { it == '\n' } + 1
+
+/**
+ * Whether a diff of these two texts stays inside the ceilings. False means
+ * [computeLineDiff] will return nothing rather than exhaust the heap.
+ */
+fun isDiffable(old: String, new: String): Boolean =
+  old.length <= MAX_DIFF_CHARS && new.length <= MAX_DIFF_CHARS &&
+    lineCount(old) <= MAX_DIFF_LINES && lineCount(new) <= MAX_DIFF_LINES
+
+/**
  * Line diff in unified-diff shape: changed runs surrounded by a little
  * context, unchanged runs beyond that collapsed into an ELIDED marker.
  * Trims the common prefix/suffix and runs LCS on the middle; oversized
  * middles fall back to a whole-block replacement to bound the cost.
- * Returns an empty list when the two texts are identical.
+ * Returns an empty list when the two texts are identical, and also when
+ * [isDiffable] says the pair is too large to diff.
  */
 fun computeLineDiff(old: String, new: String, contextLines: Int = 2): List<DiffLine> {
+  if (!isDiffable(old, new)) return emptyList()
   // An empty side is a zero-line file, not one blank line.
   val oldLines = if (old.isEmpty()) emptyList() else old.split("\n")
   val newLines = if (new.isEmpty()) emptyList() else new.split("\n")
@@ -114,6 +137,11 @@ private fun lcsOps(
 ): List<Triple<Boolean, Boolean, String>> {
   val n = a.size
   val m = b.size
+  // One side empty has no common subsequence to find: the matrix would be pure
+  // overhead for a result that is already known.
+  if (n == 0 || m == 0) {
+    return a.map { Triple(true, false, it) } + b.map { Triple(false, true, it) }
+  }
   val dp = Array(n + 1) { IntArray(m + 1) }
   for (i in n - 1 downTo 0) {
     for (j in m - 1 downTo 0) {
