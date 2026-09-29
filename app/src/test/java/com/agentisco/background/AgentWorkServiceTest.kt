@@ -7,6 +7,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.agentisco.AgentiscoApplication
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -113,26 +114,39 @@ class AgentWorkServiceTest {
     // system answers minutes later with ForegroundServiceDidNotStartInTimeException on
     // the main thread.
     val service = startWith()
-    val notice = foregroundNotification(service)
+    val shadow = shadowOf(service)
 
-    assertNotNull("the contract is answered even with nothing left to show", notice)
     assertEquals(
-      "Nothing is running",
-      notice!!.extras.getCharSequence(android.app.Notification.EXTRA_TEXT)?.toString()
+      "startForeground is the only thing that records this id, and a start without it " +
+        "is a crash - even a start that found nothing left to protect",
+      WorkNotifications.WORK_NOTIFICATION_ID,
+      shadow.lastForegroundNotificationId
     )
-    assertTrue("the service that found no work stops itself", shadowOf(service).isStoppedBySelf)
+    assertTrue("the service that found no work stops itself", shadow.isStoppedBySelf)
+    assertNull(
+      "and the notice raised only to answer the contract goes with it",
+      shadow.lastForegroundNotification
+    )
   }
 
   @Test
   fun `a second start re-raises the service instead of quietly updating the notice`() {
+    // A repeat start is not a notification update: the platform arms its deadline for
+    // every start it delivers this way, so each one has to be answered with
+    // startForeground again. Two commands go to the same instance here, which is the
+    // only way to tell that call from the quiet notify() an ordinary update takes.
     registry.begin("a", WorkKind.AGENT_TURN, "first task")
-    val service = startWith()
-    registry.begin("b", WorkKind.TERMINAL, "second task")
+    val controller = Robolectric.buildService(
+      AgentWorkService::class.java,
+      Intent(context, AgentWorkService::class.java)
+    ).create()
+    val service = controller.startCommand(0, 1).get()
 
-    startWith()
+    registry.begin("b", WorkKind.TERMINAL, "second task")
+    controller.startCommand(0, 2)
 
     assertEquals(
-      "each start re-arms the platform's deadline, so each one is answered in full",
+      "each start is answered in full",
       "2 tasks running",
       foregroundNotification(service)?.extras?.getCharSequence(android.app.Notification.EXTRA_TITLE)?.toString()
     )
