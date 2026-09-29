@@ -112,7 +112,13 @@ data class AgentBlockEntity(
    * options inline after the dialog is dismissed or the app restarts. Null for
    * approvals and for questions from before this column existed.
    */
-  val optionsJson: String? = null
+  val optionsJson: String? = null,
+  /**
+   * The tool-call id of the `delegate` call that started this block, or null when
+   * the block is mainline work by the agent the user is talking to. A delegated
+   * specialist's cards hang under the delegation card instead of the transcript.
+   */
+  val parentCallId: String? = null
 )
 
 /**
@@ -301,7 +307,7 @@ interface ChatDao {
     AgentBlockEntity::class,
     AgentCompactionEntity::class
   ],
-  version = 7,
+  version = 8,
   exportSchema = false
 )
 abstract class ChatDatabase : RoomDatabase() {
@@ -416,6 +422,18 @@ abstract class ChatDatabase : RoomDatabase() {
       override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
         if (hasColumn(db, "agent_blocks", "optionsJson")) return
         db.execSQL("ALTER TABLE agent_blocks ADD COLUMN optionsJson TEXT")
+      }
+    }
+
+    /**
+     * Records which `delegate` call produced a block, so a specialist's own tool
+     * cards and text hang under its delegation card. A pure addition: mainline
+     * rows keep NULL and stay exactly where they are in the transcript.
+     */
+    val MIGRATION_7_8 = object : androidx.room.migration.Migration(7, 8) {
+      override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+        if (hasColumn(db, "agent_blocks", "parentCallId")) return
+        db.execSQL("ALTER TABLE agent_blocks ADD COLUMN parentCallId TEXT")
       }
     }
   }

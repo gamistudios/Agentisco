@@ -72,7 +72,8 @@ internal fun contextFor(
   fileEditing: PermissionMode = PermissionMode.ALLOW_ALL,
   terminalCommands: PermissionMode = PermissionMode.ALLOW_ALL,
   deleteFiles: Boolean = true,
-  log: ApprovalLog = ApprovalLog()
+  log: ApprovalLog = ApprovalLog(),
+  toolCallId: String = ""
 ): ToolContext = ToolContext(
   project = workspace.project,
   permissions = {
@@ -93,6 +94,7 @@ internal fun contextFor(
     !log.terminated && log.approve
   },
   activeSessions = { emptyList() },
+  toolCallId = toolCallId,
   askUser = { approval ->
     log.requests.add(approval)
     if (log.terminated) null else log.answer

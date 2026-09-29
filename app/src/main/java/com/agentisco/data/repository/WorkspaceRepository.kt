@@ -330,7 +330,7 @@ class WorkspaceRepository(
     // Delegated research is run by the runtime, which owns the model call. The
     // lookup here stays silent: a sub-agent with no model reports that to the
     // agent, it does not open the model sheet in the middle of a turn.
-    subagentLauncher = com.agentisco.agent.tool.SubagentLauncher { role, description, prompt, project, terminal ->
+    subagentLauncher = com.agentisco.agent.tool.SubagentLauncher { role, description, prompt, project, terminal, delegationId ->
       // A specialist may be pinned to a model. If that model is no longer
       // configured the run still goes ahead on the user's current choice, and
       // says so in the turn's own status stream rather than failing quietly.
@@ -362,7 +362,9 @@ class WorkspaceRepository(
           apiKey = connection.second,
           parentPermissions = _permissions.value,
           terminalSession = terminal,
-          // The delegated run's progress belongs to the turn that delegated it.
+          // Everything the specialist does belongs to the delegate card that
+          // started it, so the chat shows its work as it happens, not only at the end.
+          delegationId = delegationId,
           onEvent = { event -> _agentEvents.tryEmit(event) }
         )
       }

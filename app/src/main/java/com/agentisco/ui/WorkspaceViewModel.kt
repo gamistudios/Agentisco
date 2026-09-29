@@ -231,6 +231,24 @@ class WorkspaceViewModel(
   private var textFlushJob: Job? = null
 
   /**
+   * One delegated agent's live stream, held per delegation so two specialists
+   * running beside each other never write into one another's cards.
+   */
+  private class DelegationStream {
+    val toolBlocks = mutableMapOf<String, String>()
+    val approvalBlocks = mutableMapOf<String, String>()
+    var textUuid: String? = null
+    var text = StringBuilder()
+    var textJob: Job? = null
+    var reasoningUuid: String? = null
+    var reasoning = StringBuilder()
+    var reasoningJob: Job? = null
+  }
+
+  /** delegation call id -> the stream hanging under its card. */
+  private var delegationStreams = mutableMapOf<String, DelegationStream>()
+
+  /**
    * Points the streaming bookkeeping at a turn row that is ALREADY persisted.
    * Every block the run emits (text, tool, approval, error) is written with
    * [currentTurnUuid] as its messageUuid, so a turn without a matching
@@ -244,6 +262,7 @@ class WorkspaceViewModel(
     reasoningText = StringBuilder()
     runningToolBlocks = mutableMapOf()
     approvalBlocks = mutableMapOf()
+    delegationStreams = mutableMapOf()
   }
 
   init {
@@ -502,7 +521,161 @@ class WorkspaceViewModel(
           )
         )
       }
+      // A delegated agent's own work: persisted against this turn but hung under
+      // the delegate card that started it, so the user watches it happen instead
+      // of only reading its report.
+      is AgentStreamEvent.DelegationActivity -> onDelegationActivity(turn, event)
     }
+  }
+
+  /**
+   * Persists one action from a delegated agent. The shape mirrors the mainline
+   * stream above — a specialist does ordinary agent work, it just belongs inside
+   * a card — with the delegation's call id recorded so it nests back in.
+   */
+  private fun onDelegationActivity(turn: String, activity: AgentStreamEvent.DelegationActivity) {
+    val delegationId = activity.delegationId
+    if (delegationId.isBlank()) return
+    val stream = delegationStreams.getOrPut(delegationId) { DelegationStream() }
+    fun insert(kind: String, name: String, argsJson: String, status: String, summary: String, detail: String): String {
+      val uuid = AgentChatStore.newId()
+      chatStore.insertBlock(
+        AgentBlockEntity(
+          uuid = uuid, messageUuid = turn, kind = kind, name = name,
+          argsJson = argsJson, status = status, summary = summary, detail = detail,
+          exitCode = null, createdAt = System.currentTimeMillis(),
+          parentCallId = delegationId,
+          callId = null
+        )
+      )
+      return uuid
+    }
+
+    when (val event = activity.event) {
+      is AgentStreamEvent.ToolStarted -> {
+        closeDelegationText(stream)
+        closeDelegationReasoning(stream)
+        val uuid = insert("tool", event.name, event.argsJson, "running", "Running…", "")
+        // Parallel calls in the specialist's own batch share a name — key by call id.
+        stream.toolBlocks[event.callId.ifBlank { event.name }] = uuid
+      }
+      is AgentStreamEvent.ToolFinished -> {
+        stream.toolBlocks.remove(event.callId.ifBlank { event.name })?.let { uuid ->
+          chatStore.updateToolBlock(
+            uuid = uuid,
+            status = if (event.success) "success" else "failed",
+            summary = event.summary, detail = event.detail, exitCode = event.exitCode
+          )
+        }
+      }
+      is AgentStreamEvent.ToolCancelled -> {
+        stream.toolBlocks.remove(event.callId)?.let { uuid -> chatStore.updateBlockStatus(uuid, "cancelled") }
+      }
+      is AgentStreamEvent.Token -> {
+        val uuid = stream.textUuid
+        if (uuid == null) {
+          stream.textUuid = insert("text", "", "", "streaming", event.text, "")
+          stream.text = StringBuilder(event.text)
+        } else {
+          stream.text.append(event.text)
+          stream.textJob?.cancel()
+          val snapshot = stream.text.toString()
+          stream.textJob = viewModelScope.launch {
+            delay(250)
+            chatStore.updateTextBlock(uuid, snapshot)
+          }
+        }
+      }
+      is AgentStreamEvent.ReasoningToken -> {
+        val uuid = stream.reasoningUuid
+        if (uuid == null) {
+          stream.reasoningUuid = insert("reasoning", "", "", "streaming", event.text, "")
+          stream.reasoning = StringBuilder(event.text)
+        } else {
+          stream.reasoning.append(event.text)
+          stream.reasoningJob?.cancel()
+          val snapshot = stream.reasoning.toString()
+          stream.reasoningJob = viewModelScope.launch {
+            delay(250)
+            chatStore.updateTextBlock(uuid, snapshot)
+          }
+        }
+      }
+      is AgentStreamEvent.TextReset -> {
+        // A retry: what streamed so far stays visible, the next attempt is its own block.
+        closeDelegationText(stream)
+        closeDelegationReasoning(stream)
+      }
+      is AgentStreamEvent.ApprovalRequested -> {
+        val uuid = insert(
+          kind = if (event.isQuestion) "question" else "approval",
+          name = event.approvalId, argsJson = event.command, status = "pending",
+          summary = event.title, detail = event.impact
+        )
+        stream.approvalBlocks[event.approvalId] = uuid
+      }
+      is AgentStreamEvent.ApprovalResolved -> {
+        stream.approvalBlocks.remove(event.approvalId)?.let { uuid ->
+          val status = when {
+            event.terminated -> "stalled"
+            event.allowed -> "allowed"
+            else -> "denied"
+          }
+          val answer = event.answer
+          if (!event.allowed && !event.rationale.isNullOrBlank()) {
+            chatStore.updateBlockAnswer(uuid, status, event.rationale.trim())
+          } else if (answer.isNullOrBlank()) {
+            chatStore.updateBlockStatus(uuid, status)
+          } else {
+            chatStore.updateBlockAnswer(uuid, status, answer)
+          }
+        }
+      }
+      is AgentStreamEvent.Failed -> {
+        closeDelegationText(stream)
+        closeDelegationReasoning(stream)
+        insert("error", "error", "", "failed", event.message, "")
+      }
+      // A specialist's context compaction is its own bookkeeping; the user is
+      // watching its actions, and its report reaches the parent either way.
+      is AgentStreamEvent.ContextCompacted -> Unit
+      else -> Unit
+    }
+  }
+
+  /** Ends the delegated agent's current text segment so the next one starts its own card. */
+  private fun closeDelegationText(stream: DelegationStream) {
+    val uuid = stream.textUuid ?: return
+    stream.textJob?.cancel()
+    chatStore.updateTextBlock(uuid, stream.text.toString())
+    chatStore.updateBlockStatus(uuid, "done")
+    stream.textUuid = null
+    stream.text = StringBuilder()
+  }
+
+  private fun closeDelegationReasoning(stream: DelegationStream) {
+    val uuid = stream.reasoningUuid ?: return
+    stream.reasoningJob?.cancel()
+    chatStore.updateTextBlock(uuid, stream.reasoning.toString())
+    chatStore.updateBlockStatus(uuid, "done")
+    stream.reasoningUuid = null
+    stream.reasoning = StringBuilder()
+  }
+
+  /**
+   * Closes every delegated stream at the end of a turn: a specialist stopped
+   * mid-run must not leave a card that spins forever.
+   */
+  private fun closeDelegations() {
+    delegationStreams.values.forEach { stream ->
+      closeDelegationText(stream)
+      closeDelegationReasoning(stream)
+      stream.approvalBlocks.values.forEach { uuid -> chatStore.updateBlockStatus(uuid, "stalled") }
+      stream.toolBlocks.values.forEach { uuid ->
+        chatStore.updateToolBlock(uuid, "cancelled", "Stopped", "", null)
+      }
+    }
+    delegationStreams = mutableMapOf()
   }
 
   /** Flush streamed text into the turn row and mark the text block done. */
@@ -553,6 +726,7 @@ class WorkspaceViewModel(
     closeStreamingText(turn)
     streamingTextBlockUuid = null
     closeStreamingReasoning()
+    closeDelegations()
     chatStore.updateMessageStatus(turn, status, "")
     // One red error card carries the failure — not scattered across the turn.
     if (message.isNotBlank() && status != "completed") {

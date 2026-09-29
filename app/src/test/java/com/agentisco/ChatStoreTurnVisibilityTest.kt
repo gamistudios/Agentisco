@@ -173,6 +173,73 @@ class ChatStoreTurnVisibilityTest {
   }
 
   /**
+   * A delegated agent's cards are written with the `delegate` call as their
+   * parent, so reading the turn back nests them inside that card: the user sees
+   * the specialist's own work under the delegation, and the orchestrator's line
+   * stays its own.
+   */
+  @Test
+  fun `a delegation reads back with the specialist's work nested inside it`() = runBlocking {
+    val nestSession = "sess-nest"
+    val now = System.currentTimeMillis()
+    store.createSessionBlocking(
+      AgentSessionEntity(
+        id = nestSession, projectId = "/proj", title = "T", status = "running",
+        createdAt = now, updatedAt = now
+      )
+    )
+    val turn = AgentChatStore.newId()
+    put(
+      AgentMessageEntity(
+        uuid = turn, sessionId = nestSession, role = "assistant_turn",
+        content = "", status = "completed", statusMessage = "", createdAt = now
+      )
+    )
+    val brief = """{"role":"backend","description":"trace the value","prompt":"Set value to 2 in src/App.tsx."}"""
+    put(
+      AgentBlockEntity(
+        uuid = AgentChatStore.newId(), messageUuid = turn, kind = "tool", name = "delegate",
+        argsJson = brief, status = "success", summary = "Report from the Backend Engineer",
+        detail = "Report body", exitCode = null, createdAt = now, callId = "call_0"
+      )
+    )
+    put(
+      AgentBlockEntity(
+        uuid = AgentChatStore.newId(), messageUuid = turn, kind = "tool", name = "read_file",
+        argsJson = """{"path":"src/App.tsx"}""", status = "success", summary = "1 line",
+        detail = "export const value = 1", exitCode = null, createdAt = now + 1,
+        callId = "call_1", parentCallId = "call_0"
+      )
+    )
+    put(
+      AgentBlockEntity(
+        uuid = AgentChatStore.newId(), messageUuid = turn, kind = "text", name = "",
+        argsJson = "", status = "done", summary = "Set value to 2 in src/App.tsx.",
+        detail = "", exitCode = null, createdAt = now + 2, parentCallId = "call_0"
+      )
+    )
+
+    val item = store.messagesWithBlocks(nestSession).first().single().toChatItem() as AgentTurnItem
+    assertEquals("nested cards stay out of the mainline", 1, item.blocks.size)
+    val delegation = item.blocks.single() as ActionBlock
+    assertEquals("delegate", delegation.name)
+    assertEquals(
+      listOf("read_file", "Set value to 2 in src/App.tsx."),
+      delegation.children.map { child ->
+        when (child) {
+          is ActionBlock -> child.name
+          is TextBlock -> child.text
+          else -> ""
+        }
+      }
+    )
+    // The brief is part of the record, so it reads back without a second copy.
+    assertEquals("backend", delegation.delegation?.role)
+    assertEquals("trace the value", delegation.delegation?.description)
+    assertEquals("Set value to 2 in src/App.tsx.", delegation.delegation?.prompt)
+  }
+
+  /**
    * A denial the user explained must be read back as that explanation: the model
    * acts on the reason, so a round trip through SQLite cannot drop or mangle it.
    */

@@ -315,7 +315,7 @@ class AgentTeamBoardTest {
       onStageFile = {},
       onStageAll = {},
       onUnstageAll = {},
-      subagentLauncher = SubagentLauncher { childRole, description, prompt, childProject, childTerminal ->
+      subagentLauncher = SubagentLauncher { childRole, description, prompt, childProject, childTerminal, delegationId ->
         runtime!!.runSubagent(
           role = childRole,
           description = description,
@@ -331,6 +331,7 @@ class AgentTeamBoardTest {
             deleteFiles = true
           ),
           terminalSession = childTerminal,
+          delegationId = delegationId,
           onEvent = { event -> events.add(event) }
         )
       }

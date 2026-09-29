@@ -26,6 +26,10 @@ data class SubagentOutcome(
  * Runs one delegated task. Implemented by the runtime, which owns the LLM and
  * the tools; the registry only hands the tool a way to reach it, so a build
  * without a runtime simply has no `delegate` tool instead of a broken one.
+ *
+ * [delegationId] is the parent's tool-call id. The launcher streams everything
+ * the specialist does back through it, so the chat can hang those cards under
+ * the delegation that started them.
  */
 fun interface SubagentLauncher {
   suspend fun launch(
@@ -33,7 +37,8 @@ fun interface SubagentLauncher {
     description: String,
     prompt: String,
     project: Project,
-    terminal: TerminalSession
+    terminal: TerminalSession,
+    delegationId: String
   ): SubagentOutcome
 }
 
@@ -85,7 +90,7 @@ class SubagentTool(
     val description = args.str("description")
     val prompt = args.str("prompt")
 
-    val outcome = launcher.launch(role, description, prompt, ctx.project, ctx.terminalSession)
+    val outcome = launcher.launch(role, description, prompt, ctx.project, ctx.terminalSession, ctx.toolCallId)
     if (!outcome.success) {
       return ToolResult(
         success = false,
@@ -124,9 +129,15 @@ class SubagentTool(
     }
 
   companion object {
-    /** The policy a delegated run executes under, per role. */
-    fun childPermissions(role: AgentRole, parent: AgentPermissions): AgentPermissions =
-      if (role.readOnly) {
+    /**
+     * The policy a delegated run executes under, per role. Neither side gets to
+     * invent rounds the other did not grant: the role says how long its work may
+     * take and the user's own ceiling still caps it, so a capped orchestrator
+     * cannot hand a specialist more room than it was given.
+     */
+    fun childPermissions(role: AgentRole, parent: AgentPermissions): AgentPermissions {
+      val budget = minOf(role.maxToolIterations, parent.maxToolIterations)
+      return if (role.readOnly) {
         // Research: the gate does the refusing, so it cannot be talked around.
         parent.copy(
           planMode = true,
@@ -136,7 +147,7 @@ class SubagentTool(
             else PermissionMode.ALLOW_SAFE,
           deleteFiles = false,
           gitPush = false,
-          maxToolIterations = role.maxToolIterations
+          maxToolIterations = budget
         )
       } else {
         // A specialist does real work, under exactly the user's own limits: it
@@ -144,8 +155,9 @@ class SubagentTool(
         parent.copy(
           planMode = false,
           gitPush = false,
-          maxToolIterations = role.maxToolIterations
+          maxToolIterations = budget
         )
       }
+    }
   }
 }

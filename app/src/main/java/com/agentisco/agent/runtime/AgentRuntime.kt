@@ -630,6 +630,9 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
    * and cancelling the parent turn cancels this call with the coroutine it runs
    * inside. It does share the parent's [AgentTeamBoard], which is how two agents
    * delegated in one batch each know the other is in the same files.
+   *
+   * [delegationId] is the parent's `delegate` call id, and every event the child
+   * produces is tagged with it — the specialist's work belongs to that card.
    */
   suspend fun runSubagent(
     role: com.agentisco.agent.model.AgentRole,
@@ -641,6 +644,7 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
     apiKey: String,
     parentPermissions: AgentPermissions,
     terminalSession: TerminalSession,
+    delegationId: String = "",
     onEvent: (AgentStreamEvent) -> Unit = {}
   ): SubagentOutcome {
     val child = AgentRuntime(
@@ -669,7 +673,7 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
       // refused at once, which its tools report honestly - so a specialist never
       // quietly gets a permission the user would have been asked for.
       onRequestApproval = { child.resolvePendingApproval(allowed = false) },
-      onEvent = { event -> relay(role, event, onEvent) }
+      onEvent = { event -> relay(role, delegationId, event, onEvent) }
     )
     return SubagentOutcome(
       success = result.success,
@@ -680,19 +684,29 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
   }
 
   /**
-   * Surfaces a delegated run without pretending it is the parent's own work: its
-   * tool calls arrive as status lines naming the agent that made them, and its
-   * hidden reasoning and report text never enter the parent's answer.
+   * Surfaces a delegated run as its own work: every action it takes travels to
+   * the parent's stream tagged with the delegation that started it, so the chat
+   * can render reads, edits and commands live inside that card instead of showing
+   * only the report at the end.
+   *
+   * The run's own begin/end stay unsaid — the delegation card already carries
+   * them — and each tool it starts also moves the turn's status line, so the
+   * user always sees which specialist is working.
    */
   private fun relay(
     role: com.agentisco.agent.model.AgentRole,
+    delegationId: String,
     event: AgentStreamEvent,
     onEvent: (AgentStreamEvent) -> Unit
   ) {
     when (event) {
-      is AgentStreamEvent.ToolStarted -> onEvent(AgentStreamEvent.Status("${role.name}: ${event.name}"))
+      is AgentStreamEvent.ToolStarted -> {
+        onEvent(AgentStreamEvent.Status("${role.name}: ${event.name}"))
+        onEvent(AgentStreamEvent.DelegationActivity(delegationId, role.name, event))
+      }
       is AgentStreamEvent.Status -> onEvent(AgentStreamEvent.Status("${role.name}: ${event.text}"))
-      else -> Unit
+      is AgentStreamEvent.TaskStarted, is AgentStreamEvent.Completed -> Unit
+      else -> onEvent(AgentStreamEvent.DelegationActivity(delegationId, role.name, event))
     }
   }
 

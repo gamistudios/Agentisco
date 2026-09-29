@@ -24,7 +24,13 @@ data class AgentRole(
    * by the tool list, not by the wording of the prompt.
    */
   val readOnly: Boolean = false,
-  val maxToolIterations: Int = 40,
+  /**
+   * How many tool rounds this agent may take. Unlimited by default: the run ends
+   * when the work is done, not when a counter runs out. Plan mode is the one
+   * budget that still applies, and it restricts *which* tools a run may use, never
+   * how long it may take.
+   */
+  val maxToolIterations: Int = UNLIMITED_ITERATIONS,
   /** Built-in roles ship with the app; custom ones come from the user. */
   val builtIn: Boolean = true,
   /**
@@ -166,8 +172,7 @@ object AgentRoles {
       "Say what you did not find, and where you looked for it",
       "Prefer the second opinion of the code over the first guess of a name"
     ),
-    readOnly = true,
-    maxToolIterations = 24
+    readOnly = true
   )
 
   val UIUX = AgentRole(
@@ -252,7 +257,6 @@ object AgentRoles {
       "Read the failing path's inputs before assuming the unit at the end of the stack trace",
       "Say whether the bug is a local defect or the visible end of a design problem"
     ),
-    maxToolIterations = 32
   )
 
   val QA = AgentRole(
@@ -274,7 +278,6 @@ object AgentRoles {
       "Name the behaviour under test, not the method call",
       "Report exactly what ran, what passed, what failed and what was never run"
     ),
-    maxToolIterations = 32
   )
 
   val SECURITY = AgentRole(
@@ -296,7 +299,6 @@ object AgentRoles {
       "Absence of a check is the finding; prove it by reading the code path",
       "Never claim a risk is theoretical to make a list look short"
     ),
-    maxToolIterations = 32
   )
 
   val builtIn: List<AgentRole> = listOf(
@@ -332,7 +334,7 @@ object AgentRoles {
     toolNames: List<String> = emptyList(),
     modelId: String = "",
     readOnly: Boolean = false,
-    maxToolIterations: Int = 40
+    maxToolIterations: Int = UNLIMITED_ITERATIONS
   ): AgentRole = AgentRole(
     id = id,
     name = name,

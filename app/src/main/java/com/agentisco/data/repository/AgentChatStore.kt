@@ -73,7 +73,8 @@ class AgentChatStore(context: Context?) {
         ChatDatabase.MIGRATION_3_4,
         ChatDatabase.MIGRATION_4_5,
         ChatDatabase.MIGRATION_5_6,
-        ChatDatabase.MIGRATION_6_7
+        ChatDatabase.MIGRATION_6_7,
+        ChatDatabase.MIGRATION_7_8
       )
       .build()
   }

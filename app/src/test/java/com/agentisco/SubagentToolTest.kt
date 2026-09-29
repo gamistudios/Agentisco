@@ -11,6 +11,7 @@ import com.agentisco.agent.model.AgentRole
 import com.agentisco.agent.model.AgentRoles
 import com.agentisco.agent.model.AgentStreamEvent
 import com.agentisco.agent.model.PermissionMode
+import com.agentisco.agent.model.UNLIMITED_ITERATIONS
 import com.agentisco.agent.runtime.AgentRuntime
 import com.agentisco.agent.tool.AgentToolRegistry
 import com.agentisco.agent.tool.PlanMode
@@ -71,6 +72,7 @@ class SubagentToolTest {
     var prompt = ""
     var project: Project? = null
     var terminal: TerminalSession? = null
+    var delegationId = ""
     var calls = 0
 
     override suspend fun launch(
@@ -78,7 +80,8 @@ class SubagentToolTest {
       description: String,
       prompt: String,
       project: Project,
-      terminal: TerminalSession
+      terminal: TerminalSession,
+      delegationId: String
     ): SubagentOutcome {
       calls++
       this.role = role
@@ -86,6 +89,7 @@ class SubagentToolTest {
       this.prompt = prompt
       this.project = project
       this.terminal = terminal
+      this.delegationId = delegationId
       return outcome
     }
   }
@@ -108,9 +112,13 @@ class SubagentToolTest {
     )
   }
 
-  private fun delegate(launcher: SubagentLauncher, json: String): com.agentisco.agent.tool.ToolResult {
+  private fun delegate(
+    launcher: SubagentLauncher,
+    json: String,
+    callId: String = ""
+  ): com.agentisco.agent.tool.ToolResult {
     val tool = SubagentTool(launcher)
-    return runBlocking { tool.execute(tool.parseAndValidate(json), contextFor(ws)) }
+    return runBlocking { tool.execute(tool.parseAndValidate(json), contextFor(ws, toolCallId = callId)) }
   }
 
   private fun delegation(role: String, description: String = "trace the value", prompt: String = "do it") =
@@ -123,11 +131,14 @@ class SubagentToolTest {
     val launcher = RecordingLauncher()
     val result = delegate(
       launcher,
-      delegation("backend", "implement the refund endpoint", "Add refund handling to OrderService.")
+      delegation("backend", "implement the refund endpoint", "Add refund handling to OrderService."),
+      callId = "call_7"
     )
     assertTrue(result.output, result.success)
     assertEquals(1, launcher.calls)
     assertEquals(AgentRoles.BACKEND, launcher.role)
+    // The call that started it, so its work can be hung under this card.
+    assertEquals("call_7", launcher.delegationId)
     assertEquals("implement the refund endpoint", launcher.description)
     assertEquals("Add refund handling to OrderService.", launcher.prompt)
     assertEquals(ws.project, launcher.project)
@@ -301,7 +312,10 @@ class SubagentToolTest {
     assertEquals(PermissionMode.NEVER_ALLOW, research.fileEditing)
     assertFalse(research.deleteFiles)
     assertEquals(PermissionMode.ALLOW_SAFE, research.terminalCommands)
-    assertEquals(AgentRoles.EXPLORE.maxToolIterations, research.maxToolIterations)
+    // The specialist works until the job is done — unless the user capped this turn,
+    // in which case the cap is inherited, never outgrown.
+    assertEquals(UNLIMITED_ITERATIONS, AgentRoles.EXPLORE.maxToolIterations)
+    assertEquals(200, research.maxToolIterations)
 
     val engineer = SubagentTool.childPermissions(AgentRoles.BACKEND, parent)
     assertFalse(engineer.planMode)
@@ -309,7 +323,14 @@ class SubagentToolTest {
     assertEquals(PermissionMode.ALLOW_ALL, engineer.fileEditing)
     assertEquals(PermissionMode.ALLOW_ALL, engineer.terminalCommands)
     assertTrue(engineer.deleteFiles)
-    assertEquals(AgentRoles.BACKEND.maxToolIterations, engineer.maxToolIterations)
+    assertEquals(200, engineer.maxToolIterations)
+
+    val uncapped = SubagentTool.childPermissions(AgentRoles.BACKEND, AgentPermissions())
+    assertEquals(
+      "no seat runs out of rounds by default",
+      UNLIMITED_ITERATIONS,
+      uncapped.maxToolIterations
+    )
 
     // Nothing on the team pushes, whatever the user's own setting.
     assertFalse(engineer.gitPush)
@@ -341,7 +362,7 @@ class SubagentToolTest {
       assertTrue("${role.id} has a lane", role.responsibilities.size >= 2)
       assertTrue("${role.id} names what it stays out of", role.handsOff.isNotEmpty())
       assertTrue("${role.id} has standards", role.craft.isNotEmpty())
-      assertTrue("${role.id} is capped", role.maxToolIterations in 8..60)
+      assertTrue("${role.id} runs until the work is done", role.maxToolIterations == UNLIMITED_ITERATIONS)
       assertTrue(role.prompt(), role.prompt().contains("You are the ${role.name} agent"))
     }
   }
@@ -450,7 +471,7 @@ class SubagentToolTest {
       onStageFile = {},
       onStageAll = {},
       onUnstageAll = {},
-      subagentLauncher = SubagentLauncher { childRole, description, prompt, childProject, childTerminal ->
+      subagentLauncher = SubagentLauncher { childRole, description, prompt, childProject, childTerminal, delegationId ->
         runtime!!.runSubagent(
           role = childRole,
           description = description,
@@ -466,8 +487,9 @@ class SubagentToolTest {
             deleteFiles = true
           ),
           terminalSession = childTerminal,
-          // The relay inside runSubagent turns these into status lines, so this is
-          // the same stream the parent reports on - exactly how the repository wires it.
+          delegationId = delegationId,
+          // Exactly how the repository wires it: everything the relay produces is
+          // put on the parent's stream, and the chat sorts it from there.
           onEvent = { event -> events.add(event) }
         )
       }
@@ -545,6 +567,31 @@ class SubagentToolTest {
     val report = run.parentFinal.messages.last { it.role == LlmRole.TOOL }.content
     assertTrue(report, report.contains("Report from the Backend Engineer"))
     assertTrue(report, report.contains("Files it changed: src/App.tsx"))
+  }
+
+  /** The user watches the specialist work, not only its report. */
+  @Test
+  fun `a delegated agent streams its own actions tagged with the delegation`() {
+    val run = delegationRun(
+      AgentRoles.BACKEND,
+      listOf(editTurn, Turn.Answer("Set value to 2 in src/App.tsx."))
+    )
+    val nested = run.events.filterIsInstance<AgentStreamEvent.DelegationActivity>()
+    assertTrue(nested.toString(), nested.isNotEmpty())
+    assertEquals("Backend Engineer", nested.first().agent)
+    // Every one of them carries the parent's own delegate call id, so the chat
+    // hangs them under that card instead of in the mainline.
+    assertEquals(setOf("call_0"), nested.map { it.delegationId }.toSet())
+
+    val inner = nested.map { it.event }
+    assertTrue(inner.toString(), inner.any { it is AgentStreamEvent.ToolStarted && it.name == "edit_file" })
+    assertTrue(inner.toString(), inner.any { it is AgentStreamEvent.ToolFinished && it.name == "edit_file" && it.success })
+    // The specialist's answer text streams as its own, inside the card.
+    assertTrue(inner.toString(), inner.any { it is AgentStreamEvent.Token && it.text.contains("Set value to 2") })
+    // None of it reaches the parent's answer as if the orchestrator wrote it.
+    assertFalse(run.events.toString(), run.events.filterIsInstance<AgentStreamEvent.Token>().any { it.text.contains("Set value to 2") })
+    // And the turn's live status line still names who is working.
+    assertTrue(run.events.toString(), run.events.filterIsInstance<AgentStreamEvent.Status>().any { it.text == "Backend Engineer: edit_file" })
   }
 
   @Test

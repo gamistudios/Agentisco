@@ -81,4 +81,19 @@ sealed class AgentStreamEvent {
     val summarizedThroughRowId: Long,
     val summary: String = ""
   ) : AgentStreamEvent()
+
+  /**
+   * One action by a delegated agent, belonging to the `delegate` call that started
+   * it.
+   *
+   * [delegationId] is the parent's tool-call id, so the chat can hang this card
+   * under the delegation it came from instead of in the mainline: a specialist's
+   * work is shown as its own work, in order, while it happens - and the parent's
+   * transcript still only ever gains the report.
+   */
+  data class DelegationActivity(
+    val delegationId: String,
+    val agent: String,
+    val event: AgentStreamEvent
+  ) : AgentStreamEvent()
 }

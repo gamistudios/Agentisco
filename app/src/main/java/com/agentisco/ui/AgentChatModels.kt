@@ -54,8 +54,27 @@ data class ActionBlock(
   /** The model's tool-call id — lets the UI cancel/retry this specific call. */
   val callId: String = "",
   /** True when the user SIGKILLed this call and a retry/continue choice is pending. */
-  val cancelled: Boolean = false
+  val cancelled: Boolean = false,
+  /**
+   * The work a delegated agent did for this call, in the order it did it: its
+   * tool cards, its text, its thinking. Only a `delegate` call ever has any —
+   * a specialist cannot delegate further.
+   */
+  val children: List<TurnBlock> = emptyList(),
+  /** The brief the orchestrator handed that agent, for `delegate` calls only. */
+  val delegation: DelegationBrief? = null
 ) : TurnBlock()
+
+/**
+ * What a delegation asked for, read back off the `delegate` call's own arguments:
+ * the specialist's brief is part of the record, so it survives a restart without a
+ * second copy anywhere.
+ */
+data class DelegationBrief(
+  val role: String,
+  val description: String,
+  val prompt: String
+)
 
 data class ApprovalBlock(
   override val id: String,
@@ -125,6 +144,22 @@ private fun String?.toOptionList(): List<String> {
   }.getOrDefault(emptyList())
 }
 
+/**
+ * Reads a `delegate` call's arguments back into the brief it carried. An
+ * argument blob that is not JSON, or holds neither a role nor a prompt, simply
+ * has no brief — a card must never invent what the agent was asked.
+ */
+private fun String?.toDelegationBrief(): DelegationBrief? {
+  if (isNullOrBlank()) return null
+  return runCatching {
+    val obj = org.json.JSONObject(this)
+    val role = obj.optString("role")
+    val prompt = obj.optString("prompt")
+    if (role.isBlank() && prompt.isBlank()) null
+    else DelegationBrief(role, obj.optString("description"), prompt)
+  }.getOrNull()
+}
+
 fun MessageWithBlocks.toChatItem(): ChatItem {
   val message = message
   return if (message.role == "user") {
@@ -141,10 +176,33 @@ fun MessageWithBlocks.toChatItem(): ChatItem {
         else -> TurnStatus.COMPLETED
       },
       statusMessage = message.statusMessage,
-      blocks = blocks.mapNotNull { it.toTurnBlock() },
+      blocks = blocks.toTurnBlocks(),
       providerName = message.providerName,
       modelName = message.modelName
     )
+  }
+}
+
+/**
+ * Decodes a turn's blocks and hangs each delegated agent's work under the
+ * delegation card that started it. Blocks are written in event order, so the
+ * `delegate` card is always recorded before the blocks nested under it.
+ */
+fun List<AgentBlockEntity>.toTurnBlocks(): List<TurnBlock> {
+  val nested = LinkedHashMap<String, MutableList<TurnBlock>>()
+  val mainline = mutableListOf<TurnBlock>()
+  forEach { entity ->
+    val block = entity.toTurnBlock() ?: return@forEach
+    val parent = entity.parentCallId
+    if (parent.isNullOrBlank()) mainline.add(block)
+    else nested.getOrPut(parent) { mutableListOf() }.add(block)
+  }
+  if (nested.isEmpty()) return mainline
+  return mainline.map { block ->
+    if (block is ActionBlock && block.callId.isNotBlank()) {
+      val children = nested[block.callId]
+      if (children.isNullOrEmpty()) block else block.copy(children = children)
+    } else block
   }
 }
 
@@ -187,7 +245,8 @@ fun AgentBlockEntity.toTurnBlock(): TurnBlock? = when (kind) {
     detail = detail,
     exitCode = exitCode,
     callId = callId.orEmpty(),
-    cancelled = status == "cancelled"
+    cancelled = status == "cancelled",
+    delegation = if (name == "delegate") argsJson.toDelegationBrief() else null
   )
   "error" -> ErrorBlock(uuid, summary)
   // Compaction only changes what is sent to the provider; the chat above

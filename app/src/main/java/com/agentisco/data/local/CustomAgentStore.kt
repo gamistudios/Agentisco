@@ -3,6 +3,7 @@ package com.agentisco.data.local
 import android.content.Context
 import com.agentisco.agent.model.AgentRole
 import com.agentisco.agent.model.AgentRoles
+import com.agentisco.agent.model.UNLIMITED_ITERATIONS
 import java.io.File
 import org.json.JSONArray
 import org.json.JSONObject
@@ -108,7 +109,11 @@ class CustomAgentStore(private val context: Context? = null) {
           handsOff = emptyList(),
           craft = emptyList(),
           builtIn = false,
-          maxToolIterations = role.maxToolIterations.coerceIn(8, 60)
+          // A user may still choose a budget for their own agent; not having one is
+          // the default, and a saved "unlimited" must survive a reload.
+          maxToolIterations =
+            if (role.maxToolIterations == UNLIMITED_ITERATIONS) UNLIMITED_ITERATIONS
+            else role.maxToolIterations.coerceIn(8, 600)
         )
       }
     }
@@ -134,7 +139,9 @@ class CustomAgentStore(private val context: Context? = null) {
         toolNames = obj.optJSONArray("toolNames").stringList(),
         modelId = obj.optString("modelId"),
         readOnly = obj.optBoolean("readOnly", false),
-        maxToolIterations = obj.optInt("maxToolIterations", 40)
+        // A file written before "unlimited" was the default has a number here; a
+        // file written without one means no ceiling, not forty rounds.
+        maxToolIterations = obj.optInt("maxToolIterations", UNLIMITED_ITERATIONS)
       )
     }.getOrNull()
 

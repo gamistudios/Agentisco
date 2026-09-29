@@ -158,7 +158,8 @@ class CustomAgentTest {
         description: String,
         prompt: String,
         project: Project,
-        terminal: TerminalSession
+        terminal: TerminalSession,
+        delegationId: String
       ) = com.agentisco.agent.tool.SubagentOutcome(success = true, summary = "done")
     }
     val tool = SubagentTool(launcher, roster = { roster })
@@ -338,7 +339,9 @@ class CustomAgentTest {
     assertEquals("Update the README. \nNever touch code.", normalized.systemPrompt)
     assertEquals("docs/", normalized.scope)
     assertEquals(listOf("read_file", "glob_files"), normalized.toolNames)
-    assertEquals(60, normalized.maxToolIterations)
+    // A number is a budget the user chose, so it is kept — bounded, rather than
+    // letting a mistyped field allow 999 rounds.
+    assertEquals(600, normalized.maxToolIterations)
     assertFalse(normalized.builtIn)
   }
 
@@ -439,7 +442,7 @@ class CustomAgentTest {
       onStageAll = {},
       onUnstageAll = {},
       subagentRoles = { AgentRoles.roster(listOf(role)) },
-      subagentLauncher = SubagentLauncher { childRole, description, prompt, childProject, childTerminal ->
+      subagentLauncher = SubagentLauncher { childRole, description, prompt, childProject, childTerminal, delegationId ->
         runtime!!.runSubagent(
           role = childRole,
           description = description,
@@ -455,6 +458,7 @@ class CustomAgentTest {
             deleteFiles = true
           ),
           terminalSession = childTerminal,
+          delegationId = delegationId,
           onEvent = { event -> events.add(event) }
         )
       }

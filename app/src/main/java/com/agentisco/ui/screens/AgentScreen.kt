@@ -869,6 +869,41 @@ private fun CompactionCard(block: CompactionBlock) {
   }
 }
 
+/**
+ * The work of a delegated agent, rendered with the same cards the orchestrator's
+ * own actions use, nested inside the delegation that asked for it.
+ *
+ * Nothing here is interactive by design: a specialist cannot answer the user
+ * (its approvals are refused at once by the runtime), and its calls are stopped
+ * with the turn, not individually.
+ */
+@Composable
+private fun DelegationActivityStream(blocks: List<TurnBlock>, showToolJson: Boolean) {
+  if (blocks.isEmpty()) return
+  Column(
+    modifier = Modifier
+      .fillMaxWidth()
+      .padding(start = 10.dp)
+      .testTag("delegation_activity_stream")
+  ) {
+    Spacer(modifier = Modifier.height(5.dp))
+    Text("Its own work", color = TextMuted, fontSize = 9.sp, fontWeight = FontWeight.SemiBold)
+    blocks.forEach { block ->
+      Spacer(modifier = Modifier.height(5.dp))
+      when (block) {
+        is TextBlock -> if (block.text.isNotBlank()) {
+          MarkdownText(text = block.text, streaming = block.streaming, modifier = Modifier.fillMaxWidth())
+        }
+        is ReasoningBlock -> ThinkingBlock(block)
+        is ActionBlock -> ToolCallRow(item = block, showToolJson = showToolJson)
+        is ApprovalBlock -> ApprovalCard(item = block, onAllow = {}, onDeny = {}, onAnswer = {}, onReopen = {})
+        is ErrorBlock -> ErrorCard(block, showRetry = false, onRetry = {})
+        is CompactionBlock -> CompactionCard(block)
+      }
+    }
+  }
+}
+
 @Composable
 private fun ToolCallRow(
   item: ActionBlock,
@@ -972,6 +1007,51 @@ private fun ToolCallRow(
       }
     }
 
+    // The brief the orchestrator handed this agent, as the card's first entry.
+    // Collapsed by default: reading the instructions is deliberate, watching the
+    // specialist work is not.
+    item.delegation?.let { brief ->
+      var briefOpen by remember(item.id) { mutableStateOf(false) }
+      Spacer(modifier = Modifier.height(5.dp))
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+          if (briefOpen) "Hide the brief" else "Brief for ${brief.role.ifBlank { "this agent" }}",
+          color = ElectricBlueGlow,
+          fontSize = 10.sp,
+          fontWeight = FontWeight.SemiBold,
+          modifier = Modifier
+            .clickable { briefOpen = !briefOpen }
+            .testTag("btn_toggle_delegation_brief")
+        )
+        Spacer(modifier = Modifier.weight(1f))
+        if (brief.description.isNotBlank()) {
+          Text(
+            brief.description,
+            color = TextMuted,
+            fontSize = 10.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false)
+          )
+        }
+      }
+      if (briefOpen && brief.prompt.isNotBlank()) {
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+          brief.prompt,
+          color = TextSecondary,
+          fontSize = 11.sp,
+          lineHeight = 15.sp,
+          modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(6.dp))
+            .background(DarkBackground)
+            .padding(8.dp)
+            .testTag("delegation_brief_text")
+        )
+      }
+    }
+
     // The command about to run / that ran — copyable, never truncated JSON.
     if (command != null) {
       Spacer(modifier = Modifier.height(5.dp))
@@ -1023,6 +1103,10 @@ private fun ToolCallRow(
         overflow = TextOverflow.Ellipsis
       )
     }
+
+    // A delegated agent's work, live and in order — the same cards the
+    // orchestrator gets for its own actions, hung under this delegation.
+    DelegationActivityStream(item.children, showToolJson)
 
     // Git-style diff for file edits: -removed / +added with line numbers.
     if (diffLines != null && diffLines.isNotEmpty()) {
