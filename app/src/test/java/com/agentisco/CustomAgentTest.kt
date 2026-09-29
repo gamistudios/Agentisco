@@ -241,15 +241,30 @@ class CustomAgentTest {
   fun `a custom agent runs under the user's permissions, never above them`() {
     val parent = AgentPermissions(
       planMode = false,
-      fileEditing = PermissionMode.ALLOW_ALL,
+      fileEditing = PermissionMode.ALWAYS_ASK,
       terminalCommands = PermissionMode.ALWAYS_ASK,
       deleteFiles = false
     )
     val engineer = SubagentTool.childPermissions(embedded(), parent)
     assertFalse(engineer.planMode)
-    assertEquals(PermissionMode.ALWAYS_ASK, engineer.terminalCommands)
+    // Asking is the one thing a delegated run cannot do by itself, so an ask it
+    // would have made becomes a go. What the user actually withheld - deleting,
+    // pushing - stays withheld.
+    assertEquals(PermissionMode.ALLOW_ALL, engineer.fileEditing)
+    assertEquals(PermissionMode.ALLOW_ALL, engineer.terminalCommands)
     assertFalse(engineer.deleteFiles)
     assertFalse(engineer.gitPush)
+
+    // A capability forbidden outright is not reinstated by delegation.
+    val forbidden = SubagentTool.childPermissions(
+      embedded(),
+      parent.copy(
+        fileEditing = PermissionMode.NEVER_ALLOW,
+        terminalCommands = PermissionMode.NEVER_ALLOW
+      )
+    )
+    assertEquals(PermissionMode.NEVER_ALLOW, forbidden.fileEditing)
+    assertEquals(PermissionMode.NEVER_ALLOW, forbidden.terminalCommands)
 
     val researcher = SubagentTool.childPermissions(embedded(readOnly = true), parent)
     assertTrue(researcher.planMode)

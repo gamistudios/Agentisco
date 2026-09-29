@@ -63,7 +63,7 @@ class SubagentTool(
     "Put a slice of work in another agent's hands and get its report back. Each role is the same engine with a different responsibility: explore is read-only research, every other role can change files, run commands and test its own work. " +
       "Use it when a task would cost too many files in this conversation to be worth doing here, or when the work belongs in a specialist's lane (interface, backend, tests, security, a specific bug). " +
       "Roles may run beside each other, so give each one a slice that does not overlap another agent's files, and say in the brief which files are yours. " +
-      "The brief has to carry everything: a delegated agent sees none of this conversation, cannot delegate further, and cannot ask the user - a decision that belongs to the user goes in its report as a hand-off, never as a question. " +
+      "The brief has to carry everything: a delegated agent sees none of this conversation and cannot delegate further. It can ask the user with ask_user, but that waits on the whole turn, so a decision that can live in its report goes there as a hand-off rather than as a question. " +
       "It works in the same workspace, so tell it what is already done. " +
       rosterText()
 
@@ -150,10 +150,20 @@ class SubagentTool(
           maxToolIterations = budget
         )
       } else {
-        // A specialist does real work, under exactly the user's own limits: it
-        // never gets more permission than the agent that delegated to it.
+        // A specialist does the work it was delegated, so nothing stops it to ask
+        // for what the user already agreed to by delegating: its file edits and
+        // its commands run without a prompt. Two things still hold it. A
+        // capability the user forbade outright is not reinstated by delegation,
+        // and whatever the destructive guard calls dangerous still reaches the
+        // user, through this turn's dialog.
+        val edits = if (parent.fileEditing == PermissionMode.NEVER_ALLOW)
+          PermissionMode.NEVER_ALLOW else PermissionMode.ALLOW_ALL
+        val commands = if (parent.terminalCommands == PermissionMode.NEVER_ALLOW)
+          PermissionMode.NEVER_ALLOW else PermissionMode.ALLOW_ALL
         parent.copy(
           planMode = false,
+          fileEditing = edits,
+          terminalCommands = commands,
           gitPush = false,
           maxToolIterations = budget
         )

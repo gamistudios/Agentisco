@@ -10,6 +10,7 @@ import com.agentisco.agent.model.AgentPermissions
 import com.agentisco.agent.model.AgentRole
 import com.agentisco.agent.model.AgentRoles
 import com.agentisco.agent.model.AgentStreamEvent
+import com.agentisco.agent.model.PendingApproval
 import com.agentisco.agent.model.PermissionMode
 import com.agentisco.agent.model.UNLIMITED_ITERATIONS
 import com.agentisco.agent.runtime.AgentRuntime
@@ -47,10 +48,11 @@ import org.robolectric.annotation.Config
  *
  * A role changes what an agent is told to care about and how far its reach goes.
  * Two properties are proven rather than assumed: research cannot write even when
- * the agent that delegated to it could, and a specialist does real work under
- * exactly the user's own permissions - never more. Every run is contained by
- * construction (tool list, gate, no approval channel of its own, no delegation),
- * which is what lets several of them work in one workspace at a time.
+ * the agent that delegated to it could, and a specialist does the work it was
+ * delegated without being stopped for a decision the user already made by
+ * delegating. Every run is contained by construction (tool list, gate, no dialog
+ * of its own, no delegation), which is what lets several of them work in one
+ * workspace at a time.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -250,12 +252,16 @@ class SubagentToolTest {
   }
 
   @Test
-  fun `the tool says what a delegated agent cannot do`() {
+  fun `the tool says what a delegated agent can and cannot do`() {
     val tool = SubagentTool(RecordingLauncher())
     assertEquals("delegate", tool.name)
     assertEquals(listOf("role", "description", "prompt"), tool.params.map { it.name })
     assertTrue(tool.description, tool.description.contains("explore is read-only"))
-    assertTrue(tool.description, tool.description.contains("cannot ask the user"))
+    assertTrue(tool.description, tool.description.contains("cannot delegate further"))
+    // It may ask - and the description says what that costs, so the orchestrator
+    // does not hand it a brief full of questions.
+    assertTrue(tool.description, tool.description.contains("ask the user with ask_user"))
+    assertTrue(tool.description, tool.description.contains("waits on the whole turn"))
     assertTrue(tool.description, tool.description.contains("beside each other"))
     assertTrue(tool.description, tool.description.contains("does not overlap another agent's files"))
   }
@@ -298,7 +304,7 @@ class SubagentToolTest {
   }
 
   @Test
-  fun `research never writes and a specialist works under the user's own limits`() {
+  fun `research never writes and a specialist is never stopped by an ask it cannot make`() {
     val parent = AgentPermissions(
       planMode = false,
       fileEditing = PermissionMode.ALLOW_ALL,
@@ -335,6 +341,27 @@ class SubagentToolTest {
     // Nothing on the team pushes, whatever the user's own setting.
     assertFalse(engineer.gitPush)
     assertFalse(research.gitPush)
+
+    // The user's default is to be asked about every edit. A specialist cannot
+    // hold that dialog — delegating is the agreement that its own edits and
+    // commands run, or no delegation would ever finish.
+    val asking = AgentPermissions(
+      fileEditing = PermissionMode.ALWAYS_ASK,
+      terminalCommands = PermissionMode.ALWAYS_ASK
+    )
+    assertEquals(
+      "a specialist is not stopped by an ask it cannot make",
+      PermissionMode.ALLOW_ALL,
+      SubagentTool.childPermissions(AgentRoles.GENERAL, asking).fileEditing
+    )
+    assertEquals(
+      PermissionMode.ALLOW_ALL,
+      SubagentTool.childPermissions(AgentRoles.GENERAL, asking).terminalCommands
+    )
+    // Research keeps the gate: it is the one role refused by design.
+    val askingResearch = SubagentTool.childPermissions(AgentRoles.EXPLORE, asking)
+    assertTrue(askingResearch.planMode)
+    assertEquals(PermissionMode.NEVER_ALLOW, askingResearch.fileEditing)
 
     // A user who forbade commands is not overridden by delegation.
     val strict = SubagentTool.childPermissions(
@@ -442,8 +469,15 @@ class SubagentToolTest {
    * Parent and child share one [LlmService], so the script is the whole
    * conversation of both: the parent delegates, the child works, the parent
    * answers.
+   *
+   * [answer] is what the user decides about a request that reaches the turn's
+   * dialog — a delegated agent asks through the same one, so it can ask at all.
    */
-  private fun delegationRun(role: AgentRole, childTurns: List<Turn>): PairingRun {
+  private fun delegationRun(
+    role: AgentRole,
+    childTurns: List<Turn>,
+    answer: (PendingApproval) -> Pair<Boolean, String?> = { false to null }
+  ): PairingRun {
     val dir = File(ws.root, "project_${System.nanoTime()}")
     File(dir, "src").mkdirs()
     File(dir, "src/App.tsx").writeText("export const value = 1\n")
@@ -513,7 +547,11 @@ class SubagentToolTest {
           )
         },
         terminalSession = terminal,
-        onRequestApproval = { },
+        // The user's dialog: whatever the turn asks, this test answers.
+        onRequestApproval = { approval ->
+          val (allowed, text) = answer(approval)
+          runtime!!.resolvePendingApproval(allowed = allowed, answer = text)
+        },
         onEvent = { events.add(it) }
       )
     }
@@ -649,19 +687,46 @@ class SubagentToolTest {
   }
 
   @Test
-  fun `a delegated agent never gets the user's approval dialog`() {
+  fun `a delegated agent asks the user through the turn's own dialog`() {
+    val asked = mutableListOf<PendingApproval>()
     val run = delegationRun(
       AgentRoles.SECURITY,
       listOf(
-        // A specialist may try to pull the user into a decision - and must be
-        // answered without a dialog the user never saw, so it cannot hang.
+        // A specialist that needs a human decision is not answered for: the
+        // question is put to the user, in this turn's one dialog.
         Turn.Call("ask_user", """{"question":"rotate the signing key now?","options":["now","after release"]}"""),
-        Turn.Answer("Assumed after release and reported it as a hand-off.")
-      )
+        Turn.Answer("Rotating after release, as the user chose.")
+      ),
+      answer = { approval ->
+        asked += approval
+        true to "after release"
+      }
     )
-    assertTrue(
-      "no approval may reach the parent from a delegated run",
-      run.events.none { it is AgentStreamEvent.ApprovalRequested }
+    assertEquals("the question should reach the user once", 1, asked.size)
+    assertTrue(asked.first().isQuestion)
+    // Whose question it is, so the dialog does not read as the orchestrator's.
+    assertTrue(asked.first().title, asked.first().title.contains("Security"))
+
+    val requested = run.events.filterIsInstance<AgentStreamEvent.ApprovalRequested>()
+    assertEquals(1, requested.size)
+    val resolved = run.events.filterIsInstance<AgentStreamEvent.ApprovalResolved>().single()
+    assertTrue(resolved.allowed)
+    assertEquals("after release", resolved.answer)
+
+    // The answer is what the specialist carries on with.
+    val answered = run.service.requests[2].messages.last { it.role == LlmRole.TOOL }.content
+    assertTrue(answered, answered.contains("after release"))
+  }
+
+  @Test
+  fun `a specialist that is refused says so without inventing a decision`() {
+    val run = delegationRun(
+      AgentRoles.SECURITY,
+      listOf(
+        Turn.Call("ask_user", """{"question":"rotate the signing key now?","options":["now","after release"]}"""),
+        Turn.Answer("Reported it as a hand-off instead.")
+      ),
+      answer = { false to null }
     )
     val asked = run.service.requests[2].messages.last { it.role == LlmRole.TOOL }.content
     assertTrue(asked, asked.contains("did not answer"))

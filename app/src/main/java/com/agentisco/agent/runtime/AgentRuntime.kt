@@ -157,7 +157,8 @@ Method:
      belongs in a specialist's lane: call delegate with the narrowest role that covers
      it. explore only reads and reports; every other role implements, runs and tests its
      own work in this same workspace. A delegated agent sees none of this history,
-     cannot delegate and cannot ask the user, so the brief must carry the goal, the
+     cannot delegate again, and a question it asks stops the whole turn until the user
+     answers, so the brief must carry the goal, the
      starting paths, what is already done and what the report must contain. They may run
      beside each other, so give each one a slice that does not overlap another agent's
      files - each agent is shown which files are already held - and expect a report, not
@@ -233,6 +234,13 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
   /** Serializes approval requests when tools run concurrently. */
   private val approvalMutex = Mutex()
   private var pendingApprovalDeferred: CompletableDeferred<UserDecision>? = null
+  /**
+   * The dialog of the run in flight, so a specialist it delegates to is handed this
+   * same channel. One user watching one turn gets one queue of requests, and a
+   * delegated run that reaches into it is asking in person instead of being
+   * refused on the user's behalf.
+   */
+  private var activeApprovalChannel: (suspend (PendingApproval) -> UserDecision)? = null
   private val toolParallelism = Semaphore(MAX_PARALLEL_TOOLS)
 
   /** Tool calls the user SIGKILLed; keyed by the model's call id. */
@@ -336,7 +344,15 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
     /** Fresh context-usage snapshots, for the composer's percent chip. */
     onTokenUsage: ((ContextTokenUsage) -> Unit)? = null,
     onRequestApproval: (PendingApproval) -> Unit,
-    onEvent: (AgentStreamEvent) -> Unit
+    onEvent: (AgentStreamEvent) -> Unit,
+    /**
+     * How this run puts a request in front of the user. A delegated run is handed
+     * the channel of the turn that delegated to it: one dialog serves the whole
+     * turn, so a specialist's question — or a request the destructive guard insists
+     * a human make — is asked and answered rather than refused on the user's
+     * behalf by a run they were never shown. Null means this run owns the dialog.
+     */
+    approvalChannel: (suspend (PendingApproval) -> UserDecision)? = null
   ): AgentTaskResult = withContext(Dispatchers.IO) {
     onEvent(AgentStreamEvent.TaskStarted(prompt))
 
@@ -351,6 +367,11 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
     usageCharsSinceEmit = 0
     compactor.resetCircuitBreaker()
     val sink = compactSinkProvider()
+    // One dialog serves a turn, so a delegated run is handed this channel instead
+    // of being left with nobody to ask.
+    val askUserDecision: suspend (PendingApproval) -> UserDecision =
+      approvalChannel ?: { approval -> awaitUserDecision(approval, onRequestApproval, onEvent) }
+    activeApprovalChannel = askUserDecision
     val meter = CompactTokenMeter(activePolicy.contextWindow, activePolicy)
 
     // Declared before the transcript because the seat's file claims are this very
@@ -555,7 +576,7 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
                   if (!currentCoroutineContext().isActive) {
                     call to ToolResult(success = false, error = "Agent task cancelled")
                   } else {
-                    call to executeToolCall(call, project, permissions(), terminalSession, onRequestApproval, onEvent, modifiedFiles)
+                    call to executeToolCall(call, project, permissions(), terminalSession, askUserDecision, onEvent, modifiedFiles)
                   }
                 }
                 outcome
@@ -615,6 +636,7 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
       onEvent(AgentStreamEvent.Failed(reason))
       AgentTaskResult(success = false, summary = reason, modifiedFiles = modifiedFiles.toList())
     } finally {
+      activeApprovalChannel = null
       seat?.finish(seatStatus)
     }
   }
@@ -659,6 +681,9 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
       // The same skills: a specialist working in this repo reads the same files.
       skillStore
     ) { null }
+    // This turn's dialog, if the user is watching one: the specialist's requests go
+    // through it, so it can ask rather than be answered for.
+    val parentChannel = activeApprovalChannel
     val result = child.executeTask(
       prompt = "${role.name} task (${description.ifBlank { "delegated work" }}): $prompt",
       role = role,
@@ -668,11 +693,23 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
       apiKey = apiKey,
       permissions = { SubagentTool.childPermissions(role, parentPermissions) },
       terminalSession = terminalSession,
-      // A delegated run owns no dialog: the user is watching the parent's turn and
-      // one approval channel cannot serve two runs. Anything it would ask about is
-      // refused at once, which its tools report honestly - so a specialist never
-      // quietly gets a permission the user would have been asked for.
-      onRequestApproval = { child.resolvePendingApproval(allowed = false) },
+      // The specialist speaks to the user through this turn's one dialog: what it
+      // asks is shown as its own question, and the answer comes from the user
+      // rather than being decided for them. A run with no parent turn in flight
+      // (a test, a call outside a turn) has no dialog to borrow, so its requests
+      // are answered by the fallback below instead of hanging.
+      approvalChannel = parentChannel?.let { channel ->
+        { approval ->
+          channel(
+            approval.copy(
+              title = if (approval.isQuestion) "${role.name} has a question" else "${role.name}: ${approval.title}"
+            )
+          )
+        }
+      },
+      // Nothing reached here got through to the user: record it as a request that
+      // was never made, which is what the tool then reports to the model.
+      onRequestApproval = { child.resolvePendingApproval(allowed = false, termination = true) },
       onEvent = { event -> relay(role, delegationId, event, onEvent) }
     )
     return SubagentOutcome(
@@ -997,7 +1034,7 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
     project: Project,
     permissions: AgentPermissions,
     terminalSession: TerminalSession,
-    onRequestApproval: (PendingApproval) -> Unit,
+    askUserDecision: suspend (PendingApproval) -> UserDecision,
     onEvent: (AgentStreamEvent) -> Unit,
     modifiedFiles: MutableSet<String>
   ): ToolResult {
@@ -1038,7 +1075,7 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
       return refusal
     }
 
-    val toolContext = buildToolContext(call.id, project, permissions, terminalSession, onRequestApproval, onEvent)
+    val toolContext = buildToolContext(call.id, project, permissions, terminalSession, askUserDecision)
     while (true) {
       val result: ToolResult = try {
         tool.execute(args, toolContext)
@@ -1098,8 +1135,7 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
     project: Project,
     permissions: AgentPermissions,
     terminalSession: TerminalSession,
-    onRequestApproval: (PendingApproval) -> Unit,
-    onEvent: (AgentStreamEvent) -> Unit
+    askUserDecision: suspend (PendingApproval) -> UserDecision
   ): ToolContext = ToolContext(
     project = project,
     toolCallId = callId,
@@ -1112,13 +1148,13 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
       // rationale are recorded first so a tool reading
       // [ToolContext.requestApprovalDecision] can tell a refusal from a stopped
       // turn, and can say *why* the user refused.
-      val decision = awaitUserDecision(approval, onRequestApproval, onEvent)
+      val decision = askUserDecision(approval)
       terminatedApprovals[approval.id] = decision.termination
       decision.rationale?.let { approvalRationales[approval.id] = it }
       decision.approved
     },
     askUser = { approval ->
-      val decision = awaitUserDecision(approval, onRequestApproval, onEvent)
+      val decision = askUserDecision(approval)
       // Only a genuine answer is an answer: a refusal, a dismissal, and a
       // stopped turn all mean "the user did not pick one".
       if (decision.termination || !decision.allowed) null else decision.answer
