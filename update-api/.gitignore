@@ -1,0 +1,15 @@
+# Local secrets: the service reads these from the platform in production.
+.env
+*.local.env
+
+# Runtime state: the metadata database and the cached APKs.
+data/
+tmp-live/
+*.db
+*.db-wal
+*.db-shm
+
+# Build output.
+update-api
+update-api.exe
+bin/

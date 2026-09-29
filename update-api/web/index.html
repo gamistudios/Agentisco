@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agentisco — the AI coding agent that runs on your phone</title>
+<meta name="description" content="Agentisco is a full AI coding agent, Linux terminal and code editor running entirely on Android. Download the latest release.">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          ink: '#070A12',
+          surface: '#0E1422',
+          raised: '#151D2E',
+          line: '#22304A',
+          bolt: '#3B82F6',
+          mint: '#22D3A6',
+          muted: '#8DA0BF'
+        },
+        fontFamily: {
+          mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'Consolas', 'monospace']
+        }
+      }
+    }
+  }
+</script>
+<style>
+  body { -webkit-font-smoothing: antialiased; }
+  .grid-bg {
+    background-image:
+      linear-gradient(to right, rgba(59,130,246,.07) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(59,130,246,.07) 1px, transparent 1px);
+    background-size: 44px 44px;
+  }
+  .glow { box-shadow: 0 0 0 1px rgba(59,130,246,.25), 0 18px 60px -20px rgba(59,130,246,.45); }
+</style>
+</head>
+<body class="bg-ink text-slate-100 font-mono">
+
+<header class="border-b border-line/60">
+  <div class="mx-auto max-w-6xl px-5 py-4 flex items-center justify-between">
+    <a href="#top" class="flex items-center gap-2">
+      <span class="h-6 w-6 rounded bg-bolt/20 border border-bolt/50 grid place-items-center text-bolt text-xs">A</span>
+      <span class="tracking-tight text-slate-50">Agentisco</span>
+    </a>
+    <nav class="flex items-center gap-5 text-sm text-muted">
+      <a class="hover:text-slate-100" href="#features">Features</a>
+      <a class="hover:text-slate-100" href="#download">Download</a>
+      <a class="hover:text-slate-100" href="/v1/updates/release/latest">API</a>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+  <section class="grid-bg border-b border-line/60">
+    <div class="mx-auto max-w-6xl px-5 pt-16 pb-14 md:pt-24 md:pb-20">
+      <p class="text-xs uppercase tracking-[0.2em] text-bolt">Android · offline-capable · no root</p>
+      <h1 class="mt-4 text-3xl md:text-5xl leading-tight tracking-tight text-slate-50">
+        The AI coding agent, Linux terminal and editor<br class="hidden md:block">
+        that run entirely on your phone.
+      </h1>
+      <p class="mt-5 max-w-2xl text-sm md:text-base text-muted">
+        Agentisco ships a Debian userland through <span class="text-slate-200">proot</span>, drives it with an
+        agent that has 21 real tools, and wraps the results in an IDE-grade editor and Git client.
+        Self-updates are verified byte by byte before they install.
+      </p>
+
+      <div class="mt-8 flex flex-wrap gap-3" id="hero-actions">
+        <a href="#download" class="glow inline-flex items-center gap-2 rounded-lg bg-bolt px-5 py-3 text-sm text-white hover:bg-blue-500">
+          Download Agentisco <span id="hero-version" class="text-blue-100/80"></span>
+        </a>
+        <a href="#features" class="inline-flex items-center rounded-lg border border-line px-5 py-3 text-sm text-slate-200 hover:bg-raised">
+          What it does
+        </a>
+      </div>
+      <p class="mt-4 text-xs text-muted">Requires Android 7.0+ on arm64-v8a or armeabi-v7a.</p>
+    </div>
+  </section>
+
+  <section id="features" class="mx-auto max-w-6xl px-5 py-14 md:py-20">
+    <h2 class="text-2xl tracking-tight text-slate-50">Built for real work on a real machine</h2>
+    <div class="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div class="rounded-xl border border-line bg-surface p-5">
+        <h3 class="text-sm text-bolt">Agent</h3>
+        <p class="mt-2 text-sm text-muted">Multi-turn sessions with streaming reasoning, inline tool cards, approval gates and mid-conversation model switching.</p>
+      </div>
+      <div class="rounded-xl border border-line bg-surface p-5">
+        <h3 class="text-sm text-bolt">Debian terminal</h3>
+        <p class="mt-2 text-sm text-muted">An interactive shell with a real PTY, project folders mounted at <span class="text-slate-200">/workspace</span>.</p>
+      </div>
+      <div class="rounded-xl border border-line bg-surface p-5">
+        <h3 class="text-sm text-bolt">Editor</h3>
+        <p class="mt-2 text-sm text-muted">Syntax highlighting for 26 languages, symbol outline, find &amp; replace, and "Ask Agent" with file context.</p>
+      </div>
+      <div class="rounded-xl border border-line bg-surface p-5">
+        <h3 class="text-sm text-bolt">Git</h3>
+        <p class="mt-2 text-sm text-muted">Real git: status, diffs, staging, revert, commit messages written by the agent, history.</p>
+      </div>
+      <div class="rounded-xl border border-line bg-surface p-5">
+        <h3 class="text-sm text-bolt">Projects &amp; build</h3>
+        <p class="mt-2 text-sm text-muted">Disk-measured project metadata, file tree, diff viewer and a build/run centre for npm-style scripts.</p>
+      </div>
+      <div class="rounded-xl border border-line bg-surface p-5">
+        <h3 class="text-sm text-bolt">Verified updates</h3>
+        <p class="mt-2 text-sm text-muted">Resumable downloads checked against size, SHA-256 and the APK signature before the installer is offered.</p>
+      </div>
+    </div>
+  </section>
+
+  <section id="download" class="border-y border-line/60 bg-surface/40">
+    <div class="mx-auto max-w-6xl px-5 py-14 md:py-20">
+      <h2 class="text-2xl tracking-tight text-slate-50">Downloads</h2>
+      <p class="mt-2 text-sm text-muted">
+        The <span class="text-slate-200">release</span> build is the signed build published for general use.
+        Version and checksum below come from the update service, not from this page.
+      </p>
+      <div class="mt-8 grid gap-4 md:max-w-xl">
+        <article class="rounded-xl border border-line bg-ink p-5" data-channel="release">
+          <div class="flex items-center justify-between">
+            <h3 class="text-sm text-slate-50">Release build</h3>
+            <span class="state rounded-full border border-line px-2 py-0.5 text-[11px] text-muted">checking…</span>
+          </div>
+          <p class="mt-3 text-2xl text-mint version">—</p>
+          <dl class="mt-4 space-y-1 text-xs text-muted">
+            <div class="flex justify-between gap-4"><dt>Published</dt><dd class="published text-slate-300">—</dd></div>
+            <div class="flex justify-between gap-4"><dt>Size</dt><dd class="size text-slate-300">—</dd></div>
+            <div class="flex justify-between gap-4"><dt>SHA-256</dt><dd class="digest text-slate-300 truncate max-w-[16rem]">—</dd></div>
+          </dl>
+          <div class="mt-5 flex items-center gap-3">
+            <a class="download inline-flex items-center rounded-lg bg-bolt px-4 py-2.5 text-sm text-white hover:bg-blue-500 pointer-events-none opacity-60">Download</a>
+            <button class="notes-toggle hidden text-xs text-muted underline underline-offset-2">Changelog</button>
+          </div>
+          <pre class="notes mt-4 hidden max-h-52 overflow-auto whitespace-pre-wrap rounded-lg border border-line bg-raised p-3 text-[11px] text-muted"></pre>
+        </article>
+      </div>
+      <p id="download-notice" class="mt-6 hidden rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs text-amber-200"></p>
+      <p class="mt-6 text-xs text-muted">
+        Installing a build from outside the Play store requires allowing unknown sources for the browser you used.
+        The app verifies every download itself before offering to install.
+      </p>
+    </div>
+  </section>
+</main>
+
+<footer class="mx-auto max-w-6xl px-5 py-10 text-xs text-muted">
+  <div class="flex flex-wrap items-center justify-between gap-3">
+    <span>Agentisco · <span id="footer-version">version served by the update API</span></span>
+    <span class="flex gap-4">
+      <a class="hover:text-slate-200" href="/health">health</a>
+      <a class="hover:text-slate-200" href="/ready">ready</a>
+    </span>
+  </div>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  var notice = document.getElementById('download-notice');
+  var heroVersion = document.getElementById('hero-version');
+  var footerVersion = document.getElementById('footer-version');
+  var cards = Array.prototype.slice.call(document.querySelectorAll('[data-channel]'));
+
+  function bytes(n) {
+    if (typeof n !== 'number' || n <= 0) return '—';
+    var units = ['B', 'KB', 'MB', 'GB'], value = n, i = 0;
+    while (value >= 1024 && i < units.length - 1) { value /= 1024; i++; }
+    return (value >= 10 || i === 0 ? Math.round(value) : value.toFixed(1)) + ' ' + units[i];
+  }
+
+  function date(iso) {
+    if (!iso) return '—';
+    var d = new Date(iso);
+    if (isNaN(d.getTime())) return '—';
+    return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+  }
+
+  function showNotice(text) {
+    notice.textContent = text;
+    notice.classList.remove('hidden');
+  }
+
+  function fill(card, info) {
+    card.querySelector('.version').textContent = 'v' + info.versionName.replace(/^v/, '');
+    card.querySelector('.published').textContent = date(info.publishedAt);
+    card.querySelector('.size').textContent = bytes(info.size);
+    card.querySelector('.digest').textContent = info.sha256 ? info.sha256.slice(0, 16) + '…' : 'not published';
+    card.querySelector('.digest').title = info.sha256 || '';
+
+    var link = card.querySelector('.download');
+    link.href = info.downloadUrl;
+    link.classList.remove('pointer-events-none', 'opacity-60');
+    link.textContent = 'Download ' + info.apkName.replace(/^Agentisco-/, '');
+
+    var state = card.querySelector('.state');
+    state.textContent = info.cached ? 'ready' : 'caching';
+
+    if (info.releaseNotes) {
+      var notes = card.querySelector('.notes');
+      var toggle = card.querySelector('.notes-toggle');
+      notes.textContent = info.releaseNotes;
+      toggle.classList.remove('hidden');
+      toggle.addEventListener('click', function () { notes.classList.toggle('hidden'); });
+    }
+
+    heroVersion.textContent = info.versionName;
+    footerVersion.textContent = 'release ' + info.versionName;
+  }
+
+  function load(card) {
+    var channel = card.dataset.channel;
+    return fetch('/v1/updates/' + channel + '/latest', { headers: { Accept: 'application/json' } })
+      .then(function (response) {
+        if (!response.ok) throw new Error('status ' + response.status);
+        return response.json();
+      })
+      .then(function (info) { fill(card, info); })
+      .catch(function () {
+        card.querySelector('.state').textContent = 'unavailable';
+        showNotice('The ' + channel + ' channel is momentarily unavailable. Try again in a minute.');
+      });
+  }
+
+  Promise.allSettled(cards.map(load));
+})();
+</script>
+</body>
+</html>
