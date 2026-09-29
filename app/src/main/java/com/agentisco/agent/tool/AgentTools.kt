@@ -115,10 +115,12 @@ class AgentToolRegistry(
 
   /**
    * The reach of one delegated run: research is limited to what the planning gate
-   * lets through, anything else gets the working set minus `delegate`.
+   * lets through, anything else gets the working set minus `delegate`. The
+   * custom-agent editor offers exactly this list, so what a user can check and
+   * what a run can hold never diverge.
    */
-  fun delegableToolNames(role: com.agentisco.agent.model.AgentRole): Set<String> =
-    if (role.readOnly) PlanMode.delegatedToolNames else offered.map { it.name }.toSet() - "delegate"
+  fun delegableToolNames(readOnly: Boolean): Set<String> =
+    if (readOnly) PlanMode.delegatedToolNames else offered.map { it.name }.toSet() - "delegate"
 
   /**
    * What the role is actually given. A role that names its own tools - a
@@ -126,7 +128,7 @@ class AgentToolRegistry(
    * does not exist, or that a sub-agent may not have, buys nothing.
    */
   private fun delegatedToolsFor(role: com.agentisco.agent.model.AgentRole): Set<String> {
-    val reachable = delegableToolNames(role)
+    val reachable = delegableToolNames(role.readOnly)
     val chosen = role.toolNames.map { it.trim() }.filter { it.isNotEmpty() }.toSet()
     return if (chosen.isEmpty()) reachable else reachable intersect chosen
   }

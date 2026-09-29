@@ -775,6 +775,23 @@ class WorkspaceViewModel(
   fun setIgnoredDirsOverride(enabled: Boolean) = repository.setIgnoredDirsOverride(enabled)
   fun restoreDefaultIgnoredDirs() = repository.restoreDefaultIgnoredDirs()
 
+  // ---- Agent team (Settings: who the agent may hand work to) ----
+
+  /** The user's own specialists; the built-in seats are the app's and not editable. */
+  val customAgents: StateFlow<List<com.agentisco.agent.model.AgentRole>> = repository.customAgents
+
+  /** Every seat `delegate` can be told about, built-ins first. */
+  fun agentRoster(): List<com.agentisco.agent.model.AgentRole> = repository.agentRoster()
+
+  /** The tool names a delegated run may hold, for the editor's checklist. */
+  fun delegableToolNames(readOnly: Boolean): List<String> = repository.delegableToolNames(readOnly)
+
+  /** Saved as the app will run it: the store normalizes the id and drops what cannot run. */
+  fun saveCustomAgent(agent: com.agentisco.agent.model.AgentRole): List<com.agentisco.agent.model.AgentRole> =
+    repository.saveCustomAgent(agent)
+
+  fun deleteCustomAgent(id: String) = repository.removeCustomAgent(id)
+
   // ---- Chat display (Settings → Tool activity) ----
   val chatDisplay: StateFlow<com.agentisco.data.local.ChatDisplaySettings> =
     repository.chatDisplay

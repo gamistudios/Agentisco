@@ -34,6 +34,7 @@ import com.agentisco.core.model.AppDestination
 import com.agentisco.agent.model.PermissionMode
 import com.agentisco.agent.model.UNLIMITED_ITERATIONS
 import com.agentisco.ui.WorkspaceViewModel
+import com.agentisco.ui.components.AgentTeamCard
 import com.agentisco.ui.theme.*
 
 @Composable
@@ -485,6 +486,11 @@ fun SettingsScreen(
           NotificationToggleRow("Background task finished", true)
         }
       }
+    }
+
+    // Agent team card: who the agent may hand a piece of work to
+    item {
+      AgentTeamCard(viewModel)
     }
 
     // Chat Tool Activity Card

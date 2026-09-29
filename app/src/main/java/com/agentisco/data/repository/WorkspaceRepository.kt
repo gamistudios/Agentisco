@@ -294,6 +294,14 @@ class WorkspaceRepository(
   fun saveCustomAgent(agent: com.agentisco.agent.model.AgentRole): List<com.agentisco.agent.model.AgentRole> =
     customAgentStore.save(agent).also { _customAgents.value = it }
 
+  /**
+   * The tools a delegated run may be given, as the agent editor's checklist. Read
+   * from the registry the runtime actually uses, so a tool that is added to the
+   * app appears here and cannot be promised to a custom agent by accident.
+   */
+  fun delegableToolNames(readOnly: Boolean): List<String> =
+    toolRegistry.delegableToolNames(readOnly).sorted()
+
   fun removeCustomAgent(id: String): List<com.agentisco.agent.model.AgentRole> =
     customAgentStore.remove(id).also { _customAgents.value = it }
 

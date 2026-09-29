@@ -198,6 +198,22 @@ class CustomAgentTest {
     assertFalse(given.toString(), given.contains("delegate"))
   }
 
+  /**
+   * The settings editor lists exactly [AgentToolRegistry.delegableToolNames], so
+   * the round trip is what keeps the two honest: what a user can check is what a
+   * run may be handed, and checking nothing gives precisely that list.
+   */
+  @Test
+  fun `the checklist the editor shows is what a delegated run may hold`() {
+    val registry = registryWith({ emptyList() })
+    val working = registry.delegableToolNames(readOnly = false)
+    val research = registry.delegableToolNames(readOnly = true)
+    assertEquals(working, namesFor(embedded()))
+    assertEquals(research, namesFor(embedded(readOnly = true)))
+    assertEquals(PlanMode.delegatedToolNames, research)
+    assertFalse(working.toString(), working.contains("delegate"))
+  }
+
   @Test
   fun `the user's tool list narrows the run and nothing else`() {
     val given = namesFor(embedded(toolNames = listOf("read_file", "search_files", "run_command")))
@@ -283,6 +299,20 @@ class CustomAgentTest {
     // No brief or no name is not an agent, so it is never stored and never offered.
     assertEquals(result.toString(), 2, result.size)
     assertEquals(listOf("embedded", "backend-2"), result.map { it.id })
+  }
+
+  /** A new agent from the editor has no id yet - the name is what it is addressed by. */
+  @Test
+  fun `a new agent takes its id from its name and keeps it when edited`() {
+    val store = CustomAgentStore(null)
+    val created = store.save(
+      AgentRoles.custom(id = "", name = "DB Reviewer", purpose = "", systemPrompt = "Review migrations before they merge.")
+    ).single()
+    assertEquals("db-reviewer", created.id)
+    // Editing it must not mint a second seat with a new name-for-it.
+    val edited = store.save(created.copy(name = "Migration Reviewer")).single()
+    assertEquals("db-reviewer", edited.id)
+    assertEquals("Migration Reviewer", edited.name)
   }
 
   @Test
