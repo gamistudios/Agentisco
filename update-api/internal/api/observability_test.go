@@ -253,6 +253,33 @@ func TestLandingPageCarriesNoRepositoryTrace(t *testing.T) {
 	if !bytes.Contains(body, []byte("/v1/updates/release/latest")) {
 		t.Fatal("landing page must read its versions from the API")
 	}
+
+	// The wordmark and the tab icon are the app's own launcher icon, served as a
+	// real asset rather than a letter in a box.
+	if !bytes.Contains(body, []byte(`href="/logo.png"`)) {
+		t.Fatal("the page must point its favicon at the app icon")
+	}
+	if bytes.Contains(body, []byte(">A</span>")) {
+		t.Fatal("the placeholder letter must be gone from the wordmark")
+	}
+	// versionName is the release title ("Agentisco v2.0.23"); prefixing it with a
+	// version marker is how the page ended up showing "vAgentisco v2.0.23".
+	if bytes.Contains(body, []byte(`'v' + info.versionName`)) {
+		t.Fatal("the page must take its displayed version from the tag, not the title")
+	}
+	for _, path := range []string{"/logo.png", "/favicon.ico"} {
+		iconResp := s.get(path, nil)
+		if iconResp.StatusCode != http.StatusOK {
+			t.Fatalf("%s answered %d", path, iconResp.StatusCode)
+		}
+		icon := readAll(t, iconResp)
+		if !bytes.HasPrefix(icon, []byte("\x89PNG")) {
+			t.Fatalf("%s is not a PNG (%d bytes)", path, len(icon))
+		}
+		if got := iconResp.Header.Get("Content-Type"); got != "image/png" {
+			t.Fatalf("%s served as %q", path, got)
+		}
+	}
 }
 
 func TestConcurrentClientsShareOneCachedObject(t *testing.T) {

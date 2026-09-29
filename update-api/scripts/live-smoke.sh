@@ -140,6 +140,25 @@ for path in / /health /ready; do
 done
 log "  no public surface names debug"
 
+log "== the page carries the app's own icon =="
+curl -sS -o "$STORAGE/logo.png" -w '  /logo.png -> %{http_code} %{content_type}\n' "$BASE/logo.png"
+if head -c 4 "$STORAGE/logo.png" | grep -q 'PNG'; then
+  log "  /logo.png is a PNG ($(wc -c < "$STORAGE/logo.png") bytes)"
+else
+  fail "/logo.png is not the app icon: $(head -c 40 "$STORAGE/logo.png")"
+fi
+if curl -sS -o /dev/null -w '%{http_code}' "$BASE/favicon.ico" | grep -q 200; then
+  log "  /favicon.ico served"
+else
+  fail "/favicon.ico is not served"
+fi
+page="$(curl -sS "$BASE/")"
+if printf '%s' "$page" | grep -q 'href="/logo.png"' && ! printf '%s' "$page" | grep -q '>A</span>'; then
+  log "  the wordmark uses the icon, not the placeholder letter"
+else
+  fail "the landing page still shows the placeholder mark"
+fi
+
 log "== unknown channel and version are refused cleanly =="
 curl -sS -o /dev/null -w '  beta channel -> %{http_code}\n' "$BASE/v1/updates/beta/latest"
 curl -sS -o /dev/null -w '  unknown version -> %{http_code}\n' "$BASE/v1/download/release/v0.0.0-nonexistent"

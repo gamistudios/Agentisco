@@ -8,9 +8,9 @@ import java.io.InputStream
 /**
  * Supplies the APK bytes for one download attempt.
  *
- * The production implementation ([HttpUpdateStreamSource]) reads from the GitHub
- * release URL; tests inject an in-memory source so the retry/resume/verify state
- * machine can be exercised without touching the network.
+ * The production implementation ([HttpUpdateStreamSource]) reads from the download
+ * URL the Update API gives; tests inject an in-memory source so the
+ * retry/resume/verify state machine can be exercised without touching the network.
  */
 fun interface UpdateStreamSource {
     /** Opens the stream at [offset]; throws when the request fails. */

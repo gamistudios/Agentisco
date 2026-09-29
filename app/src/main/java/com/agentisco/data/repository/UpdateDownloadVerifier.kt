@@ -65,8 +65,9 @@ object UpdateDownloadVerifier {
     }
 
     /**
-     * GitHub reports asset digests as `"sha256:<hex>"` (older payloads may carry the
-     * bare hex or nothing). Returns a lowercase hex string, or null when unusable.
+     * The Update API reports asset digests as `"sha256:<hex>"` (older payloads may
+     * carry the bare hex or nothing). Returns a lowercase hex string, or null when
+     * unusable.
      */
     fun normalizeDigest(raw: String?): String? {
         val value = raw?.trim()?.lowercase()?.removePrefix("sha256:")?.trim() ?: return null
@@ -129,7 +130,7 @@ object UpdateDownloadVerifier {
      * Single source of truth for "may the Install button be shown?".
      *
      * @param expectedSize authoritative byte size of the release asset (or, when
-     *        GitHub omits it, the Content-Length of a clean full download); 0 when
+     *        the API omits it, the Content-Length of a clean full download); 0 when
      *        nothing is known.
      * @param actualSize bytes currently on disk.
      * @param hasApkMagic whether the file starts with the ZIP local-file-header.
@@ -139,8 +140,8 @@ object UpdateDownloadVerifier {
      * @param downloadedFromZero whether this transfer started at offset 0 and no Range
      *        request was ignored: the last-resort proof of completeness when the
      *        expected size is unknown.
-     * @param expectedDigest lowercase SHA-256 of the release asset, when GitHub
-     *        reports one. This is the only proof that every byte — not just the
+     * @param expectedDigest lowercase SHA-256 of the release asset, when the Update
+     *        API reports one. This is the only proof that every byte — not just the
      *        right count — is on disk, so it catches sparse/truncated leftovers
      *        that happen to match the asset size.
      * @param actualDigest SHA-256 computed over the real file contents, or null
