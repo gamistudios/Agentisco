@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Agentisco — the AI coding agent that runs on your phone</title>
 <meta name="description" content="Agentisco is a full AI coding agent, Linux terminal and code editor running entirely on Android. Download the latest release.">
+<link rel="icon" type="image/png" href="/logo.png">
+<link rel="apple-touch-icon" href="/logo.png">
 <script src="https://cdn.tailwindcss.com"></script>
 <script>
   tailwind.config = {
@@ -42,7 +44,7 @@
 <header class="border-b border-line/60">
   <div class="mx-auto max-w-6xl px-5 py-4 flex items-center justify-between">
     <a href="#top" class="flex items-center gap-2">
-      <span class="h-6 w-6 rounded bg-bolt/20 border border-bolt/50 grid place-items-center text-bolt text-xs">A</span>
+      <img src="/logo.png" width="24" height="24" alt="" class="h-6 w-6 rounded-md">
       <span class="tracking-tight text-slate-50">Agentisco</span>
     </a>
     <nav class="flex items-center gap-5 text-sm text-muted">
@@ -170,6 +172,15 @@
     return (value >= 10 || i === 0 ? Math.round(value) : value.toFixed(1)) + ' ' + units[i];
   }
 
+  // The service reports versionName as the release title ("Agentisco v2.0.23") and
+  // tagName as the plain tag, so the displayed number comes from the tag and never
+  // gets a second "v" glued onto the front of a title.
+  function version(tag, name) {
+    var source = tag || name || '';
+    var match = source.match(/\d+(?:\.\d+)*/);
+    return match ? 'v' + match[0] : source;
+  }
+
   function date(iso) {
     if (!iso) return '—';
     var d = new Date(iso);
@@ -183,7 +194,7 @@
   }
 
   function fill(card, info) {
-    card.querySelector('.version').textContent = 'v' + info.versionName.replace(/^v/, '');
+    card.querySelector('.version').textContent = version(info.tagName, info.versionName);
     card.querySelector('.published').textContent = date(info.publishedAt);
     card.querySelector('.size').textContent = bytes(info.size);
     card.querySelector('.digest').textContent = info.sha256 ? info.sha256.slice(0, 16) + '…' : 'not published';
@@ -205,8 +216,8 @@
       toggle.addEventListener('click', function () { notes.classList.toggle('hidden'); });
     }
 
-    heroVersion.textContent = info.versionName;
-    footerVersion.textContent = 'release ' + info.versionName;
+    heroVersion.textContent = version(info.tagName, info.versionName);
+    footerVersion.textContent = 'release ' + version(info.tagName, info.versionName);
   }
 
   function load(card) {

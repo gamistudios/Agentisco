@@ -5,6 +5,8 @@
 # Runtime state: the metadata database and the cached APKs.
 data/
 tmp-live/
+tmp-smoke/
+tmp-*.out
 *.db
 *.db-wal
 *.db-shm
