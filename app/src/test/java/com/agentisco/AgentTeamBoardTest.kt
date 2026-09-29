@@ -404,7 +404,7 @@ class AgentTeamBoardTest {
     assertTrue(parentPrompt, parentPrompt.contains("no other agent was working"))
     // The playbook is still the orchestrator's own, with its delegation guidance.
     assertTrue(parentPrompt, parentPrompt.contains("Tools available:"))
-    assertTrue(parentPrompt, parentPrompt.contains("does not overlap another agent's"))
+    assertTrue(parentPrompt, parentPrompt.contains("no file overlap"))
   }
 
   /** Every way a run can end has to hand its seat back, or it claims files forever. */

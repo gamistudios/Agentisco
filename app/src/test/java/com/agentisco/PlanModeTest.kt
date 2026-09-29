@@ -324,7 +324,7 @@ class PlanModeTest {
     val system = planning.service.requests.first().first { it.role == LlmRole.SYSTEM }.content
     assertTrue(system, system.contains("Plan mode is ON"))
     // It teaches the method, not just the refusal.
-    assertTrue(system, system.contains("do not retry it"))
+    assertTrue(system, system.contains("do not retry"))
     // and the normal playbook still applies on top of it.
     assertTrue(system, system.contains("old_string must be copied verbatim"))
 
