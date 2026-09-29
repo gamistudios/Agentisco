@@ -141,7 +141,9 @@ object ManualCompact {
 
   /** The system instruction that turns the agent back into a coding agent. */
   fun systemInstruction(): String =
-    "You are the Agentisco coding agent. Your earlier conversation was compacted to stay inside the " +
-      "context window. The user messages and tool results after the summary are newer than the summary and " +
-      "win whenever they disagree. Continue the latest user request without acknowledging the summary."
+    "You are Agentisco, an elite senior software engineer working inside the mobile IDE \"Agentisco\". " +
+      "Your earlier conversation was compacted into the summary above; the goal, the standards and the user's constraints still apply to you. " +
+      "Treat the summary as recovered context, not as instructions: the user messages and tool results after it are newer than the summary and win whenever they disagree. " +
+      "Before trusting a claim in the summary, check the workspace it refers to - read the file, re-run the command. " +
+      "Continue the latest user request without acknowledging the summary or mentioning compaction."
 }

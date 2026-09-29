@@ -346,7 +346,7 @@ class WorkspaceViewModel(
       .filter { it.rowId == 0L || it.rowId > (compaction?.summarizedThroughRowId ?: 0L) }
       .map { historyToLlmMessage(it) }
     val systemTokens = com.agentisco.agent.compact.estimateTokens(
-      "You are the Agentisco coding agent operating inside the mobile IDE \"Agentisco\"."
+      "You are Agentisco, an elite senior software engineer working inside the mobile IDE \"Agentisco\"."
     )
     val total = systemTokens + com.agentisco.agent.compact.estimateMessageTokens(summaryMessages) +
       (compaction?.let { com.agentisco.agent.compact.estimateTokens(it.summary) } ?: 0)

@@ -2391,7 +2391,7 @@ class WorkspaceRepository(
     if (diffText.isBlank()) return "No changes to explain."
     return try {
       requestLlmText(
-        system = "You are an expert code reviewer and software architect. Explain the git diff concisely to the developer, highlighting purpose, key logic changes, and any architectural implications.",
+        system = "You are a senior code reviewer and software architect. Explain what this diff actually does: the intent behind it, the key logic and where it now lives, and the behavioural or architectural consequences the developer should know about. Read the diff instead of restating it line by line. Name real files and symbols. Say plainly what you cannot tell from the diff alone. Markdown, under 250 words.",
         user = "Explain these git changes:\n\n" + diffText.take(12000),
         maxTokens = 600
       )
@@ -2404,7 +2404,7 @@ class WorkspaceRepository(
     if (diffText.isBlank()) return "No changes to review."
     return try {
       requestLlmText(
-        system = "You are a senior code reviewer. Review the following git diff for bugs, edge cases, security issues, performance pitfalls, and code style. Structure with concise bullet points.",
+        system = "You are a demanding senior reviewer hunting real defects in a git diff, ordered by cost: correctness bugs, unhandled edge cases, races and concurrency, security holes, data loss, performance traps, then broken conventions. For each finding name the file and line, state concretely what breaks and under which input, mark it blocking or acceptable, and give the smallest fix. Never invent a problem to lengthen the list - if the diff is sound, say so and name what you checked.",
         user = "Perform a code review on this diff:\n\n" + diffText.take(12000),
         maxTokens = 800
       )
@@ -2418,7 +2418,7 @@ class WorkspaceRepository(
       val detail = getCommitDetail(commit.hash)
       val diff = detail?.diff?.ifBlank { null } ?: getCommitDiff(commit.hash)
       requestLlmText(
-        system = "You are an expert software engineer. Explain this git commit clearly and concisely, including what changed and why.",
+        system = "You are an expert software engineer reading someone else's commit. Explain what changed, why it was needed, and what it affects at runtime - behaviour, data, APIs or performance. Infer the motivation from the diff and the message, name the risk a reader should watch, and say what the commit left undone rather than inventing intent. Markdown, under 200 words.",
         user = "Commit: ${commit.hash} - ${commit.message}\nAuthor: ${commit.author}\nDate: ${commit.date}\n\nDiff:\n" + diff.take(10000),
         maxTokens = 500
       )
@@ -2879,11 +2879,19 @@ class WorkspaceRepository(
 
     /** System prompt for the Run & Build AI auto-configuration pass. */
     private const val AI_BUILD_CONFIG_SYSTEM_PROMPT =
-      "You configure software project run/build pipelines. Reply with strict JSON only — no prose, no code fences."
+      "You are a release engineer who configures install, build, test and run pipelines for real projects and gets them to work first time. " +
+        "Every command you emit runs non-interactively, as root, in a minimal Debian Linux shell (proot) at the project root, with network access. " +
+        "Debian's apt-get and the language's own package manager are the only installers; there is no TTY, no systemd, no docker and no browser, so nothing may wait for input or expect a service manager. " +
+        "A command that cannot work in that shell is worse than an empty step. " +
+        "Reply with strict JSON only - no prose, no markdown, no code fences."
 
     private const val AI_BUILD_CONFIG_USER_INSTRUCTIONS =
-      "Analyze the project below and produce the install, build, test and run (dev server) commands a developer would run in a Linux shell at the project root. " +
-        "Reply with JSON exactly like: {\"install\":\"...\",\"build\":\"...\",\"test\":\"...\",\"run\":\"...\",\"port\":<int or null>,\"summary\":\"one short sentence\"}. " +
-        "Use an empty string for a step that does not apply. 'run' must start the project's server in the foreground."
+      "Analyse the project below and give the four commands a developer would run at the project root, in order: install dependencies, build, test, run the dev server. " +
+        "Derive them from what the files actually show - the package.json scripts and which lockfile is present, the framework named in requirements.txt or pyproject.toml, the Gradle wrapper, the real entry point - never from a generic template. " +
+        "Rules: one shell line per command, no placeholders or angle brackets, no chained experiments, nothing interactive. " +
+        "Prefer the project's own scripts (npm run dev, ./gradlew assembleDebug) over calling the toolchain directly. " +
+        "When the toolchain itself is not part of the project, install it inside 'install' non-interactively (apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y ...). " +
+        "Leave a step an empty string only when the project genuinely has no such step. 'run' must be the foreground dev server and 'port' the port it binds, or null when nothing serves HTTP. " +
+        "Reply with JSON exactly like: {\"install\":\"...\",\"build\":\"...\",\"test\":\"...\",\"run\":\"...\",\"port\":5173,\"summary\":\"one short sentence naming the stack and why these commands\"}."
   }
 }
