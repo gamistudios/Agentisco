@@ -304,7 +304,7 @@ fun AgentEditorDialog(
 }
 
 @Composable
-private fun AgentField(
+internal fun AgentField(
   value: String,
   onValueChange: (String) -> Unit,
   label: String,

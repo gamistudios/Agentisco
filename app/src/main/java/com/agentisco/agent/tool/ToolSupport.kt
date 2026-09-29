@@ -366,6 +366,8 @@ object PlanMode {
     "git_status", "git_diff", "git_log", "git_show",
     "web_fetch", "web_search", "ask_user", "task_plan",
     "terminal_output", "interrupt_terminal",
+    // Reading a skill changes nothing; it is instructions on paper.
+    "use_skill",
     // Delegating research changes nothing: the sub-agent runs under this same gate.
     "delegate"
   )
@@ -376,11 +378,6 @@ object PlanMode {
    */
   val allowedToolNames: Set<String> = READ_ONLY_TOOLS + "run_command"
 
-  /**
-   * The tool list a delegated run gets: the planning set, minus delegation
-   * itself. A sub-agent that could spawn sub-agents would multiply one user
-   * request into an unbounded number of model calls.
-   */
   /**
    * The tool list a delegated run gets: the planning set, minus delegation
    * itself. A sub-agent that could delegate would multiply one user request into

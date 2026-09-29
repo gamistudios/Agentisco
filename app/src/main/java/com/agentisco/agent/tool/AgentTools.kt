@@ -39,6 +39,9 @@ class AgentToolRegistry(
   /** The team the delegate tool offers, including any custom agent the user defined. */
   private val subagentRoles: () -> List<com.agentisco.agent.model.AgentRole> =
     { com.agentisco.agent.model.AgentRoles.builtIn },
+  /** Reads the `SKILL.md` folders; tests can point it at a scratch workspace. */
+  private val skillStore: com.agentisco.agent.skill.SkillStore =
+    com.agentisco.agent.skill.SkillStore(),
   /** When non-null, only these tools are offered - the list a research run gets. */
   private val restrictTo: Set<String>? = null
 ) {
@@ -75,7 +78,8 @@ class AgentToolRegistry(
     TestTool(terminalManager),
     WebFetchTool(webClient),
     WebSearchTool(webClient),
-    AskUserTool()
+    AskUserTool(),
+    UseSkillTool(skillStore)
   ) + extraTools + listOfNotNull(subagentLauncher?.let { SubagentTool(it, subagentRoles) })
 
   /**

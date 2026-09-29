@@ -792,6 +792,17 @@ class WorkspaceViewModel(
 
   fun deleteCustomAgent(id: String) = repository.removeCustomAgent(id)
 
+  // ---- Skills (Settings: the know-how an agent can pull in) ----
+
+  /** The active project's skills, re-read on demand: a skill is a file, not a row. */
+  fun skills(): List<com.agentisco.agent.skill.AgentSkill> = repository.skillsFor(activeProject.value)
+
+  fun saveSkill(skill: com.agentisco.agent.skill.AgentSkill): List<com.agentisco.agent.skill.AgentSkill> =
+    activeProject.value?.let { repository.skillStore.save(java.io.File(it.path), skill) } ?: emptyList()
+
+  fun deleteSkill(name: String, scope: com.agentisco.agent.skill.SkillScope): List<com.agentisco.agent.skill.AgentSkill> =
+    activeProject.value?.let { repository.skillStore.delete(java.io.File(it.path), name, scope) } ?: emptyList()
+
   // ---- Chat display (Settings → Tool activity) ----
   val chatDisplay: StateFlow<com.agentisco.data.local.ChatDisplaySettings> =
     repository.chatDisplay

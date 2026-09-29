@@ -305,11 +305,24 @@ class WorkspaceRepository(
   fun removeCustomAgent(id: String): List<com.agentisco.agent.model.AgentRole> =
     customAgentStore.remove(id).also { _customAgents.value = it }
 
+  /**
+   * The `SKILL.md` folders, read from disk on demand. The app's own directory holds
+   * the installed ones and a project's `.agentisco/skills` the repo's, so adding a
+   * skill is writing a file - no install step, and it survives a reinstall of the
+   * app when it lives in the repo.
+   */
+  val skillStore = com.agentisco.agent.skill.SkillStore(context)
+
+  /** Skills for one project, with the project's own winning by name. */
+  fun skillsFor(project: Project?): List<com.agentisco.agent.skill.AgentSkill> =
+    project?.let { skillStore.discover(java.io.File(it.path)) } ?: emptyList()
+
   private val toolRegistry: com.agentisco.agent.tool.AgentToolRegistry =
     com.agentisco.agent.tool.AgentToolRegistry(
     fileSystem = fileSystem,
     gitManager = gitManager,
     terminalManager = terminalManager,
+    skillStore = skillStore,
     stagedFilesProvider = { _stagedFiles.value },
     onStageFile = { f -> toggleFileStaged(f) },
     onStageAll = { stageAll() },
@@ -400,7 +413,7 @@ class WorkspaceRepository(
   }
 
   val agentRuntime: AgentRuntime =
-    AgentRuntime(fileSystem, terminalManager, gitManager, llmService, toolRegistry, teamBoard) { compactSink }
+    AgentRuntime(fileSystem, terminalManager, gitManager, llmService, toolRegistry, teamBoard, skillStore) { compactSink }
 
   // Current Projects. The registry (projects.json) is the source of truth for
   // each project's real root folder; legacy projects found on disk under the

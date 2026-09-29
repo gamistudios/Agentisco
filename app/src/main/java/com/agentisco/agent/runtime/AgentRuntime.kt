@@ -87,6 +87,12 @@ class AgentRuntime(
    */
   private val teamBoard: AgentTeamBoard? = null,
   /**
+   * Reads the `SKILL.md` folders, for the index every run is shown. The default has
+   * no app context, so a unit test only ever sees a project's own skills.
+   */
+  private val skillStore: com.agentisco.agent.skill.SkillStore =
+    com.agentisco.agent.skill.SkillStore(),
+  /**
    * Compaction sink for the run in progress. Null (the default, and what unit
    * tests use) disables compaction entirely, so the runtime behaves exactly as
    * it did before the two-tier system existed.
@@ -645,7 +651,9 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
       toolRegistry.forDelegation(role),
       // The same board, so the specialist is told what its siblings are holding
       // and every run it starts in turn is counted beside them.
-      teamBoard
+      teamBoard,
+      // The same skills: a specialist working in this repo reads the same files.
+      skillStore
     ) { null }
     val result = child.executeTask(
       prompt = "${role.name} task (${description.ifBlank { "delegated work" }}): $prompt",
@@ -1184,6 +1192,13 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
       if (toolsAvailable) {
         appendLine()
         append(TOOL_PLAYBOOK)
+        // Names and one-liners only: the agent chooses from the description and
+        // pays for the instructions themselves when it does that kind of work.
+        val skills = skillStore.discover(java.io.File(project.path))
+        if (skills.isNotEmpty()) {
+          appendLine()
+          append(com.agentisco.agent.tool.UseSkillTool.index(skills))
+        }
         // The wording is for the turn whose user decides whether to implement it;
         // a research role is told to report by its own role block.
         if (planMode && role == null) {

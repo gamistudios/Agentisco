@@ -35,6 +35,7 @@ import com.agentisco.agent.model.PermissionMode
 import com.agentisco.agent.model.UNLIMITED_ITERATIONS
 import com.agentisco.ui.WorkspaceViewModel
 import com.agentisco.ui.components.AgentTeamCard
+import com.agentisco.ui.components.SkillCard
 import com.agentisco.ui.theme.*
 
 @Composable
@@ -491,6 +492,11 @@ fun SettingsScreen(
     // Agent team card: who the agent may hand a piece of work to
     item {
       AgentTeamCard(viewModel)
+    }
+
+    // Skills card: the know-how the agent can read for itself
+    item {
+      SkillCard(viewModel)
     }
 
     // Chat Tool Activity Card
