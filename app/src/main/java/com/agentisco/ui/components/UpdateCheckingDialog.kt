@@ -15,7 +15,7 @@ import androidx.compose.ui.window.Dialog
 import com.agentisco.ui.theme.*
 
 /**
- * Indeterminate dialog shown while checking GitHub for a new release
+ * Indeterminate dialog shown while checking the update service for a new release
  * (triggered manually from Settings).
  */
 @Composable

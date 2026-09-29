@@ -36,6 +36,14 @@ android {
     }
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+    // Self-updates are checked against the Agentisco Update API, never against a
+    // repository. Render serves the update-api module.
+    buildConfigField(
+      "String",
+      "UPDATE_API_BASE_URL",
+      "\"${System.getenv("UPDATE_API_BASE_URL") ?: "https://agentisco.onrender.com"}\""
+    )
   }
 
   // Release signing credentials come from environment variables (set by CI from

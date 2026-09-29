@@ -10,7 +10,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
-import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.RandomAccessFile
@@ -19,9 +18,9 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * Repository for checking app updates against the GitHub Releases API,
+ * Repository for checking app updates against the Agentisco Update API,
  * downloading the APK with resume from the bytes already on disk, verifying the
- * result against the asset size GitHub reports, and installing via FileProvider.
+ * result against the asset size the service reports, and installing via FileProvider.
  *
  * A download is only ever marked [UpdateState.DOWNLOADED] (the state that offers
  * Install) after [UpdateDownloadVerifier] confirms the file on disk is exactly the
@@ -46,16 +45,16 @@ class UpdateRepository(
         val versionCode: Long,
         val downloadUrl: String,
         val releaseNotes: String,
-        /** Name of the APK asset in the release, as reported by the GitHub API. */
+        /** Name of the APK asset, as reported by the Update API. */
         val assetName: String = "",
         /**
-         * Byte size of that asset, as reported by the GitHub API. This is the
+         * Byte size of that asset, as reported by the Update API. This is the
          * authoritative download total: progress and completion are measured
          * against it, not against whatever the HTTP response happened to send.
          */
         val assetSize: Long = 0L,
         /**
-         * Lowercase SHA-256 hex of the asset, when the GitHub API reports one.
+         * Lowercase SHA-256 hex of the asset, when the Update API reports one.
          * Hashing the whole file is the only proof that every byte of a (possibly
          * resumed, multi-part) transfer really landed — size alone cannot see
          * sparse holes or a leftover that merely happens to match.
@@ -129,48 +128,17 @@ class UpdateRepository(
         _updateState.value = UpdateState.CHECKING
         _updateError.value = null
         try {
-            val json = releaseSource.fetchLatestRelease()
+            val release = releaseSource.fetchLatestUpdate()
 
-            val tagName = json.optString("tag_name", "")
-            val versionName = json.optString("name").ifBlank { tagName }
-            val notes = json.optString("body", "")
+            val tagName = release.tagName
+            val versionName = release.versionName
+            val notes = release.releaseNotes
+            val apkName = release.assetName
+            val apkSize = release.assetSize
+            val apkDigest = release.assetDigest
 
-            var apkName: String? = null
-            var apkSize = 0L
-            var apkDigest: String? = null
-
-            // Find the -debug.apk file from assets
-            val assets = json.getJSONArray("assets")
-            for (i in 0 until assets.length()) {
-                val assetJSON = assets.getJSONObject(i)
-                val name = assetJSON.optString("name", "")
-
-                when {
-                    name.contains("-debug.apk", ignoreCase = true) -> {
-                        apkName = name
-                        apkSize = assetJSON.optLong("size", 0L)
-                        apkDigest = UpdateDownloadVerifier.normalizeDigest(
-                            assetJSON.optString("digest", "")
-                        )
-                        break
-                    }
-                    name.endsWith(".apk", ignoreCase = true) && apkName == null -> {
-                        apkName = name
-                        apkSize = assetJSON.optLong("size", 0L)
-                        apkDigest = UpdateDownloadVerifier.normalizeDigest(
-                            assetJSON.optString("digest", "")
-                        )
-                    }
-                }
-            }
-            if (apkName == null) throw Exception("No -debug.apk asset in latest release")
-
-            // Construct direct download URL: https://github.com/{owner}/{repo}/releases/download/{tag}/{file}
-            val owner = "gamistudios"
-            val repo = "Agentisco"
-            val apkUrl = "https://github.com/$owner/$repo/releases/download/$tagName/$apkName"
-
-            val remoteCode = parseVersionCode(tagName.ifBlank { versionName })
+            val remoteCode = release.versionCode.takeIf { it > 0L }
+                ?: parseVersionCode(tagName.ifBlank { versionName })
             val localCode = currentVersionCode()
 
             val isNewer = remoteCode > localCode
@@ -179,7 +147,7 @@ class UpdateRepository(
                     tagName = tagName,
                     versionName = versionName,
                     versionCode = remoteCode,
-                    downloadUrl = apkUrl,
+                    downloadUrl = release.downloadUrl,
                     releaseNotes = notes,
                     assetName = apkName,
                     assetSize = apkSize,
@@ -279,13 +247,13 @@ class UpdateRepository(
      * disk.
      *
      * Progress and completion are measured against [AvailableUpdate.assetSize] — the
-     * size GitHub reports for the asset — never against the response that happens to
-     * be in flight (a resumed response only describes the remaining range). Returns
-     * true, and sets [UpdateState.DOWNLOADED], only when the finished file passes
-     * [UpdateDownloadVerifier]: exactly the expected size, the SHA-256 the release
-     * reports when it publishes one (so every byte of a multi-part/resumed transfer
-     * is proven present), and really our APK. Anything else surfaces an error
-     * through [updateError] and removes the unusable file.
+     * size the Update API reports for the asset — never against the response that
+     * happens to be in flight (a resumed response only describes the remaining
+     * range). Returns true, and sets [UpdateState.DOWNLOADED], only when the
+     * finished file passes [UpdateDownloadVerifier]: exactly the expected size, the
+     * SHA-256 the release reports when it publishes one (so every byte of a
+     * multi-part/resumed transfer is proven present), and really our APK. Anything
+     * else surfaces an error through [updateError] and removes the unusable file.
      */
     suspend fun downloadUpdate(): Boolean = withContext(Dispatchers.IO) {
         val update = _availableUpdate.value ?: return@withContext false
@@ -301,7 +269,7 @@ class UpdateRepository(
         // starts the file on disk is in flight again.
         clearMarker()
 
-        // GitHub's asset size is authoritative; Content-Length only fills in when
+        // The API's asset size is authoritative; Content-Length only fills in when
         // the release omits it.
         var expectedSize = update.assetSize.takeIf { it > 0L } ?: 0L
         var lastError: String? = null

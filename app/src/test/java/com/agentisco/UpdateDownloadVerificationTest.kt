@@ -2,6 +2,7 @@ package com.agentisco
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import com.agentisco.data.repository.UpdateRelease
 import com.agentisco.data.repository.UpdateReleaseSource
 import com.agentisco.data.repository.UpdateRepository
 import com.agentisco.data.repository.UpdateStream
@@ -9,7 +10,6 @@ import com.agentisco.data.repository.UpdateStreamSource
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
-import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -38,6 +38,11 @@ import java.util.Collections
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 class UpdateDownloadVerificationTest {
+
+    private companion object {
+        /** The asset the fake service advertises, named by both URL and metadata. */
+        const val APK_NAME = "agentisco-debug.apk"
+    }
 
     private lateinit var context: Context
 
@@ -420,7 +425,7 @@ class UpdateDownloadVerificationTest {
         updateFile.writeBytes(apkPayload(4096))
         markerFile.writeText(
             JSONObject()
-                .put("url", "https://github.com/gamistudios/Agentisco/releases/download/v1.0.0/agentisco-debug.apk")
+                .put("url", downloadUrlFor("v1.0.0"))
                 .put("size", 4096)
                 .put("digest", "")
                 .put("versionCode", 10_000L) // what parseVersionCode("v1.0.0") wrote
@@ -446,7 +451,7 @@ class UpdateDownloadVerificationTest {
         // A marker written before versionCode was tracked has no versionCode field.
         markerFile.writeText(
             JSONObject()
-                .put("url", "https://github.com/gamistudios/Agentisco/releases/download/v1.0.0/agentisco-debug.apk")
+                .put("url", downloadUrlFor("v1.0.0"))
                 .put("size", 4096)
                 .put("digest", "")
                 .toString()
@@ -468,7 +473,7 @@ class UpdateDownloadVerificationTest {
         updateFile.writeBytes(payload)
         markerFile.writeText(
             JSONObject()
-                .put("url", "https://github.com/gamistudios/Agentisco/releases/download/v2.0.0/agentisco-debug.apk")
+                .put("url", downloadUrlFor("v2.0.0"))
                 .put("size", 4096)
                 .put("digest", "")
                 .put("versionCode", 20_000L) // what parseVersionCode("v2.0.0") wrote
@@ -521,23 +526,29 @@ class UpdateDownloadVerificationTest {
             retryDelayMs = 0L
         )
 
-    /** Serves a crafted "latest release" payload to checkForUpdates — no network. */
+    /**
+     * Serves a crafted "latest release" document to checkForUpdates — no network.
+     *
+     * `versionCode` is left at 0 so the check exercises the fallback the app relies
+     * on when a deployed service predates the field: the code must come from the tag.
+     */
     private fun releaseSource(tagName: String, assetSize: Long = 0L): UpdateReleaseSource =
         UpdateReleaseSource {
-            JSONObject()
-                .put("tag_name", tagName)
-                .put("name", tagName)
-                .put("body", "")
-                .put(
-                    "assets",
-                    JSONArray().put(
-                        JSONObject()
-                            .put("name", "agentisco-debug.apk")
-                            .put("size", assetSize)
-                            .put("digest", "")
-                    )
-                )
+            UpdateRelease(
+                tagName = tagName,
+                versionName = tagName.removePrefix("v"),
+                versionCode = 0L,
+                downloadUrl = downloadUrlFor(tagName),
+                releaseNotes = "",
+                assetName = APK_NAME,
+                assetSize = assetSize,
+                assetDigest = null
+            )
         }
+
+    /** The download URL the fake service hands out for a tag; markers must name it. */
+    private fun downloadUrlFor(tagName: String) =
+        "https://example.invalid/download/$tagName/$APK_NAME"
 
     private fun update(assetSize: Long, assetDigest: String? = null) = UpdateRepository.AvailableUpdate(
         tagName = "v9.9.9",
@@ -545,7 +556,7 @@ class UpdateDownloadVerificationTest {
         versionCode = 9_09_09L,
         downloadUrl = "https://example.invalid/agentisco-debug.apk",
         releaseNotes = "",
-        assetName = "agentisco-debug.apk",
+        assetName = APK_NAME,
         assetSize = assetSize,
         assetDigest = assetDigest
     )

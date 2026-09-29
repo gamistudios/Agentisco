@@ -17,7 +17,7 @@ class AgentiscoApplication : Application() {
   /** User preferences (auto-update toggle etc.), persisted to internal storage. */
   val userPreferencesStore: UserPreferencesStore by lazy { UserPreferencesStore(this) }
 
-  /** GitHub-release update checker/downloader (resumable, debug APK for now). */
+  /** Update-API backed checker/downloader (resumable, verified against the asset digest). */
   val updateRepository: UpdateRepository by lazy { UpdateRepository(this) }
 
   override fun onCreate() {
