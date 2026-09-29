@@ -269,6 +269,14 @@ class WorkspaceRepository(
   private val llmService = com.agentisco.agent.llm.LlmService(
     chainStore = com.agentisco.agent.llm.GeminiChainStoreImpl(appContext)
   )
+
+  /**
+   * Who is working in this workspace, shared by the chat's own run and every
+   * agent it delegates to. One board per workspace is what makes the second one
+   * know the first is there.
+   */
+  private val teamBoard = com.agentisco.agent.runtime.AgentTeamBoard()
+
   private val toolRegistry: com.agentisco.agent.tool.AgentToolRegistry =
     com.agentisco.agent.tool.AgentToolRegistry(
     fileSystem = fileSystem,
@@ -349,7 +357,8 @@ class WorkspaceRepository(
     _latestCompaction.value = chatStore.latestCompactionBlocking(sessionId)
   }
 
-  val agentRuntime: AgentRuntime = AgentRuntime(fileSystem, terminalManager, gitManager, llmService, toolRegistry) { compactSink }
+  val agentRuntime: AgentRuntime =
+    AgentRuntime(fileSystem, terminalManager, gitManager, llmService, toolRegistry, teamBoard) { compactSink }
 
   // Current Projects. The registry (projects.json) is the source of truth for
   // each project's real root folder; legacy projects found on disk under the

@@ -80,6 +80,13 @@ class AgentRuntime(
   private val llmService: LlmService,
   private val toolRegistry: AgentToolRegistry,
   /**
+   * The workspace's live team board. Non-null for every run in a turn, including
+   * delegated ones, so an agent is told which files another agent already holds
+   * before it opens one. Null means no team awareness (a lone runtime, or a unit
+   * test) and changes nothing else about the run.
+   */
+  private val teamBoard: AgentTeamBoard? = null,
+  /**
    * Compaction sink for the run in progress. Null (the default, and what unit
    * tests use) disables compaction entirely, so the runtime behaves exactly as
    * it did before the two-tier system existed.
@@ -147,7 +154,8 @@ Method:
      cannot delegate and cannot ask the user, so the brief must carry the goal, the
      starting paths, what is already done and what the report must contain. They may run
      beside each other, so give each one a slice that does not overlap another agent's
-     files, and expect a report - not the files themselves - back.
+     files - each agent is shown which files are already held - and expect a report, not
+     the files themselves, back.
   3. Prefer edit_files for any change inside an existing file: pass every edit of one
      related change in a single call. old_string must be copied verbatim from read_file
      output, including indentation; it must be unique unless replace_all is true.
@@ -339,6 +347,13 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
     val sink = compactSinkProvider()
     val meter = CompactTokenMeter(activePolicy.contextWindow, activePolicy)
 
+    // Declared before the transcript because the seat's file claims are this very
+    // set: what other agents read is what this run has already changed.
+    val modifiedFiles = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+
+    // The board is read, not joined, here: taking the seat after the prompt is
+    // built is what keeps this run from listing itself as another agent, and it
+    // means a run that fails before it starts has taken nothing to leave behind.
     val transcript = buildTranscript(
       project = project,
       useTools = useTools,
@@ -348,7 +363,8 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
       prompt = prompt,
       resume = resume,
       planMode = permissions().planMode,
-      role = role
+      role = role,
+      teamActivity = teamBoard?.promptBlock(excludingId = null) ?: ""
     )
     val messages = transcript.messages
     val rowIds = transcript.rowIds
@@ -364,7 +380,6 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
     meter.setBase(messages)
     emitUsage(meter, force = true)
 
-    val modifiedFiles = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
     val maxIterations = permissions().maxToolIterations.coerceAtLeast(1)
 
     /**
@@ -411,6 +426,18 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
         ctx = CompactionContext(provider, model, apiKey, sessionId, sink, meter, null, onEvent)
       )
     }
+
+    // Now this run is real: take the seat other agents are told about, with the
+    // live file set as its claim.
+    val seat = teamBoard?.join(
+      role = role,
+      task = prompt,
+      delegated = role != null,
+      files = modifiedFiles
+    )
+    // How the run ends is what the board reports, and every way it can end has to
+    // close the seat - an open one keeps claiming files after the agent is gone.
+    var seatStatus = AgentWorkStatus.DONE
 
     try {
       var finalText = ""
@@ -563,20 +590,26 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
         modifiedFiles = modifiedFiles.toList()
       )
     } catch (e: CancellationException) {
+      seatStatus = AgentWorkStatus.CANCELLED
       onEvent(AgentStreamEvent.Cancelled())
       throw e
     } catch (e: LlmException) {
       if (e.kind == LlmErrorKind.CANCELLED) {
+        seatStatus = AgentWorkStatus.CANCELLED
         onEvent(AgentStreamEvent.Cancelled("Generation stopped"))
         AgentTaskResult(success = false, summary = "Cancelled", modifiedFiles = modifiedFiles.toList())
       } else {
+        seatStatus = AgentWorkStatus.FAILED
         onEvent(AgentStreamEvent.Failed(e.message ?: "LLM request failed"))
         AgentTaskResult(success = false, summary = e.message ?: "LLM request failed", modifiedFiles = modifiedFiles.toList())
       }
     } catch (e: Exception) {
+      seatStatus = AgentWorkStatus.FAILED
       val reason = "Agent failed: ${e.message ?: e.javaClass.simpleName}"
       onEvent(AgentStreamEvent.Failed(reason))
       AgentTaskResult(success = false, summary = reason, modifiedFiles = modifiedFiles.toList())
+    } finally {
+      seat?.finish(seatStatus)
     }
   }
 
@@ -589,7 +622,8 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
    *
    * It has no chat session and no compaction sink: nothing it does is persisted,
    * and cancelling the parent turn cancels this call with the coroutine it runs
-   * inside.
+   * inside. It does share the parent's [AgentTeamBoard], which is how two agents
+   * delegated in one batch each know the other is in the same files.
    */
   suspend fun runSubagent(
     role: com.agentisco.agent.model.AgentRole,
@@ -603,7 +637,16 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
     terminalSession: TerminalSession,
     onEvent: (AgentStreamEvent) -> Unit = {}
   ): SubagentOutcome {
-    val child = AgentRuntime(fileSystem, terminalManager, gitManager, llmService, toolRegistry.forDelegation(role)) { null }
+    val child = AgentRuntime(
+      fileSystem,
+      terminalManager,
+      gitManager,
+      llmService,
+      toolRegistry.forDelegation(role),
+      // The same board, so the specialist is told what its siblings are holding
+      // and every run it starts in turn is counted beside them.
+      teamBoard
+    ) { null }
     val result = child.executeTask(
       prompt = "${role.name} task (${description.ifBlank { "delegated work" }}): $prompt",
       role = role,
@@ -646,9 +689,9 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
   }
 
   /**
-   * Builds the transcript the provider will receive: the static system prompt,
-   * a summary of any earlier compaction, the persisted rows that compaction
-   * did not fold in, and finally the new user prompt.
+   * Builds the transcript the provider will receive: the system prompt (workspace,
+   * role, who else is working, playbook), a summary of any earlier compaction, the
+   * persisted rows that compaction did not fold in, and finally the new user prompt.
    *
    * Compaction is deliberately invisible in the chat database — it only
    * removes messages from the *request*, so the conversation the user reads
@@ -663,7 +706,8 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
     prompt: String,
     resume: Boolean,
     planMode: Boolean = false,
-    role: com.agentisco.agent.model.AgentRole? = null
+    role: com.agentisco.agent.model.AgentRole? = null,
+    teamActivity: String = ""
   ): Transcript {
     val messages = mutableListOf<LlmMessage>()
     // Persisted rowId each message came from (0 = produced by this run), so a
@@ -674,7 +718,7 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
       rowIds.add(rowId)
     }
 
-    add(LlmMessage(LlmRole.SYSTEM, buildSystemPrompt(project, useTools, planMode, role)))
+    add(LlmMessage(LlmRole.SYSTEM, buildSystemPrompt(project, useTools, planMode, role, teamActivity)))
 
     val priorCompaction = sessionId?.let { sink?.latestCompaction(it) }
     val compactedThrough = priorCompaction?.summarizedThroughRowId ?: 0L
@@ -1107,7 +1151,8 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
     project: Project,
     toolsAvailable: Boolean,
     planMode: Boolean,
-    role: com.agentisco.agent.model.AgentRole? = null
+    role: com.agentisco.agent.model.AgentRole? = null,
+    teamActivity: String = ""
   ): String {
     val files = fileSystem.getFileTree(project, maxDepth = 3)
     val paths = StringBuilder()
@@ -1129,6 +1174,12 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
         // Which seat on the team this run occupies: its lane, its limits, its duty.
         appendLine()
         appendLine(role.prompt())
+      }
+      if (teamActivity.isNotEmpty()) {
+        // The lane says what this agent owns; this says who else is in the tree
+        // and which files are already somebody's work in progress.
+        appendLine()
+        appendLine(teamActivity)
       }
       if (toolsAvailable) {
         appendLine()
