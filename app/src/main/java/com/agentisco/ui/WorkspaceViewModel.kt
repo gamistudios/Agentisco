@@ -21,6 +21,7 @@ import com.agentisco.editor.model.EditorSettings
 import com.agentisco.editor.model.EditorTab
 import com.agentisco.editor.syntax.Language
 import com.agentisco.workspace.git.*
+import com.agentisco.workspace.buildrun.*
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -910,7 +911,15 @@ class WorkspaceViewModel(
   val searchQuery: StateFlow<String> = repository.searchQuery
   val isCommandPaletteOpen: StateFlow<Boolean> = repository.isCommandPaletteOpen
   val isModelSheetOpen: StateFlow<Boolean> = repository.isModelSheetOpen
-  val isDevServerRunning: StateFlow<Boolean> = repository.isDevServerRunning
+
+  // Run & Build Center (real install/build/test/run pipeline + live preview)
+  val buildRunConfig: StateFlow<BuildRunConfig?> = repository.buildRunConfig
+  val buildRunStageStates: StateFlow<Map<BuildStageKind, BuildStageState>> = repository.buildRunStageStates
+  val buildRunLogs: StateFlow<List<BuildLogLine>> = repository.buildRunLogs
+  val buildRunEndpoints: StateFlow<List<PreviewEndpoint>> = repository.buildRunEndpoints
+  val buildRunPreviewRequest: StateFlow<Int> = repository.buildRunPreviewRequest
+  val buildRunPipelineRunning: StateFlow<Boolean> = repository.buildRunPipelineRunning
+  val buildRunDetectState: StateFlow<BuildRunDetectState> = repository.buildRunDetectState
 
   fun navigateTo(dest: AppDestination) {
     repository.navigateTo(dest)
@@ -1684,9 +1693,22 @@ class WorkspaceViewModel(
     }
   }
 
-  fun toggleDevServer() {
-    repository.toggleDevServer()
-  }
+  fun runBuildStage(kind: BuildStageKind) = repository.runBuildStage(kind)
+
+  fun stopBuildStage(kind: BuildStageKind) = repository.stopBuildStage(kind)
+
+  fun stopAllBuildStages() = repository.stopAllBuildStages()
+
+  fun runBuildPipeline() = repository.runBuildPipeline()
+
+  fun clearBuildRunLogs() = repository.clearBuildRunLogs()
+
+  fun saveBuildStageCommand(kind: BuildStageKind, command: String, port: Int?) =
+    repository.saveBuildRunStageCommand(kind, command, port)
+
+  fun resetBuildRunCommands() = repository.resetBuildRunCommands()
+
+  fun autoConfigureBuildRun() = repository.autoConfigureBuildRun()
 }
 
 /** Encodes a question's choices for the block's `optionsJson` column. */

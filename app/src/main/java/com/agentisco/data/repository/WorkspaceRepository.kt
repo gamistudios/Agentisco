@@ -15,6 +15,16 @@ import com.agentisco.workspace.terminal.NativeBinaries
 import com.agentisco.workspace.terminal.ProotArgsBuilder
 import com.agentisco.workspace.terminal.ProotSessionManager
 import com.agentisco.workspace.terminal.TerminalProcessManager
+import com.agentisco.data.local.BuildRunConfigStore
+import com.agentisco.workspace.buildrun.BuildLogLine
+import com.agentisco.workspace.buildrun.BuildRecipeDetector
+import com.agentisco.workspace.buildrun.BuildRunConfig
+import com.agentisco.workspace.buildrun.BuildRunConfigSource
+import com.agentisco.workspace.buildrun.BuildRunController
+import com.agentisco.workspace.buildrun.BuildRunDetectState
+import com.agentisco.workspace.buildrun.BuildStageKind
+import com.agentisco.workspace.buildrun.BuildStageState
+import com.agentisco.workspace.buildrun.PreviewEndpoint
 import com.termux.terminal.TerminalSessionClient
 import com.agentisco.workspace.git.GitRepositoryManager
 import com.agentisco.workspace.filesystem.ProjectFileSystem
@@ -261,6 +271,13 @@ class WorkspaceRepository(
     val bins = nativeBinaries ?: return@TerminalProcessManager null
     ProotArgsBuilder(bins, bootstrap.rootfsDir)
   }
+
+  /** Real execution + state behind the Run & Build Center. */
+  val buildRunController = BuildRunController(
+    terminalManager = terminalManager,
+    scope = repositoryScope,
+    configStore = BuildRunConfigStore(context)
+  )
 
   // LLM communication + agent tooling. Providers are configuration only; the
   // protocol adapter is chosen from the provider config, never from its name.
@@ -848,9 +865,17 @@ class WorkspaceRepository(
   private val _isModelSheetOpen = MutableStateFlow(false)
   val isModelSheetOpen: StateFlow<Boolean> = _isModelSheetOpen.asStateFlow()
 
-  // Dev Server / Preview State
-  private val _isDevServerRunning = MutableStateFlow(true)
-  val isDevServerRunning: StateFlow<Boolean> = _isDevServerRunning.asStateFlow()
+  // ---- Run & Build Center (install / build / test / run pipeline) ----
+
+  val buildRunConfig: StateFlow<BuildRunConfig?> = buildRunController.config
+  val buildRunStageStates: StateFlow<Map<BuildStageKind, BuildStageState>> = buildRunController.stageStates
+  val buildRunLogs: StateFlow<List<BuildLogLine>> = buildRunController.logs
+  val buildRunEndpoints: StateFlow<List<PreviewEndpoint>> = buildRunController.endpoints
+  val buildRunPreviewRequest: StateFlow<Int> = buildRunController.previewRequest
+  val buildRunPipelineRunning: StateFlow<Boolean> = buildRunController.pipelineRunning
+
+  private val _buildRunDetectState = MutableStateFlow<BuildRunDetectState>(BuildRunDetectState.Idle)
+  val buildRunDetectState: StateFlow<BuildRunDetectState> = _buildRunDetectState.asStateFlow()
 
   /** Model used for background tasks: the user's default, else the selected one. */
   private val _defaultTaskModelId = MutableStateFlow(providerStore?.getDefaultTaskModelId())
@@ -879,6 +904,12 @@ class WorkspaceRepository(
       loadActiveProjectState(activeProjectToLoad)
     }
     loadProviderConfiguration()
+    // Keep the Run & Build Center bound to whichever project is active.
+    repositoryScope.launch {
+      _activeProject.collect { project ->
+        buildRunController.setProject(project.id, project.path)
+      }
+    }
   }
 
   // ---- Provider / model configuration (Task: AI provider system) ----
@@ -2781,12 +2812,78 @@ class WorkspaceRepository(
     maybeAutoSync(_activeProject.value)
   }
 
-  fun toggleDevServer() {
-    _isDevServerRunning.update { !it }
+  // ---- Run & Build Center actions ----
+
+  fun runBuildStage(kind: BuildStageKind) = buildRunController.runStage(kind)
+
+  fun stopBuildStage(kind: BuildStageKind) = buildRunController.stopStage(kind)
+
+  fun stopAllBuildStages() = buildRunController.stopAll()
+
+  fun runBuildPipeline() = buildRunController.runPipeline()
+
+  fun clearBuildRunLogs() = buildRunController.clearLogs()
+
+  fun saveBuildRunStageCommand(kind: BuildStageKind, command: String, runPort: Int?) =
+    buildRunController.saveManualCommand(kind, command, runPort)
+
+  fun resetBuildRunCommands() = buildRunController.resetToDetected()
+
+  /**
+   * One-tap "Auto-configure": a deterministic local scan of the project files
+   * first (always works, no network), then an optional LLM refinement using
+   * the background-task model when a provider is configured.
+   */
+  fun autoConfigureBuildRun() {
+    if (_buildRunDetectState.value is BuildRunDetectState.Running) return
+    val project = _activeProject.value
+    if (project.path.isBlank()) {
+      _buildRunDetectState.value = BuildRunDetectState.Done("Select a project first.")
+      return
+    }
+    _buildRunDetectState.value = BuildRunDetectState.Running
+    repositoryScope.launch {
+      val dir = File(project.path)
+      val local = runCatching {
+        withContext(Dispatchers.IO) { BuildRecipeDetector.detect(dir) }
+      }.getOrNull()
+      val localUsable = local != null && local.commands.values.any { it.isNotBlank() }
+      if (local != null && localUsable) {
+        buildRunController.applySuggestion(local, BuildRunConfigSource.LOCAL)
+      }
+      val refined = runCatching {
+        val context = withContext(Dispatchers.IO) { BuildRecipeDetector.buildAiContext(dir) }
+        val raw = requestLlmText(
+          system = AI_BUILD_CONFIG_SYSTEM_PROMPT,
+          user = AI_BUILD_CONFIG_USER_INSTRUCTIONS + "\n\n" + context,
+          maxTokens = 800,
+          disableReasoning = true
+        )
+        raw?.let { BuildRecipeDetector.parseAiResponse(it) }
+      }.getOrNull()
+      val message = when {
+        refined != null -> {
+          buildRunController.applySuggestion(refined, BuildRunConfigSource.AI)
+          "AI refined the pipeline commands — review and edit if needed."
+        }
+        localUsable -> "Commands detected from the project files. AI refinement was unavailable."
+        else -> "Couldn't detect a known project stack — configure the commands manually."
+      }
+      _buildRunDetectState.value = BuildRunDetectState.Done(message)
+    }
   }
 
   companion object {
     /** Minimum gap between full commit-history reloads triggered by file-watcher churn. */
     private const val HISTORY_MIN_RELOAD_INTERVAL_MS = 1200L
+
+    /** System prompt for the Run & Build AI auto-configuration pass. */
+    private const val AI_BUILD_CONFIG_SYSTEM_PROMPT =
+      "You configure software project run/build pipelines. Reply with strict JSON only — no prose, no code fences."
+
+    private const val AI_BUILD_CONFIG_USER_INSTRUCTIONS =
+      "Analyze the project below and produce the install, build, test and run (dev server) commands a developer would run in a Linux shell at the project root. " +
+        "Reply with JSON exactly like: {\"install\":\"...\",\"build\":\"...\",\"test\":\"...\",\"run\":\"...\",\"port\":<int or null>,\"summary\":\"one short sentence\"}. " +
+        "Use an empty string for a step that does not apply. 'run' must start the project's server in the foreground."
   }
 }
