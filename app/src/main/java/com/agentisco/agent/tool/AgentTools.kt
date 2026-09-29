@@ -33,10 +33,14 @@ class AgentToolRegistry(
   /** Extra tools appended to the built-in set (used by tests). */
   private val extraTools: List<AgentTool> = emptyList(),
   /** Injected for tests; production uses the shared client inside [WebFetchTool]. */
-  private val webClient: okhttp3.OkHttpClient? = null
+  private val webClient: okhttp3.OkHttpClient? = null,
+  /** Set when a runtime exists to run delegated work; without it there is no `delegate` tool. */
+  private val subagentLauncher: SubagentLauncher? = null,
+  /** When non-null, only these tools are offered - the list a delegated run gets. */
+  private val restrictTo: Set<String>? = null
 ) {
 
-  val tools: List<AgentTool> = listOf(
+  private val offered: List<AgentTool> = listOf(
     ListFilesTool(fileSystem),
     ReadFileTool(),
     ReadFilesTool(),
@@ -69,7 +73,14 @@ class AgentToolRegistry(
     WebFetchTool(webClient),
     WebSearchTool(webClient),
     AskUserTool()
-  ) + extraTools
+  ) + extraTools + listOfNotNull(subagentLauncher?.let(::SubagentTool))
+
+  /**
+   * A delegated run is offered only its own tool set, so a sub-agent cannot even
+   * name a tool it is not allowed to use.
+   */
+  val tools: List<AgentTool> =
+    restrictTo?.let { names -> offered.filter { tool -> tool.name in names } } ?: offered
 
   private val byName = tools.associateBy { it.name }
 
@@ -78,6 +89,23 @@ class AgentToolRegistry(
   }
 
   fun get(name: String): AgentTool? = byName[name]
+
+  /**
+   * The same collaborators offering only what a delegated run may use: no
+   * mutating tool, no `delegate` (a sub-agent that could delegate would multiply
+   * one request into an unbounded number of model calls), and no launcher at all.
+   */
+  fun forDelegation(): AgentToolRegistry = AgentToolRegistry(
+    fileSystem = fileSystem,
+    gitManager = gitManager,
+    terminalManager = terminalManager,
+    stagedFilesProvider = stagedFilesProvider,
+    onStageFile = onStageFile,
+    onStageAll = onStageAll,
+    onUnstageAll = onUnstageAll,
+    webClient = webClient,
+    restrictTo = PlanMode.delegatedToolNames
+  )
 }
 
 // ================= Filesystem tools =================

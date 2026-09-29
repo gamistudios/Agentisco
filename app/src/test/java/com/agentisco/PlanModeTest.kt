@@ -83,10 +83,18 @@ class PlanModeTest {
     for (name in listOf(
       "read_file", "read_files", "list_files", "directory_tree", "file_info",
       "glob_files", "search_files", "regex_search", "git_status", "git_diff", "git_log",
-      "git_show", "web_fetch", "web_search", "ask_user", "task_plan", "terminal_output"
+      "git_show", "web_fetch", "web_search", "ask_user", "task_plan", "terminal_output",
+      "delegate"
     )) {
       assertNull("$name must stay usable", evaluate(name))
     }
+  }
+
+  /** A delegated run is read-only by construction, so it may be started while planning. */
+  @Test
+  fun `delegating research is still allowed while planning`() {
+    assertNull(evaluate("delegate"))
+    assertFalse("delegate", "delegate" in PlanMode.delegatedToolNames)
   }
 
   /** The fail-safe property the whole design rests on. */

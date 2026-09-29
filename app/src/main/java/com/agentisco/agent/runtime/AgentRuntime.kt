@@ -26,6 +26,8 @@ import com.agentisco.agent.model.AgentStreamEvent
 import com.agentisco.agent.model.PendingApproval
 import com.agentisco.agent.tool.AgentToolRegistry
 import com.agentisco.agent.tool.PlanMode
+import com.agentisco.agent.tool.SubagentOutcome
+import com.agentisco.agent.tool.SubagentTool
 import com.agentisco.agent.tool.ToolContext
 import com.agentisco.agent.tool.ToolArgumentError
 import com.agentisco.agent.tool.ToolResult
@@ -123,7 +125,8 @@ class AgentRuntime(
     val TOOL_PLAYBOOK = """
 Tools available:
   Explore   glob_files (names), search_files (fixed text), regex_search (patterns),
-           list_files, directory_tree, file_info, read_file, read_files
+           list_files, directory_tree, file_info, read_file, read_files,
+           delegate (hand open-ended research to a read-only sub-agent)
   Change   edit_files (several exact-snippet edits, one call), edit_file,
            write_file (a whole new or replaced file), create_file, create_directory,
            move_file, copy_file, delete_file
@@ -136,26 +139,30 @@ Tools available:
 Method:
   1. Locate before you edit: glob_files / search_files to find the file, then read_file
      to see the current content. Never edit a file you have not read in this conversation.
-  2. Prefer edit_files for any change inside an existing file: pass every edit of one
+  2. Answering would mean reading a dozen files you are not going to change: call delegate
+     with a complete brief and let a read-only sub-agent read them. It returns a report
+     instead of putting every file into this conversation. It sees no history, cannot
+     change anything and cannot ask the user, so the brief has to carry everything.
+  3. Prefer edit_files for any change inside an existing file: pass every edit of one
      related change in a single call. old_string must be copied verbatim from read_file
      output, including indentation; it must be unique unless replace_all is true.
      Use write_file only for new files or when the whole file genuinely changes —
      a partial write_file silently deletes the rest of the file.
-  3. Verify after changing: build / test / run_command, then read the result. If a
+  4. Verify after changing: build / test / run_command, then read the result. If a
      command fails, fix it and run it again instead of reporting unfinished work.
-  4. Long commands (dev server, watch, big test suites): pass run_in_background true to
+  5. Long commands (dev server, watch, big test suites): pass run_in_background true to
      run_command, then poll with terminal_output and stop with interrupt_terminal.
      A foreground command that hits its timeout is reported as stopped, not as failed.
      When output stops because the command is asking something, answer it with
      write_terminal_input using the same runner_id - do not start a second copy.
-  5. Unknown library behaviour, an error message you cannot explain or a config option you
+  6. Unknown library behaviour, an error message you cannot explain or a config option you
      are not sure about: web_search for it, then web_fetch the page that looks authoritative.
      Never present a URL you have not read, and never invent one.
-  6. Results may be truncated and always say so ("[…truncated: showing N of M
+  7. Results may be truncated and always say so ("[…truncated: showing N of M
      characters]", "lines x..y not shown"). Never assume you saw a whole file: re-read
      the missing range with start_line / max_lines. Do not invent content for what was
      cut off.
-  7. Paths are workspace-relative; you cannot read, write or delete outside the project.
+  8. Paths are workspace-relative; you cannot read, write or delete outside the project.
 
 Habits:
   - Batch every independent call into one response; wait only when a later call needs
@@ -558,6 +565,61 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
       val reason = "Agent failed: ${e.message ?: e.javaClass.simpleName}"
       onEvent(AgentStreamEvent.Failed(reason))
       AgentTaskResult(success = false, summary = reason, modifiedFiles = modifiedFiles.toList())
+    }
+  }
+
+  /**
+   * Runs one delegated task in a fresh runtime over the same workspace and
+   * returns only its report. The child gets [AgentToolRegistry.forDelegation]
+   * plus plan-mode permissions, so the same gate that implements plan mode for
+   * the user is what keeps a sub-agent from changing anything.
+   *
+   * It has no chat session and no compaction sink: nothing it does is persisted,
+   * and cancelling the parent turn cancels this call with the coroutine it runs
+   * inside.
+   */
+  suspend fun runSubagent(
+    prompt: String,
+    project: Project,
+    provider: AIProvider,
+    model: AIModel,
+    apiKey: String,
+    parentPermissions: AgentPermissions,
+    terminalSession: TerminalSession,
+    onEvent: (AgentStreamEvent) -> Unit = {}
+  ): SubagentOutcome {
+    val child = AgentRuntime(fileSystem, terminalManager, gitManager, llmService, toolRegistry.forDelegation()) { null }
+    val result = child.executeTask(
+      prompt = SubagentTool.brief(prompt),
+      project = project,
+      provider = provider,
+      model = model,
+      apiKey = apiKey,
+      permissions = { SubagentTool.childPermissions(parentPermissions) },
+      terminalSession = terminalSession,
+      // A delegated run owns no dialog: the user is watching the parent's turn and
+      // one approval channel cannot serve two runs. Anything it would ask about is
+      // refused at once, which its tools report honestly.
+      onRequestApproval = { child.resolvePendingApproval(allowed = false) },
+      onEvent = { event -> relay(event, onEvent) }
+    )
+    return SubagentOutcome(
+      success = result.success,
+      summary = result.summary,
+      error = result.summary.takeIf { !result.success }
+    )
+  }
+
+  /**
+   * Surfaces a delegated run without pretending it is the parent's own work: its
+   * tool calls arrive as status lines, and its hidden reasoning and report text
+   * never enter the parent's answer.
+   */
+  private fun relay(event: AgentStreamEvent, onEvent: (AgentStreamEvent) -> Unit) {
+    when (event) {
+      is AgentStreamEvent.ToolStarted -> onEvent(AgentStreamEvent.Status("Sub-agent ${event.name}"))
+      is AgentStreamEvent.Status -> onEvent(AgentStreamEvent.Status("Sub-agent: ${event.text}"))
+      else -> Unit
     }
   }
 

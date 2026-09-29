@@ -365,8 +365,28 @@ object PlanMode {
     "glob_files", "search_files", "regex_search",
     "git_status", "git_diff", "git_log", "git_show",
     "web_fetch", "web_search", "ask_user", "task_plan",
-    "terminal_output", "interrupt_terminal"
+    "terminal_output", "interrupt_terminal",
+    // Delegating research changes nothing: the sub-agent runs under this same gate.
+    "delegate"
   )
+
+  /**
+   * The tool names a planning run may use. Also the tool list a delegated run
+   * gets, so the two policies cannot drift apart.
+   */
+  val allowedToolNames: Set<String> = READ_ONLY_TOOLS + "run_command"
+
+  /**
+   * The tool list a delegated run gets: the planning set, minus delegation
+   * itself. A sub-agent that could spawn sub-agents would multiply one user
+   * request into an unbounded number of model calls.
+   */
+  /**
+   * The tool list a delegated run gets: the planning set, minus delegation
+   * itself. A sub-agent that could delegate would multiply one user request into
+   * an unbounded number of model calls.
+   */
+  val delegatedToolNames: Set<String> = allowedToolNames - "delegate"
 
   /**
    * Shell binaries that read. Anything that can install, write, or run other code
