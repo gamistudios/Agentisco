@@ -1,12 +1,13 @@
 name: Agentisco CI/CD
 
-# One unified pipeline:
-#   1. "validate" — CI checks and tests (always runs, including PRs).
-#   2. "release"  — always builds + publishes the debug APK; additionally builds
-#                   and publishes the SIGNED release APK + AAB when the head
-#                   commit message requests a release:
-#                       "release"          -> auto-increment patch from latest tag
-#                       "release v1.2.3"   -> use exactly v1.2.3
+# One unified pipeline, ONE job, ONE environment setup:
+#   - Always: set up toolchain, run unit tests, build the debug APK.
+#   - Pull requests: stop there (validation only, nothing is published).
+#   - Push to main / manual dispatch: additionally resolve version + tag, build
+#     release notes, publish the debug APK, and — when the head commit message
+#     requests a release — build and publish the SIGNED release APK + AAB:
+#         "release"          -> auto-increment patch from latest tag
+#         "release v1.2.3"   -> use exactly v1.2.3
 on:
   push:
     branches: [ "main" ]
@@ -36,16 +37,25 @@ on:
         default: false
 
 jobs:
-  # ---------- Stage 1: CI validation ----------
-  validate:
-    name: Validate & Test
+  build:
+    name: Validate, Build & Publish
     runs-on: ubuntu-latest
+    # Write access is only exercised by the publish steps (tag + release),
+    # which never run on pull requests. GitHub also downgrades the token to
+    # read-only for PRs from forks.
     permissions:
-      contents: read
+      contents: write
+    env:
+      # 'true' for push-to-main and manual dispatch, 'false' for pull requests.
+      IS_PUBLISH_RUN: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
 
     steps:
+      # ---------- Environment (provisioned exactly once) ----------
       - name: Checkout Code
         uses: actions/checkout@v7
+        with:
+          # Full history + tags are only needed for versioning / release notes.
+          fetch-depth: ${{ github.event_name == 'pull_request' && 1 || 0 }}
 
       - name: Set up Java 21
         uses: actions/setup-java@v5
@@ -72,6 +82,7 @@ jobs:
       - name: Setup Debug Keystore
         env:
           AGENTISCO_DEBUG_KEYSTORE_BASE64: ${{ secrets.AGENTISCO_DEBUG_KEYSTORE_BASE64 }}
+          GITHUB_WORKSPACE: ${{ github.workspace }}
         run: |
           if [ -n "$AGENTISCO_DEBUG_KEYSTORE_BASE64" ]; then
             echo "Using GitHub secret AGENTISCO_DEBUG_KEYSTORE_BASE64..."
@@ -93,15 +104,9 @@ jobs:
           else
             echo "Using existing debug.keystore..."
           fi
+          echo "AGENTISCO_KEYSTORE_PATH=$GITHUB_WORKSPACE/debug.keystore" >> "$GITHUB_ENV"
 
-      - name: Build Debug APK
-        env:
-          ANDROID_KEYSTORE_PATH: ${{ github.workspace }}/debug.keystore
-          ANDROID_KEYSTORE_PASSWORD: android
-          ANDROID_KEY_ALIAS: androiddebugkey
-          ANDROID_KEY_PASSWORD: android
-        run: ./gradlew assembleDebug --stacktrace
-
+      # ---------- Validation ----------
       - name: Cache Robolectric android-all artifacts
         uses: actions/cache@v4
         with:
@@ -123,54 +128,17 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: android
           ANDROID_KEY_ALIAS: androiddebugkey
           ANDROID_KEY_PASSWORD: android
+          AGENTISCO_KEYSTORE_PATH: ${{ github.workspace }}/debug.keystore
+          AGENTISCO_KEYSTORE_PASSWORD: android
+          AGENTISCO_KEY_ALIAS: androiddebugkey
+          AGENTISCO_KEY_PASSWORD: android
 
-      - name: Build Debug APK
-        run: ./gradlew assembleDebug --stacktrace
-
-  # ---------- Stage 2: Build & publish ----------
-  # Runs only when stage 1 succeeded, and never on pull requests.
-  # The debug APK is built and published on EVERY run; the signed release
-  # APK/AAB only when the head commit (or a manual dispatch) asks for it.
-  release:
-    name: Build & Publish Release
-    needs: validate
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'push' && github.ref == 'refs/heads/main')
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-
-      - name: Set up Java 21
-        uses: actions/setup-java@v5
-        with:
-          distribution: 'temurin'
-          java-version: '21'
-          cache: 'gradle'
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v4
-        with:
-          packages: ''
-
-      - name: Install Android SDK packages
-        run: |
-          sdkmanager "platform-tools"
-          sdkmanager "platforms;android-28"
-          sdkmanager "cmake;3.22.1"
-          sdkmanager "ndk;27.2.12479018"
-
-      # Release detection + version resolution.
+      # ---------- Release detection + version resolution (publish runs only) ----------
       # The commit message is read from git (never interpolated into the shell)
       # so a crafted commit message cannot inject script.
       - name: Determine Release Mode, Version & Tag
         id: vars
+        if: env.IS_PUBLISH_RUN == 'true'
         env:
           DISPATCH_TAG: ${{ github.event.inputs.tag_name }}
           DISPATCH_TITLE: ${{ github.event.inputs.release_title }}
@@ -274,6 +242,7 @@ jobs:
       # Release notes are the real commit messages, verbatim, one entry each.
       - name: Generate Release Notes from Commits
         id: notes
+        if: env.IS_PUBLISH_RUN == 'true'
         env:
           PREV_TAG: ${{ steps.vars.outputs.prev_tag }}
         run: |
@@ -320,38 +289,14 @@ jobs:
           echo "--- release-notes.md ---"
           cat release-notes.md
 
-      - name: Grant Execute Permission for Gradlew
-        run: chmod +x gradlew
-
-      - name: Setup Debug Keystore
-        env:
-          AGENTISCO_DEBUG_KEYSTORE_BASE64: ${{ secrets.AGENTISCO_DEBUG_KEYSTORE_BASE64 }}
-          GITHUB_WORKSPACE: ${{ github.workspace }}
-        run: |
-          if [ -n "$AGENTISCO_DEBUG_KEYSTORE_BASE64" ]; then
-            echo "Using GitHub secret AGENTISCO_DEBUG_KEYSTORE_BASE64..."
-            echo "$AGENTISCO_DEBUG_KEYSTORE_BASE64" | base64 --decode > debug.keystore
-          elif [ -f "debug.keystore.base64" ]; then
-            echo "Using pre-encoded debug.keystore.base64..."
-            base64 --decode debug.keystore.base64 > debug.keystore
-          else
-            echo "Generating debug.keystore..."
-            keytool -genkey -v \
-              -keystore debug.keystore \
-              -alias androiddebugkey \
-              -storepass android \
-              -keypass android \
-              -keyalg RSA \
-              -keysize 2048 \
-              -validity 10000 \
-              -dname "CN=Android Debug,O=Android,C=US"
-          fi
-          echo "AGENTISCO_KEYSTORE_PATH=$GITHUB_WORKSPACE/debug.keystore" >> "$GITHUB_ENV"
-
-      # Always built, independent of release detection.
+      # ---------- Build (debug APK is built exactly once, after versioning) ----------
       - name: Build Debug APK
         env:
-          AGENTISCO_KEYSTORE_PATH: /home/runner/work/Agentisco/Agentisco/debug.keystore
+          ANDROID_KEYSTORE_PATH: ${{ github.workspace }}/debug.keystore
+          ANDROID_KEYSTORE_PASSWORD: android
+          ANDROID_KEY_ALIAS: androiddebugkey
+          ANDROID_KEY_PASSWORD: android
+          AGENTISCO_KEYSTORE_PATH: ${{ github.workspace }}/debug.keystore
           AGENTISCO_KEYSTORE_PASSWORD: android
           AGENTISCO_KEY_ALIAS: androiddebugkey
           AGENTISCO_KEY_PASSWORD: android
@@ -363,7 +308,7 @@ jobs:
       # never generate release keys in CI: a throwaway key produces APKs that
       # refuse to update-install over older builds.
       - name: Configure Release Signing
-        if: steps.vars.outputs.is_release == 'true'
+        if: env.IS_PUBLISH_RUN == 'true' && steps.vars.outputs.is_release == 'true'
         env:
           AGENTISCO_KEYSTORE_BASE64: ${{ secrets.AGENTISCO_KEYSTORE_BASE64 }}
           AGENTISCO_KEYSTORE_PASSWORD: ${{ secrets.AGENTISCO_KEYSTORE_PASSWORD }}
@@ -393,7 +338,7 @@ jobs:
           echo "Release keystore prepared ($(wc -c < "$KEYSTORE_PATH") bytes)."
 
       - name: Build Signed Release APK and App Bundle (AAB)
-        if: steps.vars.outputs.is_release == 'true'
+        if: env.IS_PUBLISH_RUN == 'true' && steps.vars.outputs.is_release == 'true'
         env:
           AGENTISCO_KEYSTORE_PASSWORD: ${{ secrets.AGENTISCO_KEYSTORE_PASSWORD }}
           AGENTISCO_KEY_ALIAS: ${{ secrets.AGENTISCO_KEY_ALIAS }}
@@ -404,7 +349,9 @@ jobs:
         if: always()
         run: rm -f "${RUNNER_TEMP}/agentisco-release.jks"
 
+      # ---------- Publish (push to main / manual dispatch only) ----------
       - name: Organize Release Artifacts
+        if: env.IS_PUBLISH_RUN == 'true'
         run: |
           set -euo pipefail
           mkdir -p release-artifacts
@@ -434,6 +381,7 @@ jobs:
           ls -lah release-artifacts/
 
       - name: Upload Artifacts to Workflow
+        if: env.IS_PUBLISH_RUN == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: agentisco-build-${{ steps.vars.outputs.tag }}
@@ -441,6 +389,7 @@ jobs:
           if-no-files-found: error
 
       - name: Create and Push Git Tag
+        if: env.IS_PUBLISH_RUN == 'true'
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
@@ -458,6 +407,7 @@ jobs:
       # failures on large APK/AAB files, and a failed parallel batch can leave
       # the release with a partial, inconsistent asset set.
       - name: Publish GitHub Release
+        if: env.IS_PUBLISH_RUN == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
