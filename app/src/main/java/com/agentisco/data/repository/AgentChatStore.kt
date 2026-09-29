@@ -232,6 +232,10 @@ class AgentChatStore(context: Context?) {
           pendingText.setLength(0)
         }
         blocks.forEach { b ->
+          // A delegated agent's cards exist for the user to watch. The model that
+          // delegated them holds the report its specialist returned, and must not
+          // replay that specialist's work as though it had done it itself.
+          if (!b.parentCallId.isNullOrBlank()) return@forEach
           when (b.kind) {
             "text" -> if (includeText && b.status == "done" && b.summary.isNotBlank()) {
               pendingText.append(b.summary).append("\n\n")

@@ -237,6 +237,16 @@ class ChatStoreTurnVisibilityTest {
     assertEquals("backend", delegation.delegation?.role)
     assertEquals("trace the value", delegation.delegation?.description)
     assertEquals("Set value to 2 in src/App.tsx.", delegation.delegation?.prompt)
+
+    // The transcript the next request is built from keeps the delegation whole:
+    // one call, one report — never the specialist's own forty steps.
+    val transcript = store.buildConversationMessages(nestSession)
+    val toolNames = transcript.mapNotNull { it.toolName }
+    assertEquals(toolNames.toString(), listOf("delegate", "delegate"), toolNames)
+    val content = transcript.joinToString("\n") { it.content }
+    assertTrue(content, content.contains("Report body"))
+    assertFalse(content, content.contains("export const value = 1"))
+    assertFalse(content, content.contains("Set value to 2 in src/App.tsx."))
   }
 
   /**
