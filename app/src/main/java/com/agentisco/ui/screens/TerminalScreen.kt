@@ -111,14 +111,16 @@ fun TerminalScreen(
   val activeSessionId by viewModel.activeTerminalSessionId.collectAsState()
   val ptySessions by viewModel.ptySessions.collectAsState()
   val envState by viewModel.linuxEnvironmentState.collectAsState()
+  val activeProject by viewModel.activeProject.collectAsState()
 
   var showNewSessionDialog by remember { mutableStateOf(false) }
   var newSessionNameInput by remember { mutableStateOf("") }
 
-  val currentSession = remember(sessions, activeSessionId) {
-    sessions.find { it.id == activeSessionId } ?: sessions.first()
-  }
-  val activePty = ptySessions[currentSession.id]
+  // The terminal belongs to the Linux environment, not to a project: it opens with
+  // whatever tab exists, and a tab is always there. Asking for one is what used to
+  // crash the page before any project had been chosen.
+  val currentSession = sessions.firstOrNull { it.id == activeSessionId } ?: sessions.firstOrNull()
+  val activePty = currentSession?.let { ptySessions[it.id] }
 
   // Kick off the real Debian bootstrap on first open, and create the PTY
   // session for the visible tab once the rootfs is ready.
@@ -143,7 +145,7 @@ fun TerminalScreen(
       .imePadding()
   ) {
     TerminalHeader(
-      currentDirLabel = currentSession.currentDir,
+      workspaceLabel = viewModel.repository.terminalWorkspaceLabel(activeProject),
       onNewSession = { showNewSessionDialog = true }
     )
     SessionTabs(
@@ -190,8 +192,10 @@ fun TerminalScreen(
             val session = activePty
             if (session !== attachedSession) {
               // Wire redraw notifications from the session's client bridge.
-              viewModel.repository.terminalClientRegistry[currentSession.id]?.let { bridge ->
-                bridge.redrawCallback = { view.post { view.onScreenUpdated() } }
+              currentSession?.id?.let { tabId ->
+                viewModel.repository.terminalClientRegistry[tabId]?.let { bridge ->
+                  bridge.redrawCallback = { view.post { view.onScreenUpdated() } }
+                }
               }
               view.attachSession(session)
               attachedSession = session
@@ -291,7 +295,7 @@ fun TerminalScreen(
 }
 
 @Composable
-private fun TerminalHeader(currentDirLabel: String, onNewSession: () -> Unit) {
+private fun TerminalHeader(workspaceLabel: String, onNewSession: () -> Unit) {
   val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
   Surface(
     modifier = Modifier.fillMaxWidth(),
@@ -323,7 +327,7 @@ private fun TerminalHeader(currentDirLabel: String, onNewSession: () -> Unit) {
         }
         Row(verticalAlignment = Alignment.CenterVertically) {
           Text(
-            text = currentDirLabel,
+            text = workspaceLabel,
             color = TextMuted,
             fontSize = 10.sp,
             fontFamily = FontFamily.Monospace,
@@ -338,7 +342,7 @@ private fun TerminalHeader(currentDirLabel: String, onNewSession: () -> Unit) {
             modifier = Modifier
               .padding(start = 4.dp)
               .size(11.dp)
-              .clickable { clipboard.setText(AnnotatedString(currentDirLabel)) }
+              .clickable { clipboard.setText(AnnotatedString(workspaceLabel)) }
           )
         }
       }

@@ -241,6 +241,41 @@ class WorkspaceRepository(
   }
 
   /**
+   * Where every terminal shell starts: the Linux home. A tab is not tied to a
+   * project's folder, so the page works the same whether or not one was chosen.
+   */
+  private fun newTerminalTab(project: Project, name: String = "main") = TerminalSession(
+    id = "term-${terminalTabSeq.incrementAndGet()}",
+    name = name,
+    currentDir = GUEST_HOME_DIR,
+    projectId = project.id
+  )
+
+  /**
+   * What the terminal header shows as the workspace: the project whose folder is
+   * mounted at `/workspace` inside the guest, or the home alone when no project
+   * has been chosen yet.
+   */
+  fun terminalWorkspaceLabel(project: Project): String =
+    if (project.path.isBlank()) GUEST_HOME_DIR else guestPathFor(project.path)
+
+  /**
+   * Shows [project]'s terminal tabs, opening a first one when it has none. Called
+   * both from the constructor and whenever a project becomes active: the terminal
+   * page is reachable the instant the app is, so it must have a tab before the
+   * first project has been found on disk.
+   */
+  private fun openTerminalTabsFor(project: Project) {
+    val tabs = terminalTabsByProject.getOrPut(project.id) { mutableListOf(newTerminalTab(project)) }
+    // A snapshot, never the map's own list: the flow and the registry must not be
+    // the same object, or adding a tab would reach the flow twice.
+    _terminalSessions.value = tabs.toList()
+    if (tabs.none { it.id == _activeTerminalSessionId.value }) {
+      _activeTerminalSessionId.value = tabs.first().id
+    }
+  }
+
+  /**
    * Executes a real `git` command inside the rootfs with the project folder
    * mounted as the workspace — the same environment the terminal uses.
    * Runs are serialized per project so background status refreshes can never
@@ -857,9 +892,11 @@ class WorkspaceRepository(
   private val _terminalSessions = MutableStateFlow<List<TerminalSession>>(emptyList())
   /** Terminal tabs per project: switching workspaces switches tab sets. */
   private val terminalTabsByProject = mutableMapOf<String, MutableList<TerminalSession>>()
+  /** Makes tab ids unique; a wall-clock timestamp repeats within a millisecond. */
+  private val terminalTabSeq = java.util.concurrent.atomic.AtomicLong()
   val terminalSessions: StateFlow<List<TerminalSession>> = _terminalSessions.asStateFlow()
 
-  private val _activeTerminalSessionId = MutableStateFlow("term-1")
+  private val _activeTerminalSessionId = MutableStateFlow("")
   val activeTerminalSessionId: StateFlow<String> = _activeTerminalSessionId.asStateFlow()
 
   /** Last opened project ID (persisted separately to survive app restarts). */
@@ -949,6 +986,9 @@ class WorkspaceRepository(
 
 
   init {
+    // A terminal tab exists from this moment, whatever the project scan below
+    // takes or finds: with no project chosen the shell opens in the guest's home.
+    openTerminalTabsFor(_activeProject.value)
     repositoryScope.launch {
       migrateLegacyProjects()
       refreshProjectList()
@@ -1114,6 +1154,11 @@ class WorkspaceRepository(
   }
 
   private fun loadActiveProjectState(project: Project) {
+    // Each project keeps its own tab set, so switching workspaces never inherits
+    // another project's tabs. This runs before the early exit below: the terminal
+    // page needs a tab to show even when no project was ever chosen.
+    openTerminalTabsFor(project)
+
     if (project.path.isBlank()) {
       _projectFiles.value = emptyList()
       _dirChildren.value = emptyMap()
@@ -1152,24 +1197,6 @@ class WorkspaceRepository(
       _activeFile.value = firstFile.copy(content = content)
       _editorContent.value = content
       _isEditorDirty.value = false
-    }
-
-    // Terminal tabs belong to the project: open its tab set (with the real
-    // project root as the working directory) and never inherit another
-    // project's tabs.
-    val tabs = terminalTabsByProject.getOrPut(project.id) {
-      mutableListOf(
-        TerminalSession(
-          id = "term-${System.currentTimeMillis()}",
-          name = "main",
-          currentDir = guestPathFor(project.path),
-          projectId = project.id
-        )
-      )
-    }
-    _terminalSessions.value = tabs
-    if (_terminalSessions.value.none { it.id == _activeTerminalSessionId.value }) {
-      _activeTerminalSessionId.value = tabs.first().id
     }
 
     fileWatcher.setRoot(File(project.path).takeIf { it.isDirectory })
@@ -2551,17 +2578,11 @@ class WorkspaceRepository(
 
   fun createTerminalSession(name: String = "bash") {
     val project = _activeProject.value
-    val newId = "term-${System.currentTimeMillis()}"
-    val newSession = TerminalSession(
-      id = newId,
-      name = name,
-      currentDir = guestPathFor(project.path),
-      projectId = project.id
-    )
-    terminalTabsByProject.getOrPut(project.id) { mutableListOf() }.add(newSession)
-    _terminalSessions.update { it + newSession }
-    ensurePtySession(newId, name)
-    _activeTerminalSessionId.value = newId
+    val newSession = newTerminalTab(project, name)
+    val tabs = terminalTabsByProject.getOrPut(project.id) { mutableListOf() }.also { it.add(newSession) }
+    _terminalSessions.value = tabs.toList()
+    ensurePtySession(newSession.id, name)
+    _activeTerminalSessionId.value = newSession.id
   }
 
   /** Lazily creates the PTY-backed session for a tab once Debian is ready. */
@@ -2591,12 +2612,7 @@ class WorkspaceRepository(
     val project = _activeProject.value
     val currentList = _terminalSessions.value
     if (currentList.size <= 1) {
-      val resetSession = TerminalSession(
-        id = "term-${System.currentTimeMillis()}",
-        name = "main",
-        currentDir = guestPathFor(project.path),
-        projectId = project.id
-      )
+      val resetSession = newTerminalTab(project)
       terminalTabsByProject[project.id] = mutableListOf(resetSession)
       _terminalSessions.value = listOf(resetSession)
       _activeTerminalSessionId.value = resetSession.id
@@ -2934,7 +2950,8 @@ class WorkspaceRepository(
     )
 
     val currentSession = _terminalSessions.value.firstOrNull { it.id == _activeTerminalSessionId.value }
-      ?: _terminalSessions.value.first()
+      ?: _terminalSessions.value.firstOrNull()
+      ?: newTerminalTab(_activeProject.value)
 
     val result = try {
       agentRuntime.executeTask(
@@ -3077,6 +3094,9 @@ class WorkspaceRepository(
 
     /** Registry record for the scripted Linux commands live right now. */
     private const val TERMINAL_WORK_ID = "linux-commands"
+
+    /** The Linux home a terminal tab uses when it belongs to no project. */
+    private const val GUEST_HOME_DIR = "/root"
 
     /** Registry record for the one-shot Debian rootfs bootstrap. */
     private const val LINUX_BOOTSTRAP_WORK_ID = "linux-bootstrap"
