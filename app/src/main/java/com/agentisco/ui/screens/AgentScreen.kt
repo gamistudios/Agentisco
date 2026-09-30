@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
@@ -1214,8 +1215,59 @@ internal fun ToolCallRow(
     }
 
     // A delegated agent's work, live and in order — the same cards the
-    // orchestrator gets for its own actions, hung under this delegation.
-    DelegationActivityStream(item.children, showToolJson)
+    // orchestrator gets for its own actions. Collapsed by default: one answer
+    // should not arrive as ten parallel streams the user has to scroll past.
+    if (item.children.isNotEmpty()) {
+      var workOpen by remember(item.id) { mutableStateOf(false) }
+      val liveChild = item.children.filterIsInstance<ActionBlock>().lastOrNull { it.running }
+      val headline = when {
+        liveChild != null -> friendlyToolLabel(liveChild.name, liveChild.argsJson).first
+        item.running -> "thinking"
+        else -> "finished"
+      }
+      Spacer(modifier = Modifier.height(6.dp))
+      Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+          .fillMaxWidth()
+          .clip(RoundedCornerShape(6.dp))
+          .background(DarkBackground)
+          .clickable { workOpen = !workOpen }
+          .padding(horizontal = 8.dp, vertical = 5.dp)
+          .testTag("btn_toggle_subagent_work")
+      ) {
+        Icon(
+          imageVector = if (workOpen) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+          contentDescription = null,
+          tint = TextMuted,
+          modifier = Modifier.size(14.dp)
+        )
+        Spacer(modifier = Modifier.width(4.dp))
+        Text(
+          text = if (workOpen) "Hide" else "Show",
+          color = ElectricBlueGlow,
+          fontSize = 10.5.sp,
+          fontWeight = FontWeight.SemiBold
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+          text = "${item.children.size} steps · $headline",
+          color = TextMuted,
+          fontSize = 10.sp,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
+          modifier = Modifier.weight(1f)
+        )
+        if (liveChild != null) {
+          CircularProgressIndicator(
+            modifier = Modifier.size(10.dp),
+            color = ElectricBlueGlow,
+            strokeWidth = 1.4.dp
+          )
+        }
+      }
+      if (workOpen) DelegationActivityStream(item.children, showToolJson)
+    }
 
     // Git-style diff for file edits: -removed / +added with line numbers.
     if (diffLines != null && diffLines.isNotEmpty()) {

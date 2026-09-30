@@ -7,9 +7,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
 import com.agentisco.ui.ActionBlock
 import com.agentisco.ui.ApprovalBlock
@@ -104,5 +107,50 @@ class AgentCardStyleScreenshotTest {
       .onNodeWithText("Runs in terminal session 'main': grep -aoE node version")
       .assertExists()
     composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/agent_card_styles.png")
+  }
+
+  /**
+   * A specialist's own steps stay folded away until asked, so a delegated turn
+   * reads as one line per agent instead of a flood.
+   */
+  @Test
+  fun `sub-agent work stays collapsed until opened, then closes again`() {
+    val delegation = ActionBlock(
+      id = "d1",
+      name = "delegate",
+      argsJson = """{"role":"Explore / Research Engineer","description":"map the repo","prompt":"Read the scanner"}""",
+      running = true,
+      success = null,
+      summary = "",
+      detail = "",
+      exitCode = null,
+      children = listOf(
+        readTool,
+        readTool.copy(id = "d1-c2", name = "list_files", argsJson = """{"path":"app/src"}""")
+      ),
+      delegation = com.agentisco.ui.DelegationBrief(
+        role = "Explore / Research Engineer",
+        description = "map the repo",
+        prompt = "Read the scanner"
+      )
+    )
+
+    composeTestRule.setContent {
+      AgentiscoTheme {
+        Column(modifier = Modifier.fillMaxSize().background(DarkBackground).padding(12.dp)) {
+          ToolCallRow(item = delegation)
+        }
+      }
+    }
+
+    composeTestRule.onNodeWithTag("btn_toggle_subagent_work").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("stream_tool_list_files").assertDoesNotExist()
+    composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/agent_subagent_collapsed.png")
+
+    composeTestRule.onNodeWithTag("btn_toggle_subagent_work").performClick()
+    composeTestRule.onNodeWithTag("stream_tool_list_files").assertIsDisplayed()
+
+    composeTestRule.onNodeWithTag("btn_toggle_subagent_work").performClick()
+    composeTestRule.onNodeWithTag("stream_tool_list_files").assertDoesNotExist()
   }
 }
