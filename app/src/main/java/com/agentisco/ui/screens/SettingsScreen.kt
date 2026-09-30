@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
@@ -17,6 +18,7 @@ import androidx.compose.material.icons.outlined.BugReport
 import androidx.compose.material.icons.outlined.Calculate
 import androidx.compose.material.icons.outlined.Compress
 import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.MailOutline
 import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material3.*
@@ -26,6 +28,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -523,6 +526,11 @@ fun SettingsScreen(
       item {
         DebugDiagnosticsCard(onShowCrashLog = onShowCrashLog)
       }
+    }
+
+    // About: what the app is, and who to reach.
+    item {
+      AboutCard()
     }
 
     item {
@@ -1352,6 +1360,118 @@ private fun NotificationToggleRow(label: String, initial: Boolean) {
               uncheckedTrackColor = DarkSurfaceHighlight,
               uncheckedBorderColor = DarkBorder
             )
+    )
+  }
+}
+
+private const val DEVELOPER_NAME = "Gemechis Chala"
+private const val DEVELOPER_EMAIL = "gladsonchala@gmail.com"
+private const val DEVELOPER_TELEGRAM = "venopyx"
+private const val DEVELOPER_LOCATION = "Addis Ababa, Ethiopia"
+
+@Composable
+internal fun AboutCard(modifier: Modifier = Modifier) {
+  val uriHandler = LocalUriHandler.current
+  Card(
+    modifier = modifier
+      .fillMaxWidth()
+      .clip(RoundedCornerShape(12.dp))
+      .border(1.dp, DarkBorder, RoundedCornerShape(12.dp)),
+    colors = CardDefaults.cardColors(containerColor = DarkSurface)
+  ) {
+    Column(modifier = Modifier.padding(14.dp)) {
+      Text("About", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+      Spacer(modifier = Modifier.height(8.dp))
+      Text(
+        text = "Agentisco is a coding workspace that runs on the device itself: an Ubuntu " +
+          "userland, a real terminal, and an agent that reads, edits, builds and tests your " +
+          "projects. Projects, chats and settings stay in the app's private storage — only the " +
+          "prompts you send leave it, for the model provider you configure.",
+        color = TextSecondary,
+        fontSize = 12.sp,
+        lineHeight = 17.sp
+      )
+      Spacer(modifier = Modifier.height(10.dp))
+      Text(
+        text = "v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
+        color = TextMuted,
+        fontSize = 10.5.sp,
+        fontFamily = FontFamily.Monospace
+      )
+
+      Spacer(modifier = Modifier.height(14.dp))
+      Text(DEVELOPER_NAME, color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+      Text(
+        text = "Developer · $DEVELOPER_LOCATION",
+        color = TextMuted,
+        fontSize = 11.sp
+      )
+      Spacer(modifier = Modifier.height(10.dp))
+      ContactRow(
+        icon = Icons.Outlined.MailOutline,
+        label = "Email me",
+        value = DEVELOPER_EMAIL,
+        tint = ElectricBlueGlow,
+        tag = "about_email",
+        onClick = { uriHandler.openUri("mailto:$DEVELOPER_EMAIL") }
+      )
+      Spacer(modifier = Modifier.height(8.dp))
+      ContactRow(
+        icon = Icons.AutoMirrored.Outlined.Send,
+        label = "Telegram",
+        value = "@$DEVELOPER_TELEGRAM",
+        tint = TerminalGreen,
+        tag = "about_telegram",
+        onClick = { uriHandler.openUri("https://t.me/$DEVELOPER_TELEGRAM") }
+      )
+    }
+  }
+}
+
+@Composable
+private fun ContactRow(
+  icon: androidx.compose.ui.graphics.vector.ImageVector,
+  label: String,
+  value: String,
+  tint: Color,
+  tag: String,
+  onClick: () -> Unit
+) {
+  Row(
+    verticalAlignment = Alignment.CenterVertically,
+    modifier = Modifier
+      .fillMaxWidth()
+      .clip(RoundedCornerShape(10.dp))
+      .background(DarkBackground)
+      .border(1.dp, DarkBorder, RoundedCornerShape(10.dp))
+      .clickable(onClick = onClick)
+      .padding(horizontal = 10.dp, vertical = 9.dp)
+      .testTag(tag)
+  ) {
+    Box(
+      modifier = Modifier
+        .size(26.dp)
+        .clip(androidx.compose.foundation.shape.CircleShape)
+        .background(tint.copy(alpha = 0.14f)),
+      contentAlignment = Alignment.Center
+    ) {
+      Icon(
+        imageVector = icon,
+        contentDescription = null,
+        tint = tint,
+        modifier = Modifier.size(14.dp)
+      )
+    }
+    Spacer(modifier = Modifier.width(10.dp))
+    Column(modifier = Modifier.weight(1f)) {
+      Text(label, color = TextPrimary, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
+      Text(value, color = TextMuted, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+    }
+    Icon(
+      imageVector = Icons.Default.ChevronRight,
+      contentDescription = null,
+      tint = TextMuted,
+      modifier = Modifier.size(16.dp)
     )
   }
 }
