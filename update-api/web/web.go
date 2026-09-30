@@ -6,15 +6,22 @@
 package web
 
 import (
-	_ "embed"
+	"embed"
 	"log/slog"
 	"net/http"
+	"path"
 	"strconv"
 	"strings"
 )
 
 //go:embed index.html
 var indexHTML []byte
+
+// shotsFS holds the landing page's screenshot grid, named after the screen each
+// one shows: replacing a shot means dropping in a new PNG, never editing the page.
+//
+//go:embed shots
+var shotsFS embed.FS
 
 // logoPNG is the app's launcher icon, used as the page's logo and favicon. The
 // same bytes serve both so the mark on the page is literally the app's icon.
@@ -57,6 +64,11 @@ func Handler(cfg Config) http.Handler {
 			return
 		}
 
+		if strings.HasPrefix(r.URL.Path, "/shots/") {
+			serveShot(w, r, log)
+			return
+		}
+
 		if strings.Trim(r.URL.Path, "/") != "" && r.URL.Path != "/index.html" {
 			http.NotFound(w, r)
 			return
@@ -72,4 +84,17 @@ func Handler(cfg Config) http.Handler {
 			log.Warn("could not write landing page", "error", err)
 		}
 	})
+}
+
+// serveShot writes one embedded screenshot. Only a flat ".png" name is honoured, so
+// a request cannot climb out of the shots directory or reach anything else.
+func serveShot(w http.ResponseWriter, r *http.Request, log *slog.Logger) {
+	name := path.Base(strings.TrimPrefix(r.URL.Path, "/shots/"))
+	if name == "." || !strings.HasSuffix(name, ".png") {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	http.ServeFileFS(w, r, shotsFS, "shots/"+name)
 }

@@ -314,7 +314,7 @@ internal/objectstore/ storage interface + filesystem implementation (staging, at
 internal/ratelimit/   token bucket keyed on client address
 internal/syncsvc/     one pass: list once, resolve per channel, download once, verify, publish
 internal/version/     version-code computation, shared rule with the app
-web/                  embedded landing page and the app's launcher icon
+web/                  embedded landing page, the app's launcher icon and the screenshots it shows
 scripts/              smoke-test.sh (offline), live-smoke.sh (real upstream)
 openapi.yaml          the public contract
 Dockerfile            distroless nonroot image

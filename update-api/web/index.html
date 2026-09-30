@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Agentisco — the AI coding agent that runs on your phone</title>
-<meta name="description" content="Agentisco is a full AI coding agent, Linux terminal and code editor running entirely on Android. Download the latest release.">
+<title>Agentisco — the AI coding workspace for your pocket</title>
+<meta name="description" content="Agentisco is an AI coding workspace for Android: import any folder or ZIP, let the agent edit, install, build, test and run it in a real Linux environment, preview the result live, and ship it with full Git — all from your phone.">
 <link rel="icon" type="image/png" href="/logo.png">
 <link rel="apple-touch-icon" href="/logo.png">
 <script src="https://cdn.tailwindcss.com"></script>
@@ -29,6 +29,7 @@
   }
 </script>
 <style>
+  html { scroll-behavior: smooth; }
   body { -webkit-font-smoothing: antialiased; }
   .grid-bg {
     background-image:
@@ -37,20 +38,47 @@
     background-size: 44px 44px;
   }
   .glow { box-shadow: 0 0 0 1px rgba(59,130,246,.25), 0 18px 60px -20px rgba(59,130,246,.45); }
+  .shot-card img { transition: transform .35s ease; }
+  .shot-card:hover img, .shot-card:focus-within img { transform: scale(1.04); }
 </style>
 </head>
 <body class="bg-ink text-slate-100 font-mono">
 
-<header class="border-b border-line/60">
-  <div class="mx-auto max-w-6xl px-5 py-4 flex items-center justify-between">
-    <a href="#top" class="flex items-center gap-2">
+<header class="sticky top-0 z-40 border-b border-line/60 bg-ink/90 backdrop-blur">
+  <div class="mx-auto max-w-6xl px-5 py-4 flex items-center justify-between gap-4">
+    <a href="#top" class="flex items-center gap-2 shrink-0">
       <img src="/logo.png" width="24" height="24" alt="" class="h-6 w-6 rounded-md">
       <span class="tracking-tight text-slate-50">Agentisco</span>
     </a>
-    <nav class="flex items-center gap-5 text-sm text-muted">
-      <a class="hover:text-slate-100" href="#features">Features</a>
+    <nav class="hidden md:flex items-center gap-4 text-sm text-muted">
+      <a class="hover:text-slate-100" href="#workflow">Workflow</a>
+      <a class="hover:text-slate-100" href="#agents">Agents</a>
+      <a class="hover:text-slate-100" href="#preview">Live preview</a>
+      <a class="hover:text-slate-100" href="#git">Git</a>
+      <a class="hover:text-slate-100" href="#screens">Screens</a>
       <a class="hover:text-slate-100" href="#download">Download</a>
-      <a class="hover:text-slate-100" href="/v1/updates/release/latest">API</a>
+    </nav>
+    <button id="menu-toggle" type="button" aria-expanded="false" aria-controls="mobile-menu" aria-label="Open menu"
+            class="md:hidden inline-flex items-center justify-center rounded-lg border border-line px-3 py-2 text-slate-200 hover:bg-raised">
+      <svg id="menu-icon-open" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <path d="M4 7h16M4 12h16M4 17h16" stroke-linecap="round"/>
+      </svg>
+      <svg id="menu-icon-close" class="hidden" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <path d="M6 6l12 12M18 6L6 18" stroke-linecap="round"/>
+      </svg>
+    </button>
+  </div>
+  <div id="mobile-menu" class="hidden md:hidden border-t border-line/60 bg-ink">
+    <nav class="mx-auto max-w-6xl px-3 py-2 grid grid-cols-2 gap-1 text-sm text-muted">
+      <a class="rounded-lg px-2 py-2 hover:bg-raised hover:text-slate-100" href="#workflow">Workflow</a>
+      <a class="rounded-lg px-2 py-2 hover:bg-raised hover:text-slate-100" href="#agents">Agents</a>
+      <a class="rounded-lg px-2 py-2 hover:bg-raised hover:text-slate-100" href="#preview">Live preview</a>
+      <a class="rounded-lg px-2 py-2 hover:bg-raised hover:text-slate-100" href="#git">Git</a>
+      <a class="rounded-lg px-2 py-2 hover:bg-raised hover:text-slate-100" href="#linux">Linux</a>
+      <a class="rounded-lg px-2 py-2 hover:bg-raised hover:text-slate-100" href="#background">Background</a>
+      <a class="rounded-lg px-2 py-2 hover:bg-raised hover:text-slate-100" href="#models">Your model</a>
+      <a class="rounded-lg px-2 py-2 hover:bg-raised hover:text-slate-100" href="#screens">Screens</a>
+      <a class="rounded-lg px-2 py-2 hover:bg-raised hover:text-slate-100" href="#download">Download</a>
     </nav>
   </div>
 </header>
@@ -58,75 +86,539 @@
 <main id="top">
   <section class="grid-bg border-b border-line/60">
     <div class="mx-auto max-w-6xl px-5 pt-16 pb-14 md:pt-24 md:pb-20">
-      <p class="text-xs uppercase tracking-[0.2em] text-bolt">Android · offline-capable · no root</p>
+      <p class="text-xs uppercase tracking-[0.2em] text-bolt">Android · no root · your model, your project</p>
       <h1 class="mt-4 text-3xl md:text-5xl leading-tight tracking-tight text-slate-50">
-        The AI coding agent, Linux terminal and editor<br class="hidden md:block">
-        that run entirely on your phone.
+        Ship real software from your phone.
       </h1>
-      <p class="mt-5 max-w-2xl text-sm md:text-base text-muted">
-        Agentisco ships a Debian userland through <span class="text-slate-200">proot</span>, drives it with an
-        agent that has 21 real tools, and wraps the results in an IDE-grade editor and Git client.
-        Self-updates are verified byte by byte before they install.
+      <p class="mt-3 text-lg md:text-2xl tracking-tight text-mint">The AI coding workspace for your pocket.</p>
+      <p class="mt-6 max-w-2xl text-sm md:text-base text-muted">
+        AI agent. Ubuntu Linux environment. Editor. Terminal. Full Git. Live web preview — in one
+        Android app. Import a folder or a ZIP you already have, connect the model you already pay for,
+        and tell Agentisco what to change. It reads the codebase, edits the files, installs the
+        dependencies, runs the project, reads its own errors, fixes them and runs the tests — then
+        keeps going after you lock the screen.
       </p>
+      <p class="mt-4 max-w-2xl text-sm text-slate-200">
+        Your phone stops being where you read code. It becomes where you build it.
+      </p>
+
+      <ul class="mt-8 flex flex-wrap gap-2 text-xs">
+        <li class="rounded-full border border-line bg-surface px-3 py-1.5 text-slate-200">Any folder or ZIP becomes a project</li>
+        <li class="rounded-full border border-line bg-surface px-3 py-1.5 text-slate-200">Real Linux with apt</li>
+        <li class="rounded-full border border-line bg-surface px-3 py-1.5 text-slate-200">Live preview of what you built</li>
+        <li class="rounded-full border border-line bg-surface px-3 py-1.5 text-slate-200">Git the way you use it on a desktop</li>
+        <li class="rounded-full border border-line bg-surface px-3 py-1.5 text-slate-200">Agents that work while you don't watch</li>
+      </ul>
 
       <div class="mt-8 flex flex-wrap gap-3" id="hero-actions">
         <a href="#download" class="glow inline-flex items-center gap-2 rounded-lg bg-bolt px-5 py-3 text-sm text-white hover:bg-blue-500">
-          Download Agentisco <span id="hero-version" class="text-blue-100/80"></span>
+          Start coding <span id="hero-version" class="text-blue-100/80"></span>
         </a>
-        <a href="#features" class="inline-flex items-center rounded-lg border border-line px-5 py-3 text-sm text-slate-200 hover:bg-raised">
-          What it does
+        <a href="#workflow" class="inline-flex items-center rounded-lg border border-line px-5 py-3 text-sm text-slate-200 hover:bg-raised">
+          See how it works
         </a>
       </div>
       <p class="mt-4 text-xs text-muted">Requires Android 7.0+ on arm64-v8a or armeabi-v7a.</p>
     </div>
   </section>
 
-  <section id="features" class="mx-auto max-w-6xl px-5 py-14 md:py-20">
-    <h2 class="text-2xl tracking-tight text-slate-50">Built for real work on a real machine</h2>
-    <div class="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-      <div class="rounded-xl border border-line bg-surface p-5">
-        <h3 class="text-sm text-bolt">Agent</h3>
-        <p class="mt-2 text-sm text-muted">Multi-turn sessions with streaming reasoning, inline tool cards, approval gates and mid-conversation model switching.</p>
-      </div>
-      <div class="rounded-xl border border-line bg-surface p-5">
-        <h3 class="text-sm text-bolt">Debian terminal</h3>
-        <p class="mt-2 text-sm text-muted">An interactive shell with a real PTY, project folders mounted at <span class="text-slate-200">/workspace</span>.</p>
-      </div>
-      <div class="rounded-xl border border-line bg-surface p-5">
-        <h3 class="text-sm text-bolt">Editor</h3>
-        <p class="mt-2 text-sm text-muted">Syntax highlighting for 26 languages, symbol outline, find &amp; replace, and "Ask Agent" with file context.</p>
-      </div>
-      <div class="rounded-xl border border-line bg-surface p-5">
-        <h3 class="text-sm text-bolt">Git</h3>
-        <p class="mt-2 text-sm text-muted">Real git: status, diffs, staging, revert, commit messages written by the agent, history.</p>
-      </div>
-      <div class="rounded-xl border border-line bg-surface p-5">
-        <h3 class="text-sm text-bolt">Projects &amp; build</h3>
-        <p class="mt-2 text-sm text-muted">Disk-measured project metadata, file tree, diff viewer and a build/run centre for npm-style scripts.</p>
-      </div>
-      <div class="rounded-xl border border-line bg-surface p-5">
-        <h3 class="text-sm text-bolt">Verified updates</h3>
-        <p class="mt-2 text-sm text-muted">Resumable downloads checked against size, SHA-256 and the APK signature before the installer is offered.</p>
+  <section id="workflow" class="mx-auto max-w-6xl px-5 py-14 md:py-20">
+    <p class="text-xs uppercase tracking-[0.2em] text-mint">The whole loop</p>
+    <h2 class="mt-3 text-2xl md:text-3xl tracking-tight text-slate-50">From idea to running project</h2>
+    <p class="mt-3 max-w-2xl text-sm text-muted">Six steps, one app, no laptop. Every feature below plugs into this flow.</p>
+    <ol class="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <li class="rounded-xl border border-line bg-surface p-5">
+        <p class="text-xs text-bolt">01</p>
+        <h3 class="mt-2 text-sm text-slate-50">Bring your project</h3>
+        <p class="mt-2 text-sm text-muted">Import any folder or ZIP, or start a new one. No template, no rewrite, no special project format.</p>
+      </li>
+      <li class="rounded-xl border border-line bg-surface p-5">
+        <p class="text-xs text-bolt">02</p>
+        <h3 class="mt-2 text-sm text-slate-50">Tell the agent</h3>
+        <p class="mt-2 text-sm text-muted">"Add dark mode and fix the auth bug." Plain language, with the whole project as context.</p>
+      </li>
+      <li class="rounded-xl border border-line bg-surface p-5">
+        <p class="text-xs text-bolt">03</p>
+        <h3 class="mt-2 text-sm text-slate-50">Let it work</h3>
+        <p class="mt-2 text-sm text-muted">It explores, plans, edits files, installs what's missing and runs commands in a real Linux shell.</p>
+      </li>
+      <li class="rounded-xl border border-line bg-surface p-5">
+        <p class="text-xs text-bolt">04</p>
+        <h3 class="mt-2 text-sm text-slate-50">Watch everything change</h3>
+        <p class="mt-2 text-sm text-muted">Live diffs, terminal output and each tool call as it happens — cancel one step, correct course, or edit the file yourself.</p>
+      </li>
+      <li class="rounded-xl border border-line bg-surface p-5">
+        <p class="text-xs text-bolt">05</p>
+        <h3 class="mt-2 text-sm text-slate-50">Run and test it</h3>
+        <p class="mt-2 text-sm text-muted">Install, build, test and run as one pipeline, then open the result in the built-in live preview.</p>
+      </li>
+      <li class="rounded-xl border border-line bg-surface p-5">
+        <p class="text-xs text-bolt">06</p>
+        <h3 class="mt-2 text-sm text-slate-50">Ship it</h3>
+        <p class="mt-2 text-sm text-muted">Review what changed, commit with a message the agent wrote, branch, stash, tag, push and sync.</p>
+      </li>
+    </ol>
+  </section>
+  <section id="agents" class="border-y border-line/60 bg-surface/40">
+    <div class="mx-auto max-w-6xl px-5 py-14 md:py-20">
+      <p class="text-xs uppercase tracking-[0.2em] text-mint">Working with agents</p>
+      <h2 class="mt-3 text-2xl md:text-3xl tracking-tight text-slate-50">Don't ask it questions. Hand it the project.</h2>
+      <p class="mt-3 max-w-2xl text-sm text-muted">
+        This is the part that makes Agentisco feel like a desktop agentic IDE rather than a chatbot:
+        the agent has real tools over your real files and a real shell, and it loops until the work is
+        actually done.
+      </p>
+
+      <div class="mt-8 grid gap-4 lg:grid-cols-[minmax(0,22rem)_1fr]">
+        <div class="rounded-xl border border-line bg-ink p-5">
+          <p class="text-xs text-muted">What happens after you press send</p>
+          <ul class="mt-4 space-y-2 text-sm text-slate-200">
+            <li>You: <span class="text-mint">"add rate limiting to the API"</span></li>
+            <li class="text-muted">↓ explores the project</li>
+            <li class="text-muted">↓ draws up a plan you can see</li>
+            <li class="text-muted">↓ edits the files</li>
+            <li class="text-muted">↓ installs the dependency it needs</li>
+            <li class="text-muted">↓ runs the project</li>
+            <li class="text-muted">↓ reads the error it just hit</li>
+            <li class="text-muted">↓ fixes it and runs the tests</li>
+            <li class="text-mint">↓ shows you every change it made</li>
+          </ul>
+        </div>
+
+        <div class="grid gap-4 sm:grid-cols-2">
+          <div class="rounded-xl border border-line bg-ink p-5">
+            <h3 class="text-sm text-bolt">Real edits, not code snippets</h3>
+            <p class="mt-2 text-sm text-muted">It creates, replaces and moves files in your project, and each edit lands as a diff you can read right there in the conversation.</p>
+          </div>
+          <div class="rounded-xl border border-line bg-ink p-5">
+            <h3 class="text-sm text-bolt">Your shell, its shell</h3>
+            <p class="mt-2 text-sm text-muted">Commands run in the same Linux session you can open and watch — copy the exact command it used, answer a prompt waiting for input, or interrupt it.</p>
+          </div>
+          <div class="rounded-xl border border-line bg-ink p-5">
+            <h3 class="text-sm text-bolt">You decide how much it may do</h3>
+            <p class="mt-2 text-sm text-muted">Approve each edit and command, or dial it to autonomous. Risky commands are flagged, deletions always ask, and any single step can be cancelled and retried.</p>
+          </div>
+          <div class="rounded-xl border border-line bg-ink p-5">
+            <h3 class="text-sm text-bolt">Plan mode</h3>
+            <p class="mt-2 text-sm text-muted">Understand a codebase you inherited, answer questions, draft the approach — with a guarantee that nothing gets modified.</p>
+          </div>
+          <div class="rounded-xl border border-line bg-ink p-5">
+            <h3 class="text-sm text-bolt">Steer it mid-turn</h3>
+            <p class="mt-2 text-sm text-muted">Edit and resend any message, pause or stop a turn, switch to another model when one gets rate-limited, and pick the conversation back up where it stopped.</p>
+          </div>
+          <div class="rounded-xl border border-line bg-ink p-5">
+            <h3 class="text-sm text-bolt">Remembers, and researches</h3>
+            <p class="mt-2 text-sm text-muted">Sessions persist per project, long conversations are summarised instead of falling off the end, and it can search the web and read pages when it's unsure.</p>
+          </div>
+        </div>
       </div>
     </div>
   </section>
 
-  <section id="download" class="border-y border-line/60 bg-surface/40">
+  <section id="linux" class="mx-auto max-w-6xl px-5 py-14 md:py-20">
+    <p class="text-xs uppercase tracking-[0.2em] text-mint">Run it for real</p>
+    <h2 class="mt-3 text-2xl md:text-3xl tracking-tight text-slate-50">A Linux development machine in your pocket</h2>
+    <p class="mt-3 max-w-2xl text-sm text-muted">
+      Agentisco ships an Ubuntu userland inside the app — no root, nothing to download on first launch.
+      It's the same environment your agent works in, so whatever runs in the terminal runs for the agent.
+    </p>
+    <div class="mt-8 grid gap-4 lg:grid-cols-[1fr_minmax(0,26rem)]">
+      <pre class="overflow-auto rounded-xl border border-line bg-surface p-5 text-xs text-slate-200"><code>$ apt install nodejs npm
+$ npm install
+$ npm run dev
+
+$ python3 -m venv .venv
+$ .venv/bin/pip install -r requirements.txt
+
+$ go test ./...
+$ cargo build --release
+$ git status</code></pre>
+      <ul class="space-y-3 text-sm text-muted">
+        <li><span class="text-slate-200">Install anything apt has.</span> Node, Python, Go, Rust, PHP, Ruby — the archive is the normal one, so the CLI apps you already use work here.</li>
+        <li><span class="text-slate-200">Interactive terminal, several at once.</span> Real PTY sessions in tabs with a developer key strip for CTRL, ESC, TAB and arrows.</li>
+        <li><span class="text-slate-200">Your project, mounted.</span> Every project you open appears in the Linux filesystem, and the files stay there between launches.</li>
+        <li><span class="text-slate-200">One environment, two users.</span> You and the agent run the same commands against the same tree — no simulated sandbox.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section id="preview" class="border-y border-line/60 bg-surface/40">
     <div class="mx-auto max-w-6xl px-5 py-14 md:py-20">
-      <h2 class="text-2xl tracking-tight text-slate-50">Downloads</h2>
+      <p class="text-xs uppercase tracking-[0.2em] text-mint">Live preview</p>
+      <h2 class="mt-3 text-2xl md:text-3xl tracking-tight text-slate-50">Build it. Run it. See it on your screen.</h2>
+      <p class="mt-3 max-w-2xl text-sm text-muted">
+        Start your dev server and the site opens inside Agentisco. No tunnel, no second device, no
+        "it works on my machine" — you are looking at the thing you just built.
+      </p>
+      <div class="mt-8 grid gap-4 lg:grid-cols-3">
+        <div class="rounded-xl border border-line bg-ink p-5">
+          <h3 class="text-sm text-bolt">One-tap pipelines</h3>
+          <p class="mt-2 text-sm text-muted">Install → build → test → run as a sequence that stops at the first failure. Each stage is a command you can edit, and the whole set is detected from your project's own files.</p>
+        </div>
+        <div class="rounded-xl border border-line bg-ink p-5">
+          <h3 class="text-sm text-bolt">It finds the port for you</h3>
+          <p class="mt-2 text-sm text-muted">Agentisco watches the server's own output, works out which port came up, and offers <span class="text-slate-200">Open preview</span> the moment it answers.</p>
+        </div>
+        <div class="rounded-xl border border-line bg-ink p-5">
+          <h3 class="text-sm text-bolt">In-app, or in your browser</h3>
+          <p class="mt-2 text-sm text-muted">Reload the preview after every change, or hand the URL to Chrome on the same phone. The dev server keeps serving while you do something else.</p>
+        </div>
+      </div>
+      <p class="mt-6 text-sm text-muted">
+        Scripts are read from the project as it really is — <span class="text-slate-200">package.json</span>
+        (npm, pnpm, yarn, bun), Gradle, Cargo, Go, Python and Django, PHP, Ruby, .NET, Maven, Flutter and
+        plain HTML — so a folder you import already has its run buttons.
+      </p>
+    </div>
+  </section>
+
+  <section id="git" class="mx-auto max-w-6xl px-5 py-14 md:py-20">
+    <p class="text-xs uppercase tracking-[0.2em] text-mint">Source control</p>
+    <h2 class="mt-3 text-2xl md:text-3xl tracking-tight text-slate-50">Full Git, the way you use it on a desktop</h2>
+    <p class="mt-3 max-w-2xl text-sm text-muted">
+      Real <span class="text-slate-200">git</span> running in the Linux environment, with a screen for each
+      of the things you'd otherwise reach for a laptop to do. The point:
+      <span class="text-slate-100">see exactly what your agent changed before you commit it.</span>
+    </p>
+    <div class="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div class="rounded-xl border border-line bg-surface p-5">
+        <h3 class="text-sm text-bolt">Changes and diffs</h3>
+        <p class="mt-2 text-sm text-muted">Staged, unstaged, untracked and conflicted files side by side, line-by-line diffs, +/- counts, copy a diff, per-file stage or discard.</p>
+      </div>
+      <div class="rounded-xl border border-line bg-surface p-5">
+        <h3 class="text-sm text-bolt">Commit, with help</h3>
+        <p class="mt-2 text-sm text-muted">Commit and amend, with a message the agent writes from the actual diff — and an "explain this commit" button when you're reading someone else's history.</p>
+      </div>
+      <div class="rounded-xl border border-line bg-surface p-5">
+        <h3 class="text-sm text-bolt">Branches</h3>
+        <p class="mt-2 text-sm text-muted">Create, switch, rename and delete, local and remote, with search. <span class="text-slate-200">feature/auth</span> is two taps away.</p>
+      </div>
+      <div class="rounded-xl border border-line bg-surface p-5">
+        <h3 class="text-sm text-bolt">Fetch, pull, push, sync</h3>
+        <p class="mt-2 text-sm text-muted">Each one a button, plus a single Sync that pulls and pushes. Add, rename and remove remotes as you like.</p>
+      </div>
+      <div class="rounded-xl border border-line bg-surface p-5">
+        <h3 class="text-sm text-bolt">History</h3>
+        <p class="mt-2 text-sm text-muted">Paginated log with per-file stats, commit details, revert, cherry-pick, reset with soft/mixed/hard warnings, merge and rebase with abort and continue.</p>
+      </div>
+      <div class="rounded-xl border border-line bg-surface p-5">
+        <h3 class="text-sm text-bolt">Stashes and tags</h3>
+        <p class="mt-2 text-sm text-muted">Park work with untracked files included, then apply, pop or drop it. Create annotated tags, delete them, push them.</p>
+      </div>
+      <div class="rounded-xl border border-line bg-surface p-5">
+        <h3 class="text-sm text-bolt">Conflicts, handled</h3>
+        <p class="mt-2 text-sm text-muted">Conflicted files are listed and open straight into the editor to resolve, then continue the merge — or back out cleanly.</p>
+      </div>
+      <div class="rounded-xl border border-line bg-surface p-5">
+        <h3 class="text-sm text-bolt">Agent-driven Git</h3>
+        <p class="mt-2 text-sm text-muted">The agent stages, commits and reads history through the same commands, and you review what it did as a diff — not as a claim.</p>
+      </div>
+      <div class="rounded-xl border border-line bg-surface p-5">
+        <h3 class="text-sm text-bolt">Stuck? Unclog it</h3>
+        <p class="mt-2 text-sm text-muted">A leftover index.lock offers a one-tap remove instead of a stack trace, and history reloads itself after operations that rewrite it.</p>
+      </div>
+    </div>
+  </section>
+  <section id="background" class="border-y border-line/60 bg-surface/40">
+    <div class="mx-auto max-w-6xl px-5 py-14 md:py-20">
+      <p class="text-xs uppercase tracking-[0.2em] text-mint">Background work</p>
+      <h2 class="mt-3 text-2xl md:text-3xl tracking-tight text-slate-50">Start the work. Put the phone away.</h2>
+      <p class="mt-3 max-w-2xl text-sm text-muted">
+        A long agent turn shouldn't need an audience. Agentisco keeps the work alive when you leave the
+        app, so the phone goes back in your pocket while the install, the build or the refactor carries on.
+      </p>
+      <div class="mt-8 grid gap-4 md:grid-cols-2">
+        <div class="rounded-xl border border-line bg-ink p-5">
+          <h3 class="text-sm text-bolt">Keeps running off-screen</h3>
+          <ul class="mt-3 space-y-2 text-sm text-muted">
+            <li>· Agent sessions and their tool calls</li>
+            <li>· Builds, tests and long-running commands</li>
+            <li>· Dev servers you're previewing</li>
+            <li>· App downloads</li>
+          </ul>
+          <p class="mt-4 text-sm text-muted">A notification shows what's running, and it pulls you back with an alert when the agent needs your approval or the run was interrupted.</p>
+        </div>
+        <div class="rounded-xl border border-line bg-ink p-5">
+          <h3 class="text-sm text-bolt">Set up once in Settings</h3>
+          <p class="mt-2 text-sm text-muted">A checklist shows what background work needs on your device — notifications, battery optimisation, keeping the terminal awake — each with a button that opens the right system screen.</p>
+          <p class="mt-4 text-xs text-muted">Come back and the transcript is where you left it, with every step it took while you were gone.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="projects" class="mx-auto max-w-6xl px-5 py-14 md:py-20">
+    <p class="text-xs uppercase tracking-[0.2em] text-mint">Any project</p>
+    <h2 class="mt-3 text-2xl md:text-3xl tracking-tight text-slate-50">Already have code? Bring it.</h2>
+    <p class="mt-3 max-w-2xl text-sm text-muted">
+      Agentisco doesn't ask you to start from a template or move into its own format. Give it the folder,
+      and the agent works on that project the way it is.
+    </p>
+    <div class="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div class="rounded-xl border border-line bg-surface p-5">
+        <h3 class="text-sm text-slate-50">Import a folder</h3>
+        <p class="mt-2 text-sm text-muted">Pick any directory on your device. Changes can be mirrored back to where it came from.</p>
+      </div>
+      <div class="rounded-xl border border-line bg-surface p-5">
+        <h3 class="text-sm text-slate-50">Import a ZIP</h3>
+        <p class="mt-2 text-sm text-muted">A download, an archive from your mail, a backup — unpack it into a project and start.</p>
+      </div>
+      <div class="rounded-xl border border-line bg-surface p-5">
+        <h3 class="text-sm text-slate-50">Start fresh</h3>
+        <p class="mt-2 text-sm text-muted">A new empty project is enough: the agent can scaffold, install and run from there.</p>
+      </div>
+      <div class="rounded-xl border border-line bg-surface p-5">
+        <h3 class="text-sm text-slate-50">Knows what it is</h3>
+        <p class="mt-2 text-sm text-muted">Real size, last edit, project type and icon detected from the files, plus ignore rules so <span class="text-slate-200">node_modules</span> doesn't slow everything down.</p>
+      </div>
+    </div>
+    <p class="mt-6 text-sm text-muted">
+      Conversations, open tabs and the project you were last in are all still there the next time you open the app.
+    </p>
+  </section>
+
+  <section id="subagents" class="border-y border-line/60 bg-surface/40">
+    <div class="mx-auto max-w-6xl px-5 py-14 md:py-20">
+      <p class="text-xs uppercase tracking-[0.2em] text-mint">Sub-agents</p>
+      <h2 class="mt-3 text-2xl md:text-3xl tracking-tight text-slate-50">One agent isn't always enough</h2>
+      <div class="mt-8 grid gap-4 lg:grid-cols-[minmax(0,24rem)_1fr]">
+        <pre class="overflow-auto rounded-xl border border-line bg-ink p-5 text-xs leading-6 text-slate-200"><code>            Main agent
+                 │
+     ┌───────────┼───────────┐
+     ↓           ↓           ↓
+  Research     Backend      UI
+   agent       agent      agent
+     │           │           │
+     └───────────┼───────────┘
+                 ↓
+         results, back in one
+             conversation</code></pre>
+        <div class="grid gap-4 sm:grid-cols-2">
+          <div class="rounded-xl border border-line bg-ink p-5">
+            <h3 class="text-sm text-bolt">Delegate the open-ended work</h3>
+            <p class="mt-2 text-sm text-muted">"Find every place we handle tokens" goes to a read-only researcher while your main session keeps moving.</p>
+          </div>
+          <div class="rounded-xl border border-line bg-ink p-5">
+            <h3 class="text-sm text-bolt">Run a team, see every step</h3>
+            <p class="mt-2 text-sm text-muted">Specialists work in parallel and you can open any one of them to read what it did — and they know which files another agent already holds.</p>
+          </div>
+          <div class="rounded-xl border border-line bg-ink p-5">
+            <h3 class="text-sm text-bolt">Build your own agent</h3>
+            <p class="mt-2 text-sm text-muted">Give it a name, its instructions and the tools it may use, then delegate to it like any built-in one.</p>
+          </div>
+          <div class="rounded-xl border border-line bg-ink p-5">
+            <h3 class="text-sm text-bolt">Project skills</h3>
+            <p class="mt-2 text-sm text-muted">Write your house rules down once — how to build, test and review in this repo — and every agent follows them.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="models" class="mx-auto max-w-6xl px-5 py-14 md:py-20">
+    <p class="text-xs uppercase tracking-[0.2em] text-mint">Your AI provider</p>
+    <h2 class="mt-3 text-2xl md:text-3xl tracking-tight text-slate-50">Use the models you already trust</h2>
+    <p class="mt-3 max-w-2xl text-sm text-muted">
+      Agentisco ships no model and never sits between you and your provider — no subscription of ours, no
+      locked workflow. Add a provider, add its models, start working.
+    </p>
+    <ul class="mt-6 flex flex-wrap gap-2 text-xs">
+      <li class="rounded-full border border-line bg-surface px-3 py-1.5 text-slate-200">OpenAI</li>
+      <li class="rounded-full border border-line bg-surface px-3 py-1.5 text-slate-200">Anthropic · Claude</li>
+      <li class="rounded-full border border-line bg-surface px-3 py-1.5 text-slate-200">Google Gemini</li>
+      <li class="rounded-full border border-line bg-surface px-3 py-1.5 text-slate-200">OpenAI-compatible APIs</li>
+      <li class="rounded-full border border-line bg-surface px-3 py-1.5 text-slate-200">Any custom base URL</li>
+    </ul>
+    <div class="mt-8 grid gap-4 md:grid-cols-4">
+      <div class="rounded-xl border border-line bg-surface p-5">
+        <p class="text-xs text-bolt">1</p>
+        <p class="mt-2 text-sm text-slate-100">Open <span class="text-mint">Providers</span> and add one.</p>
+      </div>
+      <div class="rounded-xl border border-line bg-surface p-5">
+        <p class="text-xs text-bolt">2</p>
+        <p class="mt-2 text-sm text-slate-100">Paste your API key and the endpoint URL.</p>
+      </div>
+      <div class="rounded-xl border border-line bg-surface p-5">
+        <p class="text-xs text-bolt">3</p>
+        <p class="mt-2 text-sm text-slate-100">Test connection — it asks the endpoint what it actually serves.</p>
+      </div>
+      <div class="rounded-xl border border-line bg-surface p-5">
+        <p class="text-xs text-bolt">4</p>
+        <p class="mt-2 text-sm text-slate-100">Add the model names you want and go.</p>
+      </div>
+    </div>
+    <p class="mt-6 text-xs text-muted">
+      Keys stay in the app's private storage on your phone and go only to the provider you configured.
+      Switch model in the middle of a conversation when one is slow or rate-limited. Everything except the
+      model calls works with no network at all.
+    </p>
+  </section>
+
+  <section id="editor" class="border-y border-line/60 bg-surface/40">
+    <div class="mx-auto max-w-6xl px-5 py-14 md:py-20">
+      <p class="text-xs uppercase tracking-[0.2em] text-mint">Editor</p>
+      <h2 class="mt-3 text-2xl md:text-3xl tracking-tight text-slate-50">And when you want to type it yourself</h2>
+      <p class="mt-3 max-w-2xl text-sm text-muted">
+        An editor good enough to live in: multiple tabs, syntax highlighting for 26 languages and five
+        themes, symbol outline, go-to-line, find &amp; replace with match-case and whole-word, full undo and
+        redo, word wrap and bracket matching. Images and SVGs preview instead of dumping text on you.
+        Select a block, tap <span class="text-slate-200">Ask Agent</span>, and it answers about that code.
+      </p>
+    </div>
+  </section>
+
+  <section id="build" class="mx-auto max-w-6xl px-5 py-14 md:py-20">
+    <p class="text-xs uppercase tracking-[0.2em] text-mint">What you can build</p>
+    <h2 class="mt-3 text-2xl md:text-3xl tracking-tight text-slate-50">From small fixes to whole projects</h2>
+    <div class="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div class="rounded-xl border border-line bg-surface p-5">
+        <h3 class="text-sm text-slate-50">Web apps and sites</h3>
+        <p class="mt-2 text-sm text-muted">Node front-end projects — React, Vue, Next.js and friends — built, served and previewed on the phone.</p>
+      </div>
+      <div class="rounded-xl border border-line bg-surface p-5">
+        <h3 class="text-sm text-slate-50">APIs and backends</h3>
+        <p class="mt-2 text-sm text-muted">Python, Go, PHP, Ruby or Node services: install dependencies, run the server, hit it, read the logs.</p>
+      </div>
+      <div class="rounded-xl border border-line bg-surface p-5">
+        <h3 class="text-sm text-slate-50">Scripts and automation</h3>
+        <p class="mt-2 text-sm text-muted">CLI tools, data clean-up, bots, cron-shaped jobs — the Linux environment is the runtime.</p>
+      </div>
+      <div class="rounded-xl border border-line bg-surface p-5">
+        <h3 class="text-sm text-slate-50">Codebases you inherited</h3>
+        <p class="mt-2 text-sm text-muted">Import it, ask it questions in plan mode, then make the change and test it.</p>
+      </div>
+      <div class="rounded-xl border border-line bg-surface p-5">
+        <h3 class="text-sm text-slate-50">Mobile projects</h3>
+        <p class="mt-2 text-sm text-muted">Gradle and Flutter projects open as projects with their own build and test actions wired up.</p>
+      </div>
+      <div class="rounded-xl border border-line bg-surface p-5">
+        <h3 class="text-sm text-slate-50">Work on the move</h3>
+        <p class="mt-2 text-sm text-muted">The bug came in after hours: review the diff, fix it, commit and push before you're back at a desk.</p>
+      </div>
+    </div>
+  </section>
+  <section id="screens" class="border-t border-line/60 bg-surface/40">
+    <div class="mx-auto max-w-6xl px-5 py-14 md:py-20">
+      <p class="text-xs uppercase tracking-[0.2em] text-mint">Screens</p>
+      <h2 class="mt-3 text-2xl md:text-3xl tracking-tight text-slate-50">One project, start to finish</h2>
+      <p class="mt-3 max-w-2xl text-sm text-muted">Tap any screen to open it full size — the same order you'd actually use them in.</p>
+
+      <div class="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4">
+        <figure class="shot-card relative overflow-hidden rounded-xl border border-line bg-ink">
+          <button type="button" class="shot-open block w-full text-left" aria-label="Open larger image: Agent session"
+                  data-src="/shots/agent-chat.png" data-title="Agent session"
+                  data-desc="Streaming answer with live tool cards and inline diffs.">
+            <img src="/shots/agent-chat.png" alt="Agentisco agent session screen" loading="lazy" class="aspect-[709/1536] w-full object-cover">
+            <span class="pointer-events-none absolute inset-x-0 bottom-0 block bg-gradient-to-t from-ink via-ink/85 to-transparent p-3">
+              <span class="block text-xs text-slate-50 sm:text-sm">Agent session</span>
+              <span class="mt-0.5 block text-[10px] leading-snug text-muted sm:text-xs">Live tool cards and diffs</span>
+            </span>
+          </button>
+        </figure>
+
+        <figure class="shot-card relative overflow-hidden rounded-xl border border-line bg-ink">
+          <button type="button" class="shot-open block w-full text-left" aria-label="Open larger image: Review the change"
+                  data-src="/shots/agent-review.png" data-title="Review the change"
+                  data-desc="Nothing destructive happens without your approval.">
+            <img src="/shots/agent-review.png" alt="Agentisco approval and diff review screen" loading="lazy" class="aspect-[709/1536] w-full object-cover">
+            <span class="pointer-events-none absolute inset-x-0 bottom-0 block bg-gradient-to-t from-ink via-ink/85 to-transparent p-3">
+              <span class="block text-xs text-slate-50 sm:text-sm">Review the change</span>
+              <span class="mt-0.5 block text-[10px] leading-snug text-muted sm:text-xs">Approve edits before they land</span>
+            </span>
+          </button>
+        </figure>
+
+        <figure class="shot-card relative overflow-hidden rounded-xl border border-line bg-ink">
+          <button type="button" class="shot-open block w-full text-left" aria-label="Open larger image: Linux terminal"
+                  data-src="/shots/terminal.png" data-title="Linux terminal"
+                  data-desc="An Ubuntu shell with apt, npm and whichever CLI the job needs.">
+            <img src="/shots/terminal.png" alt="Agentisco Linux terminal screen" loading="lazy" class="aspect-[709/1536] w-full object-cover">
+            <span class="pointer-events-none absolute inset-x-0 bottom-0 block bg-gradient-to-t from-ink via-ink/85 to-transparent p-3">
+              <span class="block text-xs text-slate-50 sm:text-sm">Linux terminal</span>
+              <span class="mt-0.5 block text-[10px] leading-snug text-muted sm:text-xs">Real shell, real packages</span>
+            </span>
+          </button>
+        </figure>
+
+        <figure class="shot-card relative overflow-hidden rounded-xl border border-line bg-ink">
+          <button type="button" class="shot-open block w-full text-left" aria-label="Open larger image: Run and build"
+                  data-src="/shots/run-build.png" data-title="Run &amp; build"
+                  data-desc="Install, build, test and run as one pipeline with live logs.">
+            <img src="/shots/run-build.png" alt="Agentisco run and build centre screen" loading="lazy" class="aspect-[709/1536] w-full object-cover">
+            <span class="pointer-events-none absolute inset-x-0 bottom-0 block bg-gradient-to-t from-ink via-ink/85 to-transparent p-3">
+              <span class="block text-xs text-slate-50 sm:text-sm">Run &amp; build</span>
+              <span class="mt-0.5 block text-[10px] leading-snug text-muted sm:text-xs">Pipeline with live output</span>
+            </span>
+          </button>
+        </figure>
+
+        <figure class="shot-card relative overflow-hidden rounded-xl border border-line bg-ink">
+          <button type="button" class="shot-open block w-full text-left" aria-label="Open larger image: Live preview"
+                  data-src="/shots/live-preview.png" data-title="Live preview"
+                  data-desc="The dev server you just started, rendered inside the app — or handed to your browser.">
+            <img src="/shots/live-preview.png" alt="Agentisco live web preview screen" loading="lazy" class="aspect-[709/1536] w-full object-cover">
+            <span class="pointer-events-none absolute inset-x-0 bottom-0 block bg-gradient-to-t from-ink via-ink/85 to-transparent p-3">
+              <span class="block text-xs text-slate-50 sm:text-sm">Live preview</span>
+              <span class="mt-0.5 block text-[10px] leading-snug text-muted sm:text-xs">Your site, running</span>
+            </span>
+          </button>
+        </figure>
+
+        <figure class="shot-card relative overflow-hidden rounded-xl border border-line bg-ink">
+          <button type="button" class="shot-open block w-full text-left" aria-label="Open larger image: Git"
+                  data-src="/shots/git.png" data-title="Git"
+                  data-desc="Changes, branches, stashes, tags, history and sync.">
+            <img src="/shots/git.png" alt="Agentisco Git screen" loading="lazy" class="aspect-[709/1536] w-full object-cover">
+            <span class="pointer-events-none absolute inset-x-0 bottom-0 block bg-gradient-to-t from-ink via-ink/85 to-transparent p-3">
+              <span class="block text-xs text-slate-50 sm:text-sm">Git</span>
+              <span class="mt-0.5 block text-[10px] leading-snug text-muted sm:text-xs">Stage, commit, sync</span>
+            </span>
+          </button>
+        </figure>
+
+        <figure class="shot-card relative overflow-hidden rounded-xl border border-line bg-ink">
+          <button type="button" class="shot-open block w-full text-left" aria-label="Open larger image: Editor"
+                  data-src="/shots/editor.png" data-title="Editor"
+                  data-desc="Tabs, highlighting and symbol outline over the files the agent touched.">
+            <img src="/shots/editor.png" alt="Agentisco code editor screen" loading="lazy" class="aspect-[709/1536] w-full object-cover">
+            <span class="pointer-events-none absolute inset-x-0 bottom-0 block bg-gradient-to-t from-ink via-ink/85 to-transparent p-3">
+              <span class="block text-xs text-slate-50 sm:text-sm">Editor</span>
+              <span class="mt-0.5 block text-[10px] leading-snug text-muted sm:text-xs">Edit it yourself</span>
+            </span>
+          </button>
+        </figure>
+
+        <figure class="shot-card relative overflow-hidden rounded-xl border border-line bg-ink">
+          <button type="button" class="shot-open block w-full text-left" aria-label="Open larger image: Providers"
+                  data-src="/shots/providers.png" data-title="Providers"
+                  data-desc="Add your key, test the endpoint, add the models you want.">
+            <img src="/shots/providers.png" alt="Agentisco AI provider setup screen" loading="lazy" class="aspect-[709/1536] w-full object-cover">
+            <span class="pointer-events-none absolute inset-x-0 bottom-0 block bg-gradient-to-t from-ink via-ink/85 to-transparent p-3">
+              <span class="block text-xs text-slate-50 sm:text-sm">Providers</span>
+              <span class="mt-0.5 block text-[10px] leading-snug text-muted sm:text-xs">Your key, your models</span>
+            </span>
+          </button>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <section id="download" class="border-t border-line/60">
+    <div class="mx-auto max-w-6xl px-5 py-14 md:py-20">
+      <h2 class="text-2xl md:text-3xl tracking-tight text-slate-50">Install Agentisco</h2>
       <p class="mt-2 text-sm text-muted">
-        The <span class="text-slate-200">release</span> build is the signed build published for general use.
-        Version and checksum below come from the update service, not from this page.
+        The current release, read live from the download service. Install it, add your model in
+        <span class="text-slate-200">Providers</span>, import a project, and start.
       </p>
       <div class="mt-8 grid gap-4 md:max-w-xl">
-        <article class="rounded-xl border border-line bg-ink p-5" data-channel="release">
+        <article class="rounded-xl border border-line bg-surface p-5" data-channel="release">
           <div class="flex items-center justify-between">
-            <h3 class="text-sm text-slate-50">Release build</h3>
+            <h3 class="text-sm text-slate-50">Latest for Android</h3>
             <span class="state rounded-full border border-line px-2 py-0.5 text-[11px] text-muted">checking…</span>
           </div>
           <p class="mt-3 text-2xl text-mint version">—</p>
           <dl class="mt-4 space-y-1 text-xs text-muted">
-            <div class="flex justify-between gap-4"><dt>Published</dt><dd class="published text-slate-300">—</dd></div>
+            <div class="flex justify-between gap-4"><dt>Released</dt><dd class="published text-slate-300">—</dd></div>
             <div class="flex justify-between gap-4"><dt>Size</dt><dd class="size text-slate-300">—</dd></div>
             <div class="flex justify-between gap-4"><dt>SHA-256</dt><dd class="digest text-slate-300 truncate max-w-[16rem]">—</dd></div>
           </dl>
@@ -139,17 +631,34 @@
       </div>
       <p id="download-notice" class="mt-6 hidden rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs text-amber-200"></p>
       <p class="mt-6 text-xs text-muted">
-        Installing a build from outside the Play store requires allowing unknown sources for the browser you used.
-        The app verifies every download itself before offering to install.
+        Android will ask you to allow installs from this browser the first time — that's the normal
+        sideload prompt. Agentisco requires Android 7.0+ on arm64-v8a or armeabi-v7a.
       </p>
     </div>
   </section>
 </main>
 
+</main>
+
+<div id="lightbox" class="fixed inset-0 z-50 hidden items-center justify-center bg-ink/95 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="Screenshot viewer">
+  <button type="button" id="lb-close" class="absolute right-4 top-4 rounded-lg border border-line px-3 py-1.5 text-xs text-slate-200 hover:bg-raised">Close · Esc</button>
+  <button type="button" id="lb-prev" class="absolute left-2 top-1/2 -translate-y-1/2 rounded-lg border border-line px-3 py-2 text-sm text-slate-200 hover:bg-raised">←</button>
+  <button type="button" id="lb-next" class="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg border border-line px-3 py-2 text-sm text-slate-200 hover:bg-raised">→</button>
+  <figure class="max-h-full text-center">
+    <img id="lb-img" src="" alt="" class="mx-auto max-h-[78vh] w-auto rounded-xl border border-line object-contain">
+    <figcaption class="mt-3">
+      <span id="lb-title" class="block text-sm text-slate-50"></span>
+      <span id="lb-desc" class="mt-1 block text-xs text-muted"></span>
+    </figcaption>
+  </figure>
+</div>
+
+
 <footer class="mx-auto max-w-6xl px-5 py-10 text-xs text-muted">
   <div class="flex flex-wrap items-center justify-between gap-3">
     <span>Agentisco · <span id="footer-version">version served by the update API</span></span>
     <span class="flex gap-4">
+      <a class="hover:text-slate-200" href="/v1/updates/release/latest">release feed</a>
       <a class="hover:text-slate-200" href="/health">health</a>
       <a class="hover:text-slate-200" href="/ready">ready</a>
     </span>
@@ -235,6 +744,85 @@
   }
 
   Promise.allSettled(cards.map(load));
+})();
+</script>
+
+<script>
+(function () {
+  'use strict';
+
+  var box = document.getElementById('lightbox');
+  var img = document.getElementById('lb-img');
+  var title = document.getElementById('lb-title');
+  var desc = document.getElementById('lb-desc');
+  var shots = Array.prototype.slice.call(document.querySelectorAll('.shot-open'));
+  var shown = -1;
+
+  function show(index) {
+    var shot = shots[(index + shots.length) % shots.length];
+    shown = (index + shots.length) % shots.length;
+    img.src = shot.dataset.src;
+    img.alt = shot.dataset.title + ' — ' + shot.dataset.desc;
+    title.textContent = shot.dataset.title;
+    desc.textContent = shot.dataset.desc;
+    box.classList.remove('hidden');
+    box.classList.add('flex');
+    document.body.classList.add('overflow-hidden');
+  }
+
+  function hide() {
+    box.classList.add('hidden');
+    box.classList.remove('flex');
+    document.body.classList.remove('overflow-hidden');
+    if (shown >= 0) shots[shown].focus();
+  }
+
+  shots.forEach(function (shot, index) {
+    shot.addEventListener('click', function () { show(index); });
+  });
+
+  document.getElementById('lb-close').addEventListener('click', hide);
+  document.getElementById('lb-prev').addEventListener('click', function () { show(shown - 1); });
+  document.getElementById('lb-next').addEventListener('click', function () { show(shown + 1); });
+  box.addEventListener('click', function (event) { if (event.target === box) hide(); });
+  document.addEventListener('keydown', function (event) {
+    if (box.classList.contains('hidden')) return;
+    if (event.key === 'Escape') hide();
+    if (event.key === 'ArrowLeft') show(shown - 1);
+    if (event.key === 'ArrowRight') show(shown + 1);
+  });
+})();
+</script>
+
+<script>
+(function () {
+  'use strict';
+
+  var toggle = document.getElementById('menu-toggle');
+  var menu = document.getElementById('mobile-menu');
+  var iconOpen = document.getElementById('menu-icon-open');
+  var iconClose = document.getElementById('menu-icon-close');
+
+  function setMenu(open) {
+    menu.classList.toggle('hidden', !open);
+    iconOpen.classList.toggle('hidden', open);
+    iconClose.classList.toggle('hidden', !open);
+    toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    toggle.setAttribute('aria-label', open ? 'Close menu' : 'Open menu');
+  }
+
+  toggle.addEventListener('click', function () {
+    setMenu(menu.classList.contains('hidden'));
+  });
+  menu.addEventListener('click', function (event) {
+    if (event.target.closest('a')) setMenu(false);
+  });
+  document.addEventListener('keydown', function (event) {
+    if (event.key === 'Escape' && !menu.classList.contains('hidden')) {
+      setMenu(false);
+      toggle.focus();
+    }
+  });
 })();
 </script>
 </body>
