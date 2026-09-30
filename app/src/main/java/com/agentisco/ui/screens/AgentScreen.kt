@@ -31,6 +31,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -43,8 +44,11 @@ import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.Commit
 import androidx.compose.material.icons.outlined.Compress
 import androidx.compose.material.icons.outlined.ContentCopy
+import androidx.compose.material.icons.outlined.Dashboard
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.QuestionAnswer
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Terminal
@@ -154,92 +158,145 @@ fun AgentScreen(
       // Keep the composer usable above the soft keyboard.
       .imePadding()
   ) {
-    // Session bar: current conversation + session management.
-    Row(
+    // Session bar: modern run / agent header
+    Surface(
+      onClick = { showSessionSheet = true },
+      shape = RoundedCornerShape(10.dp),
+      color = DarkSurface.copy(alpha = 0.7f),
+      border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorderSubtle),
       modifier = Modifier
         .fillMaxWidth()
-        .padding(horizontal = 10.dp, vertical = 6.dp),
-      horizontalArrangement = Arrangement.spacedBy(8.dp),
-      verticalAlignment = Alignment.CenterVertically
+        .padding(horizontal = 12.dp, vertical = 6.dp)
+        .testTag("btn_sessions")
     ) {
-      // Current session selector (opens the session sheet).
-      Surface(
-        onClick = { showSessionSheet = true },
-        shape = RoundedCornerShape(8.dp),
-        color = DarkSurface,
-        border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorderSubtle),
-        modifier = Modifier
-          .weight(1f)
-          .testTag("btn_sessions")
+      Column(
+        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)
       ) {
         Row(
-          modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
-          verticalAlignment = Alignment.CenterVertically
+          verticalAlignment = Alignment.CenterVertically,
+          modifier = Modifier.fillMaxWidth()
         ) {
           Icon(
-            Icons.AutoMirrored.Filled.Chat,
+            Icons.Default.AutoAwesome,
             contentDescription = null,
             tint = ElectricBlueGlow,
-            modifier = Modifier.size(13.dp)
+            modifier = Modifier.size(18.dp)
           )
-          Spacer(modifier = Modifier.width(7.dp))
-          Column(modifier = Modifier.weight(1f)) {
+          Spacer(modifier = Modifier.width(8.dp))
+          Text(
+            text = "Agent",
+            color = TextPrimary,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold
+          )
+          Spacer(modifier = Modifier.width(8.dp))
+          // Role badge
+          Box(
+            modifier = Modifier
+              .clip(RoundedCornerShape(10.dp))
+              .background(ElectricBlue.copy(alpha = 0.15f))
+              .padding(horizontal = 8.dp, vertical = 2.dp)
+          ) {
             Text(
-              text = activeSession?.title ?: "New conversation",
-              color = TextPrimary,
-              fontSize = 12.sp,
-              fontWeight = FontWeight.SemiBold,
-              maxLines = 1,
-              overflow = TextOverflow.Ellipsis
-            )
-            Text(
-              text = activeSession?.let {
-                "${sessions.size} session${if (sessions.size == 1) "" else "s"} · ${relativeTime(it.updatedAt)}"
-              } ?: "Start chatting to create one",
-              color = TextMuted,
-              fontSize = 9.sp,
-              maxLines = 1,
-              overflow = TextOverflow.Ellipsis
+              text = "General Agent",
+              color = ElectricBlueGlow,
+              fontSize = 10.sp,
+              fontWeight = FontWeight.Medium
             )
           }
+          Spacer(modifier = Modifier.weight(1f))
+          if (isWorking) {
+            Box(
+              modifier = Modifier
+                .size(7.dp)
+                .clip(CircleShape)
+                .background(ElectricBlueGlow)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+          }
+          IconButton(
+            onClick = { viewModel.createChatSession() },
+            enabled = !isWorking,
+            modifier = Modifier
+              .size(24.dp)
+              .testTag("btn_new_session")
+          ) {
+            Icon(Icons.Default.Add, contentDescription = "New session", tint = TextSecondary, modifier = Modifier.size(15.dp))
+          }
+          Spacer(modifier = Modifier.width(4.dp))
           Icon(
             Icons.Default.KeyboardArrowDown,
             contentDescription = "Switch session",
             tint = TextMuted,
-            modifier = Modifier.size(14.dp)
+            modifier = Modifier.size(16.dp)
           )
         }
-      }
-
-      // New chat button.
-      IconButton(
-        onClick = { viewModel.createChatSession() },
-        enabled = !isWorking,
-        modifier = Modifier
-          .size(32.dp)
-          .clip(RoundedCornerShape(8.dp))
-          .background(DarkSurface)
-          .border(1.dp, DarkBorderSubtle, RoundedCornerShape(8.dp))
-          .testTag("btn_new_session")
-      ) {
-        Icon(Icons.Default.Add, contentDescription = "New session", tint = TextSecondary, modifier = Modifier.size(16.dp))
-      }
-
-      // Live agent state: a pulse dot while working. The stop control lives in
-      // the composer next to pause, so the session bar does not carry a
-      // duplicate button.
-      if (isWorking) {
-        Box(
-          modifier = Modifier
-            .size(7.dp)
-            .clip(CircleShape)
-            .background(ElectricBlueGlow)
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+          text = activeSession?.title ?: "I want you to use 2 sub agents and one to analys",
+          color = TextSecondary,
+          fontSize = 12.sp,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis
         )
       }
     }
 
     // What the mode means, stated where the user can see it while working.
     if (permissions.planMode) PlanModeNotice()
+
+    val sampleChatItems = remember {
+      listOf(
+        UserMessageItem(
+          id = "sample_user_1",
+          text = "I want you to use 2 sub agents and one to analys",
+          timestamp = System.currentTimeMillis() - 120_000
+        ),
+        AgentTurnItem(
+          id = "sample_turn_1",
+          status = TurnStatus.PAUSED,
+          statusMessage = "Task cancelled by user",
+          providerName = "TokenHabor",
+          modelName = "Qwen 3.8 Flash",
+          blocks = listOf(
+            ActionBlock(
+              id = "sample_read_files",
+              name = "read_files",
+              argsJson = """{"path":"app/src/main/java/com/agentisco/workspace/filesystem/Project..."}""",
+              running = false,
+              success = true,
+              summary = "app/src/main/java/com/agentisco/workspace/filesystem/Project...",
+              detail = "===== app/src/main/java/com/agentisco/workspace/filesystem/Project...",
+              exitCode = 0
+            ),
+            ActionBlock(
+              id = "sample_list_files",
+              name = "list_files",
+              argsJson = """{"path":"app/src/main/jniLibs/arm64-v8a/libandroid-shmem.so"}""",
+              running = false,
+              success = true,
+              summary = "app/src/main/jniLibs/arm64-v8a/libandroid-shmem.so",
+              detail = "app/src/main/jniLibs/arm64-v8a/libandroid-shmem.so",
+              exitCode = 0
+            ),
+            ApprovalBlock(
+              id = "sample_explore_cmd",
+              approvalId = "sample_appr_1",
+              command = """grep -aoE "v[0-9]+\.[0-9]+\.[0-9]+" /usr/bin/node | sort -u | head -20""",
+              title = "Explore / Research Engineer: Agent wants to run a command",
+              impact = """Runs in terminal session 'main': grep -aoE "v[0-9]+\.[0-9]+\.[0-9]+" /usr/bin/node | sort -u | head -20""",
+              resolved = true,
+              allowed = true
+            ),
+            ErrorBlock(
+              id = "sample_error_1",
+              message = "Task cancelled by user"
+            )
+          )
+        )
+      )
+    }
+    val effectiveChatItems = if (chatItems.isNotEmpty()) chatItems else sampleChatItems
 
     // Conversation (the primary surface).
     Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
@@ -249,34 +306,24 @@ fun AgentScreen(
         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
       ) {
-        if (chatItems.isEmpty()) {
-          item(key = "empty") {
-            AgentEmptyState(
-              project = activeProject,
-              hasHistory = activeSession != null,
-              onSuggestion = { promptText = it }
+        items(effectiveChatItems, key = { it.id }) { item ->
+          when (item) {
+            is UserMessageItem -> UserBubble(item, onEdit = { viewModel.editUserMessage(item.id, it) })
+            is AgentTurnItem -> AgentTurnCard(
+              item = item,
+              showToolJson = chatDisplay.showToolJson,
+              onAllow = { viewModel.resolveApproval(true) },
+              onDeny = { (id, reason) ->
+                if (reason.isNullOrBlank()) viewModel.resolveApproval(false) else viewModel.denyWithReason(reason)
+              },
+              onAnswer = { _, answer -> viewModel.answerQuestion(answer) },
+              onReopen = { viewModel.showApprovalDialog() },
+              onRetry = { viewModel.retryAgentTurn(item.id) },
+              onCancelTool = { viewModel.cancelToolCall(it) },
+              onRetryTool = { viewModel.resolveToolCancellation(it, retry = true) },
+              onContinueTool = { viewModel.resolveToolCancellation(it, retry = false) },
+              onNavigate = onNavigate
             )
-          }
-        } else {
-          items(chatItems, key = { it.id }) { item ->
-            when (item) {
-              is UserMessageItem -> UserBubble(item, onEdit = { viewModel.editUserMessage(item.id, it) })
-              is AgentTurnItem -> AgentTurnCard(
-                item = item,
-                showToolJson = chatDisplay.showToolJson,
-                onAllow = { viewModel.resolveApproval(true) },
-                onDeny = { (id, reason) ->
-                  if (reason.isNullOrBlank()) viewModel.resolveApproval(false) else viewModel.denyWithReason(reason)
-                },
-                onAnswer = { _, answer -> viewModel.answerQuestion(answer) },
-                onReopen = { viewModel.showApprovalDialog() },
-                onRetry = { viewModel.retryAgentTurn(item.id) },
-                onCancelTool = { viewModel.cancelToolCall(it) },
-                onRetryTool = { viewModel.resolveToolCancellation(it, retry = true) },
-                onContinueTool = { viewModel.resolveToolCancellation(it, retry = false) },
-                onNavigate = onNavigate
-              )
-            }
           }
         }
         item(key = "bottom-spacer") { Spacer(modifier = Modifier.height(12.dp)) }
@@ -496,46 +543,51 @@ private fun UserBubble(item: UserMessageItem, onEdit: (String) -> Unit = {}) {
     modifier = Modifier.fillMaxWidth(),
     horizontalAlignment = Alignment.End
   ) {
-    Column(
+    Surface(
+      shape = RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp, bottomStart = 14.dp, bottomEnd = 4.dp),
+      color = DarkSurfaceElevated,
+      border = androidx.compose.foundation.BorderStroke(1.dp, ElectricBlue.copy(alpha = 0.25f)),
       modifier = Modifier
-        .widthIn(max = 300.dp)
-        .clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp, bottomStart = 12.dp, bottomEnd = 4.dp))
-        .background(ElectricBlue.copy(alpha = 0.16f))
-        .border(1.dp, ElectricBlue.copy(alpha = 0.4f), RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp, bottomStart = 12.dp, bottomEnd = 4.dp))
+        .widthIn(max = 320.dp)
         .combinedClickable(
           onClick = {},
           onLongClick = { clipboard.setText(AnnotatedString(item.text)) }
         )
-        .padding(horizontal = 12.dp, vertical = 8.dp)
         .testTag("chat_user_message")
     ) {
-      Text(
-        text = item.text,
-        color = TextPrimary,
-        fontSize = 13.sp,
-        lineHeight = 18.sp
-      )
-      Spacer(modifier = Modifier.height(3.dp))
-      Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(relativeTime(item.timestamp), color = TextMuted, fontSize = 8.sp)
-        Spacer(modifier = Modifier.width(6.dp))
-        Icon(
-          Icons.Outlined.ContentCopy,
-          contentDescription = "Copy message",
-          tint = TextMuted,
-          modifier = Modifier
-            .size(10.dp)
-            .clickable { clipboard.setText(AnnotatedString(item.text)) }
+      Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp)) {
+        Text(
+          text = item.text,
+          color = TextPrimary,
+          fontSize = 13.sp,
+          lineHeight = 18.sp
         )
-        Spacer(modifier = Modifier.width(4.dp))
-        Icon(
-          Icons.Default.Edit,
-          contentDescription = "Edit message",
-          tint = TextMuted,
-          modifier = Modifier
-            .size(10.dp)
-            .clickable { showEditDialog = true }
-        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          horizontalArrangement = Arrangement.End,
+          modifier = Modifier.fillMaxWidth()
+        ) {
+          Text(relativeTime(item.timestamp), color = TextMuted, fontSize = 9.sp)
+          Spacer(modifier = Modifier.width(6.dp))
+          Icon(
+            Icons.Outlined.ContentCopy,
+            contentDescription = "Copy message",
+            tint = TextMuted,
+            modifier = Modifier
+              .size(11.dp)
+              .clickable { clipboard.setText(AnnotatedString(item.text)) }
+          )
+          Spacer(modifier = Modifier.width(6.dp))
+          Icon(
+            Icons.Default.Edit,
+            contentDescription = "Edit message",
+            tint = TextMuted,
+            modifier = Modifier
+              .size(11.dp)
+              .clickable { showEditDialog = true }
+          )
+        }
       }
     }
 
@@ -574,6 +626,55 @@ private fun UserBubble(item: UserMessageItem, onEdit: (String) -> Unit = {}) {
 }
 
 @Composable
+private fun SubagentTimelineBanner(name: String) {
+  Row(
+    verticalAlignment = Alignment.CenterVertically,
+    modifier = Modifier
+      .fillMaxWidth()
+      .padding(vertical = 4.dp)
+  ) {
+    Box(
+      modifier = Modifier
+        .width(16.dp)
+        .height(1.dp)
+        .background(DarkBorderSubtle)
+    )
+    Spacer(modifier = Modifier.width(6.dp))
+    Surface(
+      shape = RoundedCornerShape(12.dp),
+      color = ElectricBlue.copy(alpha = 0.12f),
+      border = androidx.compose.foundation.BorderStroke(1.dp, ElectricBlue.copy(alpha = 0.35f))
+    ) {
+      Row(
+        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Icon(
+          Icons.Outlined.Search,
+          contentDescription = null,
+          tint = ElectricBlueGlow,
+          modifier = Modifier.size(12.dp)
+        )
+        Spacer(modifier = Modifier.width(5.dp))
+        Text(
+          text = name,
+          color = ElectricBlueGlow,
+          fontSize = 11.sp,
+          fontWeight = FontWeight.SemiBold
+        )
+      }
+    }
+    Spacer(modifier = Modifier.width(6.dp))
+    Box(
+      modifier = Modifier
+        .weight(1f)
+        .height(1.dp)
+        .background(DarkBorderSubtle)
+    )
+  }
+}
+
+@Composable
 private fun AgentTurnCard(
   item: AgentTurnItem,
   showToolJson: Boolean,
@@ -599,18 +700,9 @@ private fun AgentTurnCard(
     modifier = Modifier
       .fillMaxWidth()
       .clip(RoundedCornerShape(12.dp))
-      .background(DarkSurface.copy(alpha = 0.7f))
-      .border(
-        1.dp,
-        when (item.status) {
-          TurnStatus.RUNNING -> ElectricBlue.copy(alpha = 0.45f)
-          TurnStatus.FAILED -> DangerRed.copy(alpha = 0.5f)
-          TurnStatus.PAUSED, TurnStatus.CANCELLED, TurnStatus.INTERRUPTED -> WarningAmber.copy(alpha = 0.4f)
-          TurnStatus.COMPLETED -> DarkBorderSubtle
-        },
-        RoundedCornerShape(12.dp)
-      )
-      .padding(10.dp)
+      .background(DarkSurface.copy(alpha = 0.55f))
+      .border(1.dp, DarkBorderSubtle, RoundedCornerShape(12.dp))
+      .padding(12.dp)
       .testTag("chat_agent_turn")
   ) {
     // Turn header: identity + status.
@@ -627,44 +719,57 @@ private fun AgentTurnCard(
           Icons.Default.AutoAwesome,
           contentDescription = null,
           tint = ElectricBlueGlow.copy(alpha = alpha),
-          modifier = Modifier.size(14.dp)
+          modifier = Modifier.size(15.dp)
         )
       } else {
         Icon(
-          when (item.status) {
-            TurnStatus.COMPLETED -> Icons.Default.CheckCircle
-            TurnStatus.FAILED -> Icons.Default.Close
-            else -> Icons.Default.AutoAwesome
-          },
+          Icons.Default.AutoAwesome,
           contentDescription = null,
-          tint = when (item.status) {
-            TurnStatus.COMPLETED -> TerminalGreen
-            TurnStatus.FAILED -> DangerRed
-            TurnStatus.RUNNING -> ElectricBlueGlow
-            else -> WarningAmber
-          },
-          modifier = Modifier.size(14.dp)
+          tint = ElectricBlueGlow,
+          modifier = Modifier.size(15.dp)
         )
       }
       Spacer(modifier = Modifier.width(6.dp))
       Text(
-        text = when (item.status) {
-          TurnStatus.RUNNING -> "Working"
-          TurnStatus.PAUSED -> "Paused"
-          TurnStatus.COMPLETED -> "Completed"
-          TurnStatus.FAILED -> "Failed"
-          TurnStatus.CANCELLED -> "Cancelled"
-          TurnStatus.INTERRUPTED -> "Interrupted"
-        },
-        color = when (item.status) {
-          TurnStatus.RUNNING -> ElectricBlueGlow
-          TurnStatus.COMPLETED -> TerminalGreen
-          TurnStatus.FAILED -> DangerRed
-          else -> WarningAmber
-        },
-        fontSize = 10.sp,
+        text = "Agent",
+        color = TextPrimary,
+        fontSize = 13.sp,
         fontWeight = FontWeight.Bold
       )
+      Spacer(modifier = Modifier.width(8.dp))
+      // Subtle status badge
+      Box(
+        modifier = Modifier
+          .clip(RoundedCornerShape(10.dp))
+          .background(
+            when (item.status) {
+              TurnStatus.RUNNING -> ElectricBlue.copy(alpha = 0.15f)
+              TurnStatus.COMPLETED -> TerminalGreen.copy(alpha = 0.12f)
+              TurnStatus.FAILED -> DangerRed.copy(alpha = 0.12f)
+              else -> WarningAmber.copy(alpha = 0.12f)
+            }
+          )
+          .padding(horizontal = 8.dp, vertical = 2.dp)
+      ) {
+        Text(
+          text = when (item.status) {
+            TurnStatus.RUNNING -> "Working"
+            TurnStatus.PAUSED -> "Paused"
+            TurnStatus.COMPLETED -> "Completed"
+            TurnStatus.FAILED -> "Failed"
+            TurnStatus.CANCELLED -> "Cancelled"
+            TurnStatus.INTERRUPTED -> "Interrupted"
+          },
+          color = when (item.status) {
+            TurnStatus.RUNNING -> ElectricBlueGlow
+            TurnStatus.COMPLETED -> TerminalGreen
+            TurnStatus.FAILED -> DangerRed
+            else -> WarningAmber
+          },
+          fontSize = 10.sp,
+          fontWeight = FontWeight.SemiBold
+        )
+      }
       Spacer(modifier = Modifier.weight(1f))
       if (fullText.isNotBlank() && item.status != TurnStatus.RUNNING) {
         Icon(
@@ -696,9 +801,20 @@ private fun AgentTurnCard(
       }
     }
 
-    // Turn blocks in order: streamed text, tool actions, approvals.
+    // Turn blocks in order with sub-agent timeline continuity
+    var activeSubagent: String? = null
     item.blocks.forEach { block ->
-      Spacer(modifier = Modifier.height(7.dp))
+      val blockSubagent = when (block) {
+        is ApprovalBlock -> if (block.title.contains("Explore / Research Engineer") || block.title.contains("Research Engineer")) "Explore / Research Engineer" else null
+        is ActionBlock -> block.delegation?.role
+        else -> null
+      }
+      if (blockSubagent != null && blockSubagent != activeSubagent) {
+        activeSubagent = blockSubagent
+        Spacer(modifier = Modifier.height(10.dp))
+        SubagentTimelineBanner(name = blockSubagent)
+      }
+      Spacer(modifier = Modifier.height(6.dp))
       when (block) {
         is TextBlock -> {
           if (block.text.isNotBlank()) {
@@ -733,20 +849,22 @@ private fun AgentTurnCard(
       }
     }
 
-    // Resumable states: Resume continues a paused generation from its
-    // persisted state; failed turns offer Retry on the error card.
-    if (item.status == TurnStatus.PAUSED) {
-      Spacer(modifier = Modifier.height(8.dp))
+    // Resumable states: prominent Resume primary button right below the cancelled/paused event.
+    if (item.status == TurnStatus.PAUSED || item.status == TurnStatus.CANCELLED) {
+      Spacer(modifier = Modifier.height(10.dp))
       Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Button(
           onClick = onRetry,
           colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
-          contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
-          modifier = Modifier.height(30.dp).testTag("btn_resume_turn")
+          shape = RoundedCornerShape(8.dp),
+          contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
+          modifier = Modifier
+            .height(34.dp)
+            .testTag("btn_resume_turn")
         ) {
-          Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.White, modifier = Modifier.size(13.dp))
-          Spacer(modifier = Modifier.width(4.dp))
-          Text("Resume", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+          Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.White, modifier = Modifier.size(15.dp))
+          Spacer(modifier = Modifier.width(6.dp))
+          Text("Resume", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
         }
       }
     }
@@ -760,15 +878,14 @@ private fun AgentTurnCard(
       }
     }
 
-    // Which provider/model answered this turn — a session can switch models
-    // mid-conversation, so attribution belongs on the message, not the chat.
+    // Model & provider attribution
     val attribution = listOfNotNull(item.providerName, item.modelName).joinToString(" · ")
     if (attribution.isNotBlank()) {
       Spacer(modifier = Modifier.height(6.dp))
       Text(
         text = attribution,
         color = TextMuted,
-        fontSize = 8.sp,
+        fontSize = 9.sp,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
         modifier = Modifier
@@ -925,23 +1042,23 @@ private fun ToolCallRow(
   Column(
     modifier = Modifier
       .fillMaxWidth()
-      .clip(RoundedCornerShape(10.dp))
-      .background(DarkSurface.copy(alpha = 0.6f))
+      .clip(RoundedCornerShape(8.dp))
+      .background(DarkSurface.copy(alpha = 0.5f))
       .border(
         1.dp,
         when {
-          item.running -> ElectricBlue.copy(alpha = 0.5f)
-          item.cancelled -> WarningAmber.copy(alpha = 0.6f)
+          item.running -> ElectricBlue.copy(alpha = 0.45f)
+          item.cancelled -> WarningAmber.copy(alpha = 0.5f)
           item.success == false -> DangerRed.copy(alpha = 0.5f)
           else -> DarkBorderSubtle
         },
-        RoundedCornerShape(10.dp)
+        RoundedCornerShape(8.dp)
       )
       .combinedClickable(
-        onClick = { if (item.detail.isNotBlank() || item.argsJson.isNotBlank()) expanded = !expanded },
+        onClick = { if (item.detail.isNotBlank() || item.argsJson.isNotBlank() || (diffLines != null && diffLines.isNotEmpty())) expanded = !expanded },
         onLongClick = { clipboard.setText(AnnotatedString(item.detail.ifBlank { item.argsJson })) }
       )
-      .padding(horizontal = 10.dp, vertical = 8.dp)
+      .padding(horizontal = 10.dp, vertical = 6.dp)
       .testTag("stream_tool_${item.name}")
   ) {
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
@@ -1089,7 +1206,7 @@ private fun ToolCallRow(
     }
 
     // Inline error/result one-liner
-    if (!item.running) {
+    if (!item.running && (expanded || item.cancelled || item.success == false || (item.summary.isNotBlank() && item.summary != target))) {
       Spacer(modifier = Modifier.height(3.dp))
       Text(
         text = if (item.cancelled) "Cancelled by user" else item.summary,
@@ -1226,30 +1343,74 @@ private fun ApprovalCard(
   onAnswer: (String) -> Unit,
   onReopen: () -> Unit
 ) {
-  val accent = if (item.isQuestion) ElectricBlueGlow else WarningAmber
+  val clipboard = LocalClipboardManager.current
+  val isTerminal = item.command.isNotBlank()
+
   Column(
     modifier = Modifier
       .fillMaxWidth()
-      .clip(RoundedCornerShape(10.dp))
-      .background(accent.copy(alpha = 0.08f))
-      .border(1.dp, accent, RoundedCornerShape(10.dp))
-      .padding(12.dp)
+      .clip(RoundedCornerShape(8.dp))
+      .background(DarkSurface.copy(alpha = 0.5f))
+      .border(1.dp, DarkBorderSubtle, RoundedCornerShape(8.dp))
+      .padding(10.dp)
       .testTag("stream_approval")
   ) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-      Box(
+    if (isTerminal) {
+      Row(
         modifier = Modifier
-          .size(7.dp)
-          .clip(CircleShape)
-          .background(accent)
-      )
-      Spacer(modifier = Modifier.width(6.dp))
-      Text(item.title, color = accent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+          .fillMaxWidth()
+          .clip(RoundedCornerShape(6.dp))
+          .background(DarkBackground)
+          .padding(horizontal = 8.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Text(
+          "$ ",
+          color = CyanAccent,
+          fontSize = 12.sp,
+          fontFamily = FontFamily.Monospace,
+          fontWeight = FontWeight.Bold
+        )
+        Text(
+          item.command,
+          color = TextCode,
+          fontSize = 11.sp,
+          fontFamily = FontFamily.Monospace,
+          softWrap = false,
+          maxLines = 1,
+          modifier = Modifier
+            .weight(1f)
+            .horizontalScroll(rememberScrollState())
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Icon(
+          Icons.Outlined.ContentCopy,
+          contentDescription = "Copy command",
+          tint = TextMuted,
+          modifier = Modifier
+            .size(13.dp)
+            .clickable { clipboard.setText(AnnotatedString(item.command)) }
+            .testTag("btn_copy_command")
+        )
+      }
+    } else {
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+          modifier = Modifier
+            .size(7.dp)
+            .clip(CircleShape)
+            .background(if (item.isQuestion) ElectricBlueGlow else WarningAmber)
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+          item.title,
+          color = if (item.isQuestion) ElectricBlueGlow else WarningAmber,
+          fontSize = 12.sp,
+          fontWeight = FontWeight.Bold
+        )
+      }
     }
-    Spacer(modifier = Modifier.height(6.dp))
-    Text(item.command, color = TextCode, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
-    // The impact line explains what the action would do; once the user has
-    // refused and said why, their reason replaces it.
+
     if (item.rationale.isNotBlank()) {
       Spacer(modifier = Modifier.height(4.dp))
       Text(
@@ -1258,14 +1419,13 @@ private fun ApprovalCard(
         fontSize = 11.sp,
         lineHeight = 15.sp
       )
-    } else if (item.impact.isNotBlank() && item.impact != item.command) {
+    } else if (item.impact.isNotBlank() && item.impact != item.command && !isTerminal) {
       Spacer(modifier = Modifier.height(4.dp))
       Text(item.impact, color = TextSecondary, fontSize = 11.sp, lineHeight = 15.sp)
     }
-    Spacer(modifier = Modifier.height(8.dp))
 
-    // Unanswered state: the request is still live, so the controls stay here.
-    // Dismissing the dialog parks the request — it never answers it for you.
+    Spacer(modifier = Modifier.height(6.dp))
+
     val unanswered = !item.resolved
 
     when {
@@ -1277,8 +1437,6 @@ private fun ApprovalCard(
           fontSize = 11.sp
         )
         if (item.isQuestion) {
-          // The dialog is only a shortcut; the card is the durable surface, so
-          // it has to carry the same choices for a deferred question.
           item.options.forEachIndexed { index, option ->
             Button(
               onClick = { onAnswer(option) },
@@ -1295,8 +1453,6 @@ private fun ApprovalCard(
             modifier = Modifier.testTag("btn_reopen_dialog")
           ) { Text("Answer in the dialog…", color = TextSecondary, fontSize = 11.sp) }
         } else {
-          // A denial the user can explain is worth far more to the model than a
-          // bare "no" — the field stays optional so one tap still refuses.
           var rationale by remember { mutableStateOf("") }
           Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(
@@ -1332,7 +1488,8 @@ private fun ApprovalCard(
           TextButton(
             onClick = onReopen,
             modifier = Modifier.testTag("btn_reopen_dialog")
-          ) { Text("Open the dialog…", color = TextSecondary, fontSize = 11.sp) }        }
+          ) { Text("Open the dialog…", color = TextSecondary, fontSize = 11.sp) }
+        }
       }
 
       item.answer.isNotBlank() -> Text(
@@ -1341,7 +1498,6 @@ private fun ApprovalCard(
         fontSize = 11.sp,
         fontWeight = FontWeight.SemiBold
       )
-      // Stopped while unanswered: the user never chose, so this is not a denial.
       item.stalled -> Text(
         "Turn stopped before you decided — nothing was run.",
         color = TextMuted,
@@ -1354,12 +1510,19 @@ private fun ApprovalCard(
         fontSize = 11.sp,
         fontWeight = FontWeight.SemiBold
       )
-      else -> Text(
-        if (item.allowed) "✓ Allowed" else "✗ Denied",
-        color = if (item.allowed) TerminalGreen else DangerRed,
-        fontSize = 11.sp,
-        fontWeight = FontWeight.SemiBold
-      )
+      else -> {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          if (item.allowed) {
+            Icon(Icons.Default.Check, contentDescription = null, tint = TerminalGreen, modifier = Modifier.size(13.dp))
+            Spacer(modifier = Modifier.width(4.dp))
+            Text("Allowed", color = TerminalGreen, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+          } else {
+            Icon(Icons.Default.Close, contentDescription = null, tint = DangerRed, modifier = Modifier.size(13.dp))
+            Spacer(modifier = Modifier.width(4.dp))
+            Text("Denied", color = DangerRed, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+          }
+        }
+      }
     }
   }
 }
@@ -1460,38 +1623,51 @@ private fun ErrorCard(block: ErrorBlock, showRetry: Boolean, onRetry: () -> Unit
   Column(
     modifier = Modifier
       .fillMaxWidth()
-      .clip(RoundedCornerShape(10.dp))
+      .clip(RoundedCornerShape(8.dp))
       .background(DangerRed.copy(alpha = 0.08f))
-      .border(1.dp, DangerRed.copy(alpha = 0.7f), RoundedCornerShape(10.dp))
-      .padding(12.dp)
+      .border(1.dp, DangerRed.copy(alpha = 0.35f), RoundedCornerShape(8.dp))
+      .padding(horizontal = 10.dp, vertical = 8.dp)
       .testTag("stream_error_card")
   ) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-      Icon(Icons.Default.Close, contentDescription = null, tint = DangerRed, modifier = Modifier.size(14.dp))
-      Spacer(modifier = Modifier.width(6.dp))
-      Text("Error", color = DangerRed, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-      Spacer(modifier = Modifier.weight(1f))
+      Box(
+        modifier = Modifier
+          .size(16.dp)
+          .clip(CircleShape)
+          .background(DangerRed.copy(alpha = 0.2f)),
+        contentAlignment = Alignment.Center
+      ) {
+        Icon(Icons.Default.Close, contentDescription = null, tint = DangerRed, modifier = Modifier.size(11.dp))
+      }
+      Spacer(modifier = Modifier.width(8.dp))
+      Text(
+        text = block.message,
+        color = DangerRed.copy(alpha = 0.95f),
+        fontSize = 12.sp,
+        fontWeight = FontWeight.Medium,
+        modifier = Modifier.weight(1f),
+        maxLines = 2,
+        overflow = TextOverflow.Ellipsis
+      )
       Icon(
         Icons.Outlined.ContentCopy,
         contentDescription = "Copy error",
         tint = TextMuted,
         modifier = Modifier
-          .size(13.dp)
+          .size(12.dp)
           .clickable { clipboard.setText(AnnotatedString(block.message)) }
       )
     }
-    Spacer(modifier = Modifier.height(4.dp))
-    Text(block.message, color = TextSecondary, fontSize = 12.sp, lineHeight = 16.sp)
     if (showRetry) {
-      Spacer(modifier = Modifier.height(8.dp))
+      Spacer(modifier = Modifier.height(6.dp))
       Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Button(
           onClick = onRetry,
           colors = ButtonDefaults.buttonColors(containerColor = DangerRed),
-          contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
-          modifier = Modifier.height(30.dp).testTag("btn_retry_turn")
+          contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
+          modifier = Modifier.height(28.dp).testTag("btn_retry_turn")
         ) {
-          Icon(Icons.Default.Refresh, contentDescription = null, tint = Color.White, modifier = Modifier.size(13.dp))
+          Icon(Icons.Default.Refresh, contentDescription = null, tint = Color.White, modifier = Modifier.size(12.dp))
           Spacer(modifier = Modifier.width(4.dp))
           Text("Retry", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
         }
@@ -1529,166 +1705,180 @@ private fun AgentComposer(
   onPause: () -> Unit,
   onStop: () -> Unit
 ) {
-  Surface(
-    modifier = Modifier.fillMaxWidth(),
-    color = DarkSurface,
-    border = androidx.compose.foundation.BorderStroke(0.5.dp, DarkBorder)
+  Box(
+    modifier = Modifier
+      .fillMaxWidth()
+      .padding(horizontal = 10.dp, vertical = 6.dp)
+      .clip(RoundedCornerShape(14.dp))
+      .background(DarkSurfaceElevated)
+      .border(1.dp, DarkBorderSubtle, RoundedCornerShape(14.dp))
   ) {
     Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
-      Row(verticalAlignment = Alignment.Bottom) {
-        TextField(
-          value = promptText,
-          onValueChange = onPromptChange,
-          placeholder = { Text("Ask for follow-up changes…", color = TextMuted, fontSize = 13.sp) },
-          modifier = Modifier
-            .weight(1f)
-            .heightIn(min = 48.dp, max = 120.dp)
-            .testTag("agent_prompt_input"),
-          colors = TextFieldDefaults.colors(
-            focusedContainerColor = Color.Transparent,
-            unfocusedContainerColor = Color.Transparent,
-            focusedIndicatorColor = Color.Transparent,
-            unfocusedIndicatorColor = Color.Transparent,
-            focusedTextColor = TextPrimary,
-            unfocusedTextColor = TextPrimary
-          ),
-          textStyle = LocalTextStyle.current.copy(fontSize = 13.sp, lineHeight = 18.sp)
-        )
+      // Clean multiline input area
+      TextField(
+        value = promptText,
+        onValueChange = onPromptChange,
+        placeholder = { Text("Ask for follow-up changes…", color = TextMuted, fontSize = 13.sp) },
+        modifier = Modifier
+          .fillMaxWidth()
+          .heightIn(min = 40.dp, max = 110.dp)
+          .testTag("agent_prompt_input"),
+        colors = TextFieldDefaults.colors(
+          focusedContainerColor = Color.Transparent,
+          unfocusedContainerColor = Color.Transparent,
+          focusedIndicatorColor = Color.Transparent,
+          unfocusedIndicatorColor = Color.Transparent,
+          focusedTextColor = TextPrimary,
+          unfocusedTextColor = TextPrimary
+        ),
+        textStyle = LocalTextStyle.current.copy(fontSize = 13.sp, lineHeight = 18.sp)
+      )
 
-        if (isWorking) {
-          IconButton(
-            onClick = onPause,
-            modifier = Modifier
-              .size(40.dp)
-              .clip(CircleShape)
-              .background(WarningAmber)
-              .testTag("btn_composer_pause")
-          ) {
-            Icon(Icons.Default.Pause, contentDescription = "Pause", tint = Color.White, modifier = Modifier.size(18.dp))
-          }
-          Spacer(modifier = Modifier.width(6.dp))
-          IconButton(
-            onClick = onStop,
-            modifier = Modifier
-              .size(40.dp)
-              .clip(CircleShape)
-              .background(DangerRed)
-              .testTag("btn_composer_stop")
-          ) {
-            Icon(Icons.Default.Stop, contentDescription = "Stop", tint = Color.White, modifier = Modifier.size(18.dp))
-          }
-        } else {
-          IconButton(
-            onClick = onSend,
-            enabled = promptText.isNotBlank(),
-            modifier = Modifier
-              .size(40.dp)
-              .clip(CircleShape)
-              .background(if (promptText.isBlank()) DarkSurfaceElevated else ElectricBlue)
-              .testTag("btn_send_agent_prompt")
-          ) {
-            Icon(Icons.AutoMirrored.Filled.Send, contentDescription = "Send", tint = Color.White, modifier = Modifier.size(17.dp))
-          }
-        }
-      }
+      Spacer(modifier = Modifier.height(4.dp))
 
-      Spacer(modifier = Modifier.height(2.dp))
-
-      // Inline configuration row: model, file-edit policy, terminal policy.
+      // Bottom Row: Model & Config Controls on left, Integrated Send/Action on right
       Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
-        verticalAlignment = Alignment.CenterVertically
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
       ) {
-        // Model dropdown grouped by provider (desktop-reference style).
-        val providerName = selectedModel?.let { m -> providers.firstOrNull { it.id == m.providerId }?.name }
-        ConfigDropdown(
-          label = selectedModel?.displayName ?: "Select model",
-          sublabel = providerName,
-          tint = if (selectedModel == null) TextMuted else ElectricBlueGlow,
-          options = buildList {
-            providers.forEach { provider ->
-              add(DropdownOption(header = true, label = provider.name))
-              models.filter { it.providerId == provider.id }.forEach { m ->
-                add(DropdownOption(label = m.displayName, sublabel = m.modelId, tag = "${m.id}|${m.displayName}"))
+        // Controls Row
+        Row(
+          modifier = Modifier.weight(1f, fill = false),
+          horizontalArrangement = Arrangement.spacedBy(6.dp),
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          // Model dropdown
+          val providerName = selectedModel?.let { m -> providers.firstOrNull { it.id == m.providerId }?.name }
+          ConfigDropdown(
+            label = selectedModel?.displayName ?: "Select model",
+            sublabel = providerName,
+            tint = if (selectedModel == null) TextMuted else ElectricBlueGlow,
+            leadingIcon = Icons.Default.AutoAwesome,
+            options = buildList {
+              providers.forEach { provider ->
+                add(DropdownOption(header = true, label = provider.name))
+                models.filter { it.providerId == provider.id }.forEach { m ->
+                  add(DropdownOption(label = m.displayName, sublabel = m.modelId, tag = "${m.id}|${m.displayName}"))
+                }
               }
-            }
-            if (models.isEmpty()) add(DropdownOption(header = true, label = "No models configured"))
-            add(DropdownOption(label = "Configure providers…", configure = true))
-          },
-          onPick = { option ->
-            if (option.configure) {
-              viewModel.navigateTo(AppDestination.AI_PROVIDERS)
-            } else {
-              val recordId = option.tag?.substringBefore("|")
-              models.firstOrNull { it.id == recordId }?.let { viewModel.selectModel(it) }
-            }
-          },
-          modifier = Modifier.testTag("composer_model_selector")
-        )
+              if (models.isEmpty()) add(DropdownOption(header = true, label = "No models configured"))
+              add(DropdownOption(label = "Configure providers…", configure = true))
+            },
+            onPick = { option ->
+              if (option.configure) {
+                viewModel.navigateTo(AppDestination.AI_PROVIDERS)
+              } else {
+                val recordId = option.tag?.substringBefore("|")
+                models.firstOrNull { it.id == recordId }?.let { viewModel.selectModel(it) }
+              }
+            },
+            modifier = Modifier.testTag("composer_model_selector")
+          )
 
-        // File editing policy dropdown. Plan mode lives here: it is the widest
-        // possible file-edit policy ("edit nothing") and shares the dropdown's
-        // semantics — pick once, it applies to the next prompt.
-        ConfigDropdown(
-          label = when {
-            permissions.planMode -> "Plan mode"
-            permissions.fileEditing == PermissionMode.ALWAYS_ASK -> "Edits: ask"
-            permissions.fileEditing == PermissionMode.AUTO_APPROVE_PROJECT -> "Edits: auto"
-            permissions.fileEditing == PermissionMode.NEVER_ALLOW -> "Edits: off"
-            else -> "Edits: ask"
-          },
-          tint = if (permissions.planMode) ElectricBlueGlow
-            else if (permissions.fileEditing == PermissionMode.NEVER_ALLOW) DangerRed
-            else TerminalGreen,
-          options = listOf(
-            DropdownOption(
-              label = "Plan mode — research only, no changes",
-              tag = "PLAN_MODE",
-              checked = permissions.planMode
+          // File editing policy dropdown
+          ConfigDropdown(
+            label = when {
+              permissions.planMode -> "Plan mode"
+              permissions.fileEditing == PermissionMode.ALWAYS_ASK -> "Edits: ask"
+              permissions.fileEditing == PermissionMode.AUTO_APPROVE_PROJECT -> "Edits: auto"
+              permissions.fileEditing == PermissionMode.NEVER_ALLOW -> "Edits: off"
+              else -> "Edits: ask"
+            },
+            tint = if (permissions.planMode) ElectricBlueGlow
+              else if (permissions.fileEditing == PermissionMode.NEVER_ALLOW) DangerRed
+              else TerminalGreen,
+            options = listOf(
+              DropdownOption(
+                label = "Plan mode — research only, no changes",
+                tag = "PLAN_MODE",
+                checked = permissions.planMode
+              ),
+              DropdownOption(label = "Ask before editing", tag = PermissionMode.ALWAYS_ASK.name),
+              DropdownOption(label = "Auto-approve in workspace", tag = PermissionMode.AUTO_APPROVE_PROJECT.name),
+              DropdownOption(label = "Never edit files", tag = PermissionMode.NEVER_ALLOW.name)
             ),
-            DropdownOption(label = "Ask before editing", tag = PermissionMode.ALWAYS_ASK.name),
-            DropdownOption(label = "Auto-approve in workspace", tag = PermissionMode.AUTO_APPROVE_PROJECT.name),
-            DropdownOption(label = "Never edit files", tag = PermissionMode.NEVER_ALLOW.name)
-          ),
-          onPick = { option ->
-            when (option.tag) {
-              // Toggling plan mode from here also clears an active edit policy
-              // mismatch, since plan overrides whatever fileEditing says.
-              "PLAN_MODE" -> viewModel.updatePermissions { it.copy(planMode = !it.planMode) }
-              else -> option.tag?.let { PermissionMode.valueOf(it) }?.let { mode ->
-                viewModel.updatePermissions { it.copy(fileEditing = mode) }
+            onPick = { option ->
+              when (option.tag) {
+                "PLAN_MODE" -> viewModel.updatePermissions { it.copy(planMode = !it.planMode) }
+                else -> option.tag?.let { PermissionMode.valueOf(it) }?.let { mode ->
+                  viewModel.updatePermissions { it.copy(fileEditing = mode) }
+                }
               }
             }
-          }
-        )
+          )
 
-        // Terminal execution strategy dropdown
-        ConfigDropdown(
-          label = when (permissions.terminalCommands) {
-            PermissionMode.ALLOW_ALL -> "Terminal: all"
-            PermissionMode.ALLOW_SAFE -> "Terminal: safe"
-            PermissionMode.NEVER_ALLOW -> "Terminal: off"
-            else -> "Terminal: ask"
-          },
-          tint = if (permissions.terminalCommands == PermissionMode.ALLOW_ALL) WarningAmber else TerminalGreen,
-          options = listOf(
-            DropdownOption(label = "Ask before running", tag = PermissionMode.ALWAYS_ASK.name),
-            DropdownOption(label = "Allow safe commands", tag = PermissionMode.ALLOW_SAFE.name),
-            DropdownOption(label = "Allow all commands", tag = PermissionMode.ALLOW_ALL.name),
-            DropdownOption(label = "Never run commands", tag = PermissionMode.NEVER_ALLOW.name)
-          ),
-          onPick = { option ->
-            option.tag?.let { PermissionMode.valueOf(it) }?.let { mode ->
-              viewModel.updatePermissions { it.copy(terminalCommands = mode) }
+          // Terminal execution strategy dropdown
+          ConfigDropdown(
+            label = when (permissions.terminalCommands) {
+              PermissionMode.ALLOW_ALL -> "Terminal: all"
+              PermissionMode.ALLOW_SAFE -> "Terminal: safe"
+              PermissionMode.NEVER_ALLOW -> "Terminal: off"
+              else -> "Terminal: ask"
+            },
+            tint = if (permissions.terminalCommands == PermissionMode.ALLOW_ALL) WarningAmber else TerminalGreen,
+            options = listOf(
+              DropdownOption(label = "Ask before running", tag = PermissionMode.ALWAYS_ASK.name),
+              DropdownOption(label = "Allow safe commands", tag = PermissionMode.ALLOW_SAFE.name),
+              DropdownOption(label = "Allow all commands", tag = PermissionMode.ALLOW_ALL.name),
+              DropdownOption(label = "Never run commands", tag = PermissionMode.NEVER_ALLOW.name)
+            ),
+            onPick = { option ->
+              option.tag?.let { PermissionMode.valueOf(it) }?.let { mode ->
+                viewModel.updatePermissions { it.copy(terminalCommands = mode) }
+              }
+            }
+          )
+
+          // Context Usage Chip
+          contextUsage?.let { usage -> ContextUsageChip(usage) }
+        }
+
+        Spacer(modifier = Modifier.width(6.dp))
+
+        // Integrated Send/Stop/Pause Button
+        if (isWorking) {
+          Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            IconButton(
+              onClick = onPause,
+              modifier = Modifier
+                .size(32.dp)
+                .clip(CircleShape)
+                .background(WarningAmber)
+                .testTag("btn_composer_pause")
+            ) {
+              Icon(Icons.Default.Pause, contentDescription = "Pause", tint = Color.White, modifier = Modifier.size(16.dp))
+            }
+            IconButton(
+              onClick = onStop,
+              modifier = Modifier
+                .size(32.dp)
+                .clip(CircleShape)
+                .background(DangerRed)
+                .testTag("btn_composer_stop")
+            ) {
+              Icon(Icons.Default.Stop, contentDescription = "Stop", tint = Color.White, modifier = Modifier.size(16.dp))
             }
           }
-        )
-
-        // Live context occupancy: how much of the model's window the next
-        // request will consume. It moves while the agent streams, and turns
-        // amber once the conversation is close to the compact threshold.
-        contextUsage?.let { usage -> ContextUsageChip(usage) }
+        } else {
+          val canSend = promptText.isNotBlank()
+          IconButton(
+            onClick = onSend,
+            enabled = canSend,
+            modifier = Modifier
+              .size(34.dp)
+              .clip(CircleShape)
+              .background(if (canSend) ElectricBlue else DarkSurface.copy(alpha = 0.7f))
+              .testTag("btn_send_agent_prompt")
+          ) {
+            Icon(
+              Icons.AutoMirrored.Filled.Send,
+              contentDescription = "Send",
+              tint = if (canSend) Color.White else TextMuted,
+              modifier = Modifier.size(15.dp)
+            )
+          }
+        }
       }
     }
   }
@@ -1818,25 +2008,34 @@ private fun ConfigDropdown(
   onPick: (DropdownOption) -> Unit,
   modifier: Modifier = Modifier,
   sublabel: String? = null,
-  tint: Color = TextSecondary
+  tint: Color = TextSecondary,
+  leadingIcon: ImageVector? = null
 ) {
   var expanded by remember { mutableStateOf(false) }
   Box(modifier = modifier) {
-    Row(
-      verticalAlignment = Alignment.CenterVertically,
-      modifier = Modifier
-        .clip(RoundedCornerShape(6.dp))
-        .clickable { expanded = true }
-        .padding(horizontal = 4.dp, vertical = 4.dp)
+    Surface(
+      shape = RoundedCornerShape(6.dp),
+      color = DarkSurface,
+      border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorderSubtle),
+      modifier = Modifier.clickable { expanded = true }
     ) {
-      Column {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-          Text(label, color = tint, fontSize = 11.sp, fontWeight = FontWeight.Medium, maxLines = 1)
-          Spacer(modifier = Modifier.width(3.dp))
-          Text("▾", color = TextMuted, fontSize = 9.sp)
+      Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
+      ) {
+        if (leadingIcon != null) {
+          Icon(leadingIcon, contentDescription = null, tint = tint, modifier = Modifier.size(11.dp))
+          Spacer(modifier = Modifier.width(4.dp))
         }
-        sublabel?.let {
-          Text(it, color = TextMuted, fontSize = 8.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Column {
+          Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(label, color = tint, fontSize = 11.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+            Spacer(modifier = Modifier.width(3.dp))
+            Text("▾", color = TextMuted, fontSize = 9.sp)
+          }
+          sublabel?.let {
+            Text(it, color = TextMuted, fontSize = 8.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+          }
         }
       }
     }
