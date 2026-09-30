@@ -56,17 +56,21 @@
       <a class="hover:text-slate-100" href="#preview">Live preview</a>
       <a class="hover:text-slate-100" href="#git">Git</a>
       <a class="hover:text-slate-100" href="#screens">Screens</a>
-      <a class="hover:text-slate-100" href="#download">Download</a>
     </nav>
-    <button id="menu-toggle" type="button" aria-expanded="false" aria-controls="mobile-menu" aria-label="Open menu"
-            class="md:hidden inline-flex items-center justify-center rounded-lg border border-line px-3 py-2 text-slate-200 hover:bg-raised">
-      <svg id="menu-icon-open" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-        <path d="M4 7h16M4 12h16M4 17h16" stroke-linecap="round"/>
-      </svg>
-      <svg id="menu-icon-close" class="hidden" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-        <path d="M6 6l12 12M18 6L6 18" stroke-linecap="round"/>
-      </svg>
-    </button>
+    <div class="flex items-center gap-2">
+      <a href="#download" class="glow inline-flex items-center rounded-lg bg-bolt px-3.5 py-2 text-sm text-white hover:bg-blue-500 md:px-4">
+        Download
+      </a>
+      <button id="menu-toggle" type="button" aria-expanded="false" aria-controls="mobile-menu" aria-label="Open menu"
+              class="md:hidden inline-flex items-center justify-center rounded-lg border border-line px-3 py-2 text-slate-200 hover:bg-raised">
+        <svg id="menu-icon-open" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path d="M4 7h16M4 12h16M4 17h16" stroke-linecap="round"/>
+        </svg>
+        <svg id="menu-icon-close" class="hidden" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <path d="M6 6l12 12M18 6L6 18" stroke-linecap="round"/>
+        </svg>
+      </button>
+    </div>
   </div>
   <div id="mobile-menu" class="hidden md:hidden border-t border-line/60 bg-ink">
     <nav class="mx-auto max-w-6xl px-3 py-2 grid grid-cols-2 gap-1 text-sm text-muted">
@@ -78,7 +82,7 @@
       <a class="rounded-lg px-2 py-2 hover:bg-raised hover:text-slate-100" href="#background">Background</a>
       <a class="rounded-lg px-2 py-2 hover:bg-raised hover:text-slate-100" href="#models">Your model</a>
       <a class="rounded-lg px-2 py-2 hover:bg-raised hover:text-slate-100" href="#screens">Screens</a>
-      <a class="rounded-lg px-2 py-2 hover:bg-raised hover:text-slate-100" href="#download">Download</a>
+      <a class="rounded-lg px-2 py-2 hover:bg-raised hover:text-slate-100" href="#contact">Contact</a>
     </nav>
   </div>
 </header>
@@ -93,7 +97,7 @@
       <p class="mt-3 text-lg md:text-2xl tracking-tight text-mint">The AI coding workspace for your pocket.</p>
       <p class="mt-6 max-w-2xl text-sm md:text-base text-muted">
         AI agent. Ubuntu Linux environment. Editor. Terminal. Full Git. Live web preview — in one
-        Android app. Import a folder or a ZIP you already have, connect the model you already pay for,
+        Android app. Clone Git Repository OR Import a folder or a ZIP you already have, connect the model you already pay for,
         and tell Agentisco what to change. It reads the codebase, edits the files, installs the
         dependencies, runs the project, reads its own errors, fixes them and runs the tests — then
         keeps going after you lock the screen.
@@ -364,6 +368,10 @@ $ git status</code></pre>
         <p class="mt-2 text-sm text-muted">A download, an archive from your mail, a backup — unpack it into a project and start.</p>
       </div>
       <div class="rounded-xl border border-line bg-surface p-5">
+        <h3 class="text-sm text-slate-50">Clone git repository</h3>
+        <p class="mt-2 text-sm text-muted">You can use the built in terminal to clone any repository just as if you're using Ubuntu Desktop environment.</p>
+      </div>
+      <div class="rounded-xl border border-line bg-surface p-5">
         <h3 class="text-sm text-slate-50">Start fresh</h3>
         <p class="mt-2 text-sm text-muted">A new empty project is enough: the agent can scaffold, install and run from there.</p>
       </div>
@@ -429,7 +437,7 @@ $ git status</code></pre>
       <li class="rounded-full border border-line bg-surface px-3 py-1.5 text-slate-200">OpenAI-compatible APIs</li>
       <li class="rounded-full border border-line bg-surface px-3 py-1.5 text-slate-200">Any custom base URL</li>
     </ul>
-    <div class="mt-8 grid gap-4 md:grid-cols-4">
+    <div class="mt-8 grid gap-4 md:grid-cols-3">
       <div class="rounded-xl border border-line bg-surface p-5">
         <p class="text-xs text-bolt">1</p>
         <p class="mt-2 text-sm text-slate-100">Open <span class="text-mint">Providers</span> and add one.</p>
@@ -440,10 +448,6 @@ $ git status</code></pre>
       </div>
       <div class="rounded-xl border border-line bg-surface p-5">
         <p class="text-xs text-bolt">3</p>
-        <p class="mt-2 text-sm text-slate-100">Test connection — it asks the endpoint what it actually serves.</p>
-      </div>
-      <div class="rounded-xl border border-line bg-surface p-5">
-        <p class="text-xs text-bolt">4</p>
         <p class="mt-2 text-sm text-slate-100">Add the model names you want and go.</p>
       </div>
     </div>
@@ -636,6 +640,26 @@ $ git status</code></pre>
       </p>
     </div>
   </section>
+
+  <section id="contact" class="border-t border-line/60">
+    <div class="mx-auto max-w-6xl px-5 py-14 md:py-16">
+      <p class="text-xs uppercase tracking-[0.2em] text-mint">Contact</p>
+      <h2 class="mt-3 text-2xl tracking-tight text-slate-50">Agentisco is made by one developer you can reach</h2>
+      <p class="mt-3 max-w-2xl text-sm text-muted">
+        A missing package, a device that misbehaves, a feature you need before you can rely on this at work —
+        write to me and you'll get an answer from the person who wrote the code.
+      </p>
+      <div class="mt-6 flex flex-wrap items-center gap-x-5 gap-y-3">
+        <a href="mailto:gladsonchala@gmail.com" class="glow inline-flex items-center gap-2 rounded-lg bg-bolt px-4 py-2.5 text-sm text-white hover:bg-blue-500">
+          Contact Me: gladsonchala@gmail.com
+        </a>
+        <p class="text-sm text-slate-200">
+          Gemechis Chala
+          <span class="text-muted">· Addis Ababa, Ethiopia 🇪🇹</span>
+        </p>
+      </div>
+    </div>
+  </section>
 </main>
 
 </main>
@@ -658,6 +682,7 @@ $ git status</code></pre>
   <div class="flex flex-wrap items-center justify-between gap-3">
     <span>Agentisco · <span id="footer-version">version served by the update API</span></span>
     <span class="flex gap-4">
+      <a class="hover:text-slate-200" href="#contact">contact</a>
       <a class="hover:text-slate-200" href="/v1/updates/release/latest">release feed</a>
       <a class="hover:text-slate-200" href="/health">health</a>
       <a class="hover:text-slate-200" href="/ready">ready</a>
