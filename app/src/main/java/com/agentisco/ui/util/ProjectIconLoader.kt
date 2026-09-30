@@ -10,7 +10,6 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayInputStream
 import java.io.File
-import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Decodes the real icon file [com.agentisco.workspace.filesystem.ProjectMetadataScanner]
@@ -26,16 +25,20 @@ object ProjectIconLoader {
 
   /** Icons are drawn at ~36dp, so there is no point decoding a 512px logo. */
   private const val TARGET_PX = 128
-  private const val MAX_CACHE_ENTRIES = 24
+  private const val MAX_CACHE_ENTRIES = 64
 
-  private val cache = ConcurrentHashMap<String, ImageBitmap>()
+  /**
+   * Access-ordered, so exceeding the cap drops the icon nobody looked at rather
+   * than every icon at once — a bulk clear made each reopen re-decode the lot.
+   */
+  private val cache = LinkedHashMap<String, ImageBitmap>(16, 0.75f, true)
 
   /** Already-decoded icon for [path], safe to call from composition. */
-  fun cached(path: String): ImageBitmap? = cache[path]
+  fun cached(path: String): ImageBitmap? = synchronized(cache) { cache[path] }
 
   /** Decodes [path] and memoizes the result. Blocking — call from IO. */
   fun load(path: String): ImageBitmap? {
-    cache[path]?.let { return it }
+    cached(path)?.let { return it }
     val file = File(path)
     if (!file.isFile || !file.canRead()) return null
     val bitmap = runCatching {
@@ -46,9 +49,18 @@ object ProjectIconLoader {
       }
     }.getOrNull() ?: return null
 
-    if (cache.size >= MAX_CACHE_ENTRIES) cache.clear()
-    cache[path] = bitmap.asImageBitmap()
-    return cache[path]
+    val image = bitmap.asImageBitmap()
+    synchronized(cache) {
+      if (cache.size >= MAX_CACHE_ENTRIES) {
+        val oldest = cache.keys.iterator()
+        if (oldest.hasNext()) {
+          oldest.next()
+          oldest.remove()
+        }
+      }
+      cache[path] = image
+    }
+    return image
   }
 
   private fun decodeFile(file: File): Bitmap? {

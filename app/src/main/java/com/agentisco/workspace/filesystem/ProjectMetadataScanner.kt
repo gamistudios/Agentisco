@@ -115,7 +115,7 @@ object ProjectMetadataScanner {
     // 1. Direct candidates in common well-known spots
     for (relative in ICON_CANDIDATES) {
       val file = File(root, relative)
-      if (file.isFile && file.canRead() && file.length() in 1..MAX_ICON_BYTES) return file
+      if (isDecodableIcon(relative) && file.isFile && file.canRead() && file.length() in 1..MAX_ICON_BYTES) return file
     }
 
     // 2. Scan up to depth 5 for favicon.ico / favicon.png / logo / app icons
@@ -123,7 +123,7 @@ object ProjectMetadataScanner {
       ".git", "node_modules", "build", ".gradle", "dist", "target",
       ".next", "venv", ".venv", "__pycache__", ".idea", ".vscode", "vendor", "cache"
     )
-    val priorityFavicon = setOf("favicon.ico", "favicon.png", "favicon.svg")
+    val priorityFavicon = setOf("favicon.ico", "favicon.png")
     val secondaryIcons = setOf(
       "icon.ico", "icon.png", "logo.png", "logo.ico", "app-icon.png",
       "apple-touch-icon.png", "project-icon.png"
@@ -137,7 +137,9 @@ object ProjectMetadataScanner {
       val (currentDir, depth) = queue.removeFirst()
       if (depth >= 5) continue
 
-      val entries = currentDir.listFiles() ?: continue
+      // listFiles() has no defined order; sorting keeps one project resolving
+      // to the same icon path across rescans, which is what the bitmap cache keys on.
+      val entries = currentDir.listFiles()?.sortedBy { it.name } ?: continue
       val subdirs = ArrayList<File>()
 
       for (entry in entries) {
@@ -147,6 +149,9 @@ object ProjectMetadataScanner {
           }
         } else if (entry.isFile && entry.canRead() && entry.length() in 1..MAX_ICON_BYTES) {
           val nameLower = entry.name.lowercase()
+          // An icon the decoder cannot read is worse than no icon: returning it
+          // here would also hide a usable one further down the tree.
+          if (!isDecodableIcon(nameLower)) continue
           if (nameLower in priorityFavicon) {
             return entry
           } else if (nameLower in secondaryIcons && foundSecondary == null) {
@@ -176,6 +181,13 @@ object ProjectMetadataScanner {
     }
     return null
   }
+
+  /**
+   * Formats [ProjectIconLoader] can actually decode. An SVG favicon is real on
+   * disk but unreadable here, and returning it would hide a usable PNG.
+   */
+  private fun isDecodableIcon(name: String): Boolean =
+    name.substringAfterLast('.', "").lowercase() in DECODABLE_ICON_EXTS
 
   private fun densityRank(dirName: String): Int = when {
     dirName.contains("anydpi") -> 6
@@ -223,14 +235,16 @@ object ProjectMetadataScanner {
     if (project.path.isBlank()) null else scan(File(project.path))
 
   private val ICON_CANDIDATES = listOf(
-    "favicon.ico", "favicon.png", "favicon.svg",
+    // The per-project override is chosen by hand, so it outranks anything the
+    // repo happens to contain.
+    ".agentisco/icon.png", ".agentisco/icon.webp", ".agentisco/icon.jpg",
+    "favicon.ico", "favicon.png",
     "public/favicon.ico", "public/favicon.png", "public/logo.png", "public/icon.png",
     "src/favicon.ico", "src/assets/favicon.ico", "src/assets/logo.png",
     "static/favicon.ico", "static/favicon.png", "static/logo.png",
     "assets/favicon.ico", "assets/logo.png", "assets/icon.png",
     "app/favicon.ico", "app/favicon.png",
     "web/favicon.ico", "web/favicon.png", "web/logo.png",
-    ".agentisco/icon.png", ".agentisco/icon.webp", ".agentisco/icon.jpg",
     "logo.png", "logo.webp", "logo.jpg", "logo.ico",
     "icon.png", "icon.ico", "app-icon.png", "project-icon.png"
   )
@@ -242,4 +256,6 @@ object ProjectMetadataScanner {
   )
 
   private val ICON_STEMS = listOf("ic_launcher", "ic_launcher_round", "ic_launcher_foreground")
+
+  private val DECODABLE_ICON_EXTS = setOf("png", "jpg", "jpeg", "webp", "ico", "bmp")
 }

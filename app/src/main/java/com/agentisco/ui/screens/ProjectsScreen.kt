@@ -816,7 +816,7 @@ private fun WorkspaceOverview(
     if (storage != null) {
       Column(horizontalAlignment = Alignment.End) {
         Text(
-          text = "${formatBytes(storage.freeBytes)} free",
+          text = "${formatBytes(storage.usedBytes)} of ${formatBytes(storage.totalBytes)}",
           color = when {
             storage.usedFraction > 0.9f -> DangerRed
             storage.usedFraction > 0.75f -> WarningAmber
@@ -824,7 +824,17 @@ private fun WorkspaceOverview(
           },
           fontSize = 9.5.sp,
           fontFamily = FontFamily.Monospace,
-          fontWeight = FontWeight.SemiBold
+          fontWeight = FontWeight.SemiBold,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis
+        )
+        Spacer(modifier = Modifier.height(1.dp))
+        Text(
+          text = "${formatBytes(storage.freeBytes)} free",
+          color = TextMuted,
+          fontSize = 8.5.sp,
+          fontFamily = FontFamily.Monospace,
+          maxLines = 1
         )
         Spacer(modifier = Modifier.height(3.dp))
         Box(

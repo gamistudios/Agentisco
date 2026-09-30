@@ -233,9 +233,18 @@ fun AgentScreen(
         }
         Spacer(modifier = Modifier.height(4.dp))
         Text(
-          text = activeSession?.title ?: "I want you to use 2 sub agents and one to analys",
+          text = activeSession?.title ?: "New conversation",
           color = TextSecondary,
           fontSize = 12.sp,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis
+        )
+        Text(
+          text = activeSession?.let {
+            "${sessions.size} session${if (sessions.size == 1) "" else "s"} · ${relativeTime(it.updatedAt)}"
+          } ?: "Start chatting to create one",
+          color = TextMuted,
+          fontSize = 9.sp,
           maxLines = 1,
           overflow = TextOverflow.Ellipsis
         )
@@ -245,59 +254,6 @@ fun AgentScreen(
     // What the mode means, stated where the user can see it while working.
     if (permissions.planMode) PlanModeNotice()
 
-    val sampleChatItems = remember {
-      listOf(
-        UserMessageItem(
-          id = "sample_user_1",
-          text = "I want you to use 2 sub agents and one to analys",
-          timestamp = System.currentTimeMillis() - 120_000
-        ),
-        AgentTurnItem(
-          id = "sample_turn_1",
-          status = TurnStatus.PAUSED,
-          statusMessage = "Task cancelled by user",
-          providerName = "TokenHabor",
-          modelName = "Qwen 3.8 Flash",
-          blocks = listOf(
-            ActionBlock(
-              id = "sample_read_files",
-              name = "read_files",
-              argsJson = """{"path":"app/src/main/java/com/agentisco/workspace/filesystem/Project..."}""",
-              running = false,
-              success = true,
-              summary = "app/src/main/java/com/agentisco/workspace/filesystem/Project...",
-              detail = "===== app/src/main/java/com/agentisco/workspace/filesystem/Project...",
-              exitCode = 0
-            ),
-            ActionBlock(
-              id = "sample_list_files",
-              name = "list_files",
-              argsJson = """{"path":"app/src/main/jniLibs/arm64-v8a/libandroid-shmem.so"}""",
-              running = false,
-              success = true,
-              summary = "app/src/main/jniLibs/arm64-v8a/libandroid-shmem.so",
-              detail = "app/src/main/jniLibs/arm64-v8a/libandroid-shmem.so",
-              exitCode = 0
-            ),
-            ApprovalBlock(
-              id = "sample_explore_cmd",
-              approvalId = "sample_appr_1",
-              command = """grep -aoE "v[0-9]+\.[0-9]+\.[0-9]+" /usr/bin/node | sort -u | head -20""",
-              title = "Explore / Research Engineer: Agent wants to run a command",
-              impact = """Runs in terminal session 'main': grep -aoE "v[0-9]+\.[0-9]+\.[0-9]+" /usr/bin/node | sort -u | head -20""",
-              resolved = true,
-              allowed = true
-            ),
-            ErrorBlock(
-              id = "sample_error_1",
-              message = "Task cancelled by user"
-            )
-          )
-        )
-      )
-    }
-    val effectiveChatItems = if (chatItems.isNotEmpty()) chatItems else sampleChatItems
-
     // Conversation (the primary surface).
     Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
       LazyColumn(
@@ -306,24 +262,34 @@ fun AgentScreen(
         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
       ) {
-        items(effectiveChatItems, key = { it.id }) { item ->
-          when (item) {
-            is UserMessageItem -> UserBubble(item, onEdit = { viewModel.editUserMessage(item.id, it) })
-            is AgentTurnItem -> AgentTurnCard(
-              item = item,
-              showToolJson = chatDisplay.showToolJson,
-              onAllow = { viewModel.resolveApproval(true) },
-              onDeny = { (id, reason) ->
-                if (reason.isNullOrBlank()) viewModel.resolveApproval(false) else viewModel.denyWithReason(reason)
-              },
-              onAnswer = { _, answer -> viewModel.answerQuestion(answer) },
-              onReopen = { viewModel.showApprovalDialog() },
-              onRetry = { viewModel.retryAgentTurn(item.id) },
-              onCancelTool = { viewModel.cancelToolCall(it) },
-              onRetryTool = { viewModel.resolveToolCancellation(it, retry = true) },
-              onContinueTool = { viewModel.resolveToolCancellation(it, retry = false) },
-              onNavigate = onNavigate
+        if (chatItems.isEmpty()) {
+          item(key = "empty") {
+            AgentEmptyState(
+              project = activeProject,
+              hasHistory = activeSession != null,
+              onSuggestion = { promptText = it }
             )
+          }
+        } else {
+          items(chatItems, key = { it.id }) { item ->
+            when (item) {
+              is UserMessageItem -> UserBubble(item, onEdit = { viewModel.editUserMessage(item.id, it) })
+              is AgentTurnItem -> AgentTurnCard(
+                item = item,
+                showToolJson = chatDisplay.showToolJson,
+                onAllow = { viewModel.resolveApproval(true) },
+                onDeny = { (id, reason) ->
+                  if (reason.isNullOrBlank()) viewModel.resolveApproval(false) else viewModel.denyWithReason(reason)
+                },
+                onAnswer = { _, answer -> viewModel.answerQuestion(answer) },
+                onReopen = { viewModel.showApprovalDialog() },
+                onRetry = { viewModel.retryAgentTurn(item.id) },
+                onCancelTool = { viewModel.cancelToolCall(it) },
+                onRetryTool = { viewModel.resolveToolCancellation(it, retry = true) },
+                onContinueTool = { viewModel.resolveToolCancellation(it, retry = false) },
+                onNavigate = onNavigate
+              )
+            }
           }
         }
         item(key = "bottom-spacer") { Spacer(modifier = Modifier.height(12.dp)) }
@@ -805,7 +771,6 @@ private fun AgentTurnCard(
     var activeSubagent: String? = null
     item.blocks.forEach { block ->
       val blockSubagent = when (block) {
-        is ApprovalBlock -> if (block.title.contains("Explore / Research Engineer") || block.title.contains("Research Engineer")) "Explore / Research Engineer" else null
         is ActionBlock -> block.delegation?.role
         else -> null
       }
@@ -1355,7 +1320,26 @@ private fun ApprovalCard(
       .padding(10.dp)
       .testTag("stream_approval")
   ) {
+    // The title says who is asking — a delegated agent's command strip alone
+    // would not name the agent that wants to run it.
+    Row(verticalAlignment = Alignment.CenterVertically) {
+      Box(
+        modifier = Modifier
+          .size(7.dp)
+          .clip(CircleShape)
+          .background(if (item.isQuestion) ElectricBlueGlow else WarningAmber)
+      )
+      Spacer(modifier = Modifier.width(6.dp))
+      Text(
+        item.title,
+        color = if (item.isQuestion) ElectricBlueGlow else WarningAmber,
+        fontSize = 12.sp,
+        fontWeight = FontWeight.Bold
+      )
+    }
+
     if (isTerminal) {
+      Spacer(modifier = Modifier.height(6.dp))
       Row(
         modifier = Modifier
           .fillMaxWidth()
@@ -1391,22 +1375,6 @@ private fun ApprovalCard(
             .size(13.dp)
             .clickable { clipboard.setText(AnnotatedString(item.command)) }
             .testTag("btn_copy_command")
-        )
-      }
-    } else {
-      Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(
-          modifier = Modifier
-            .size(7.dp)
-            .clip(CircleShape)
-            .background(if (item.isQuestion) ElectricBlueGlow else WarningAmber)
-        )
-        Spacer(modifier = Modifier.width(6.dp))
-        Text(
-          item.title,
-          color = if (item.isQuestion) ElectricBlueGlow else WarningAmber,
-          fontSize = 12.sp,
-          fontWeight = FontWeight.Bold
         )
       }
     }
