@@ -142,6 +142,8 @@ class ProjectsScreenScreenshotTest {
         activeProject = active,
         workspacePath = "~/projects",
         storage = storage,
+        gridView = false,
+        onGridViewChange = {},
         onNewProject = {},
         onOpenFolder = {},
         onProjectClick = {},

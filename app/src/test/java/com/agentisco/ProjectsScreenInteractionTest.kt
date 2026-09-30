@@ -2,6 +2,9 @@ package com.agentisco
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -61,6 +64,7 @@ class ProjectsScreenInteractionTest {
     var newProjectClicked = false
     var openFolderClicked = false
     var selectedProject: Project? = null
+    var gridView by mutableStateOf(false)
 
     composeTestRule.setContent {
       AgentiscoTheme {
@@ -69,6 +73,8 @@ class ProjectsScreenInteractionTest {
           activeProject = sampleProject1,
           workspacePath = "~/projects",
           storage = storage,
+          gridView = gridView,
+          onGridViewChange = { gridView = it },
           onNewProject = { newProjectClicked = true },
           onOpenFolder = { openFolderClicked = true },
           onProjectClick = { selectedProject = it },
@@ -94,8 +100,10 @@ class ProjectsScreenInteractionTest {
     composeTestRule.onNodeWithTag("project_card_proj-1").performClick()
     assertEquals(sampleProject1.id, selectedProject?.id)
 
-    // Toggle to Grid view
+    // Toggle to Grid view: the screen reports the intent, the caller owns the state
     composeTestRule.onNodeWithTag("btn_grid_view").assertIsDisplayed().performClick()
+    composeTestRule.waitForIdle()
+    assertTrue(gridView)
 
     // Both cards should still be displayed in Grid view
     composeTestRule.onNodeWithTag("project_card_proj-1").assertIsDisplayed()
@@ -103,6 +111,8 @@ class ProjectsScreenInteractionTest {
 
     // Toggle back to Linear view
     composeTestRule.onNodeWithTag("btn_linear_view").assertIsDisplayed().performClick()
+    composeTestRule.waitForIdle()
+    assertEquals(false, gridView)
     composeTestRule.onNodeWithTag("project_card_proj-1").assertIsDisplayed()
   }
 
@@ -118,6 +128,8 @@ class ProjectsScreenInteractionTest {
           activeProject = sampleProject1,
           workspacePath = "~/projects",
           storage = storage,
+          gridView = false,
+          onGridViewChange = {},
           onNewProject = {},
           onOpenFolder = {},
           onProjectClick = {},

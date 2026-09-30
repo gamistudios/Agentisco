@@ -166,6 +166,16 @@ class WorkspaceRepository(
     _chatDisplay.value = chatDisplayStore.update { it.copy(showToolJson = visible) }
   }
 
+  // ---- Projects layout (grid vs. list) ----
+  val projectsViewStore = com.agentisco.data.local.ProjectsViewStore(context)
+  private val _projectsView = MutableStateFlow(projectsViewStore.get())
+  val projectsView: StateFlow<com.agentisco.data.local.ProjectsViewSettings> =
+    _projectsView.asStateFlow()
+
+  fun setProjectsGridView(enabled: Boolean) {
+    _projectsView.value = projectsViewStore.update { it.copy(gridView = enabled) }
+  }
+
   // ---- Context & compaction (Settings → Context) ----
   val compactSettingsStore = com.agentisco.data.local.CompactSettingsStore(context)
   private val _compactSettings = MutableStateFlow(compactSettingsStore.get())

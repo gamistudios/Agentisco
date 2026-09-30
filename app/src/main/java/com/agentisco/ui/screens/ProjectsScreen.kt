@@ -17,7 +17,6 @@ import androidx.compose.material3.*
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -71,6 +70,7 @@ fun ProjectsScreen(
   val activeProject by viewModel.activeProject.collectAsState()
   val recentActivity by viewModel.recentActivity.collectAsState()
   val previewSessions by viewModel.projectSessionsPreview.collectAsState()
+  val projectsView by viewModel.projectsView.collectAsState()
   val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
 
   // Dialog mode: null = closed, otherwise the tab the dialog opens on.
@@ -94,6 +94,8 @@ fun ProjectsScreen(
     activeProject = activeProject,
     workspacePath = workspacePath,
     storage = storage,
+    gridView = projectsView.gridView,
+    onGridViewChange = viewModel::setProjectsGridView,
     onNewProject = { dialogMode = "create" },
     onOpenFolder = { dialogMode = "import" },
     onProjectClick = { project ->
@@ -553,6 +555,8 @@ fun ProjectsScreenContent(
   activeProject: Project,
   workspacePath: String,
   storage: WorkspaceStorageInfo?,
+  gridView: Boolean,
+  onGridViewChange: (Boolean) -> Unit,
   onNewProject: () -> Unit,
   onOpenFolder: () -> Unit,
   onProjectClick: (Project) -> Unit,
@@ -560,8 +564,6 @@ fun ProjectsScreenContent(
   onProjectAction: (Project, ProjectOverflowAction) -> Unit,
   modifier: Modifier = Modifier
 ) {
-  var isGridView by rememberSaveable { mutableStateOf(false) }
-
   LazyColumn(
     modifier = modifier
       .fillMaxSize()
@@ -664,15 +666,15 @@ fun ProjectsScreenContent(
               modifier = Modifier
                 .size(24.dp)
                 .clip(RoundedCornerShape(5.dp))
-                .background(if (!isGridView) ElectricBlue.copy(alpha = 0.22f) else Color.Transparent)
-                .clickable { isGridView = false }
+                .background(if (!gridView) ElectricBlue.copy(alpha = 0.22f) else Color.Transparent)
+                .clickable { onGridViewChange(false) }
                 .testTag("btn_linear_view"),
               contentAlignment = Alignment.Center
             ) {
               Icon(
                 imageVector = Icons.AutoMirrored.Outlined.ViewList,
                 contentDescription = "List view",
-                tint = if (!isGridView) ElectricBlueGlow else TextMuted,
+                tint = if (!gridView) ElectricBlueGlow else TextMuted,
                 modifier = Modifier.size(14.dp)
               )
             }
@@ -680,15 +682,15 @@ fun ProjectsScreenContent(
               modifier = Modifier
                 .size(24.dp)
                 .clip(RoundedCornerShape(5.dp))
-                .background(if (isGridView) ElectricBlue.copy(alpha = 0.22f) else Color.Transparent)
-                .clickable { isGridView = true }
+                .background(if (gridView) ElectricBlue.copy(alpha = 0.22f) else Color.Transparent)
+                .clickable { onGridViewChange(true) }
                 .testTag("btn_grid_view"),
               contentAlignment = Alignment.Center
             ) {
               Icon(
                 imageVector = Icons.Outlined.GridView,
                 contentDescription = "Grid view",
-                tint = if (isGridView) ElectricBlueGlow else TextMuted,
+                tint = if (gridView) ElectricBlueGlow else TextMuted,
                 modifier = Modifier.size(13.dp)
               )
             }
@@ -696,7 +698,7 @@ fun ProjectsScreenContent(
         }
       }
 
-      if (isGridView) {
+      if (gridView) {
         val pairs = projects.chunked(2)
         items(pairs, key = { row -> row.joinToString("_") { it.id } }) { row ->
           Row(

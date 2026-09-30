@@ -1057,6 +1057,12 @@ class WorkspaceViewModel(
 
   fun setChatToolJsonVisible(visible: Boolean) = repository.setChatToolJsonVisible(visible)
 
+  // ---- Projects layout (grid vs. list) ----
+  val projectsView: StateFlow<com.agentisco.data.local.ProjectsViewSettings> =
+    repository.projectsView
+
+  fun setProjectsGridView(enabled: Boolean) = repository.setProjectsGridView(enabled)
+
   /**
    * Deletes a project entirely after the user confirms: folder, chat sessions
    * and registry entry all go together (see [WorkspaceRepository.removeProject]).
