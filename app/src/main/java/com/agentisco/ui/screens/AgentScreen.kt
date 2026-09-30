@@ -234,23 +234,29 @@ fun AgentScreen(
             modifier = Modifier.size(16.dp)
           )
         }
-        Spacer(modifier = Modifier.height(4.dp))
-        Text(
-          text = activeSession?.title ?: "New conversation",
-          color = TextSecondary,
-          fontSize = 12.sp,
-          maxLines = 1,
-          overflow = TextOverflow.Ellipsis
-        )
-        Text(
-          text = activeSession?.let {
-            "${sessions.size} session${if (sessions.size == 1) "" else "s"} · ${relativeTime(it.updatedAt)}"
-          } ?: "Start chatting to create one",
-          color = TextMuted,
-          fontSize = 9.sp,
-          maxLines = 1,
-          overflow = TextOverflow.Ellipsis
-        )
+        Row(
+          verticalAlignment = Alignment.CenterVertically,
+          modifier = Modifier.fillMaxWidth()
+        ) {
+          Text(
+            text = activeSession?.title ?: "New conversation",
+            color = TextSecondary,
+            fontSize = 12.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false)
+          )
+          Spacer(modifier = Modifier.width(8.dp))
+          Text(
+            text = activeSession?.let {
+              "${sessions.size} session${if (sessions.size == 1) "" else "s"} · ${relativeTime(it.updatedAt)}"
+            } ?: "Start chatting to create one",
+            color = TextMuted,
+            fontSize = 9.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+          )
+        }
       }
     }
 
