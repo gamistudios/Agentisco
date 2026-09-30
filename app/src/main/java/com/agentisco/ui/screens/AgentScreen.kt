@@ -57,6 +57,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
@@ -640,6 +642,40 @@ private fun SubagentTimelineBanner(name: String) {
   }
 }
 
+/**
+ * Card chrome: a solid accent rail down the left edge of a rounded, faintly
+ * outlined surface — what marks a card as the agent asking, failing or working.
+ */
+private fun Modifier.cardWithRail(
+  accent: Color,
+  surface: Color,
+  shape: RoundedCornerShape = RoundedCornerShape(10.dp)
+): Modifier =
+  this.clip(shape)
+    .background(surface, shape)
+    .drawBehind { drawRect(color = accent, size = Size(4.dp.toPx(), size.height)) }
+    .border(1.dp, accent.copy(alpha = 0.35f), shape)
+
+/** Round status marker: filled disc once a step is settled, outlined ring for a card. */
+@Composable
+private fun StatusCircle(icon: ImageVector, color: Color, filled: Boolean = false) {
+  Box(
+    modifier = Modifier
+      .size(26.dp)
+      .clip(CircleShape)
+      .background(if (filled) color else color.copy(alpha = 0.12f))
+      .then(if (filled) Modifier else Modifier.border(1.dp, color.copy(alpha = 0.5f), CircleShape)),
+    contentAlignment = Alignment.Center
+  ) {
+    Icon(
+      imageVector = icon,
+      contentDescription = null,
+      tint = if (filled) DarkBackground else color,
+      modifier = Modifier.size(14.dp)
+    )
+  }
+}
+
 @Composable
 private fun AgentTurnCard(
   item: AgentTurnItem,
@@ -662,40 +698,43 @@ private fun AgentTurnCard(
     item.blocks.lastOrNull { it is TextBlock && (it as? TextBlock)?.text?.isNotBlank() == true }?.id
   } else null
 
+  val statusColor = when (item.status) {
+    TurnStatus.RUNNING -> ElectricBlueGlow
+    TurnStatus.COMPLETED -> TerminalGreen
+    TurnStatus.FAILED -> DangerRed
+    else -> WarningAmber
+  }
+  val statusIcon = when (item.status) {
+    TurnStatus.COMPLETED -> Icons.Default.CheckCircle
+    TurnStatus.FAILED -> Icons.Default.Close
+    TurnStatus.CANCELLED, TurnStatus.INTERRUPTED -> Icons.Default.Stop
+    TurnStatus.PAUSED -> Icons.Default.Pause
+    else -> Icons.Default.AutoAwesome
+  }
+  // A working turn breathes; everything else states its result.
+  val statusAlpha: Float = if (item.status == TurnStatus.RUNNING) {
+    val transition = rememberInfiniteTransition(label = "thinking")
+    transition
+      .animateFloat(
+        initialValue = 0.35f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(700), RepeatMode.Reverse),
+        label = "thinking-alpha"
+      )
+      .value
+  } else 1f
+
   Column(
     modifier = Modifier
       .fillMaxWidth()
-      .clip(RoundedCornerShape(12.dp))
-      .background(DarkSurface.copy(alpha = 0.55f))
-      .border(1.dp, DarkBorderSubtle, RoundedCornerShape(12.dp))
-      .padding(12.dp)
+      .cardWithRail(statusColor, DarkSurface.copy(alpha = 0.55f), RoundedCornerShape(12.dp))
+      .padding(start = 14.dp, end = 12.dp, top = 12.dp, bottom = 12.dp)
       .testTag("chat_agent_turn")
   ) {
     // Turn header: identity + status.
     Row(verticalAlignment = Alignment.CenterVertically) {
-      if (item.status == TurnStatus.RUNNING) {
-        val transition = rememberInfiniteTransition(label = "thinking")
-        val alpha by transition.animateFloat(
-          initialValue = 0.35f,
-          targetValue = 1f,
-          animationSpec = infiniteRepeatable(tween(700), RepeatMode.Reverse),
-          label = "thinking-alpha"
-        )
-        Icon(
-          Icons.Default.AutoAwesome,
-          contentDescription = null,
-          tint = ElectricBlueGlow.copy(alpha = alpha),
-          modifier = Modifier.size(15.dp)
-        )
-      } else {
-        Icon(
-          Icons.Default.AutoAwesome,
-          contentDescription = null,
-          tint = ElectricBlueGlow,
-          modifier = Modifier.size(15.dp)
-        )
-      }
-      Spacer(modifier = Modifier.width(6.dp))
+      StatusCircle(icon = statusIcon, color = statusColor.copy(alpha = statusAlpha), filled = false)
+      Spacer(modifier = Modifier.width(8.dp))
       Text(
         text = "Agent",
         color = TextPrimary,
@@ -707,14 +746,7 @@ private fun AgentTurnCard(
       Box(
         modifier = Modifier
           .clip(RoundedCornerShape(10.dp))
-          .background(
-            when (item.status) {
-              TurnStatus.RUNNING -> ElectricBlue.copy(alpha = 0.15f)
-              TurnStatus.COMPLETED -> TerminalGreen.copy(alpha = 0.12f)
-              TurnStatus.FAILED -> DangerRed.copy(alpha = 0.12f)
-              else -> WarningAmber.copy(alpha = 0.12f)
-            }
-          )
+          .background(statusColor.copy(alpha = 0.14f))
           .padding(horizontal = 8.dp, vertical = 2.dp)
       ) {
         Text(
@@ -726,12 +758,7 @@ private fun AgentTurnCard(
             TurnStatus.CANCELLED -> "Cancelled"
             TurnStatus.INTERRUPTED -> "Interrupted"
           },
-          color = when (item.status) {
-            TurnStatus.RUNNING -> ElectricBlueGlow
-            TurnStatus.COMPLETED -> TerminalGreen
-            TurnStatus.FAILED -> DangerRed
-            else -> WarningAmber
-          },
+          color = statusColor,
           fontSize = 10.sp,
           fontWeight = FontWeight.SemiBold
         )
@@ -987,7 +1014,7 @@ private fun DelegationActivityStream(blocks: List<TurnBlock>, showToolJson: Bool
 }
 
 @Composable
-private fun ToolCallRow(
+internal fun ToolCallRow(
   item: ActionBlock,
   showToolJson: Boolean = false,
   onCancelTool: () -> Unit = {},
@@ -1003,6 +1030,19 @@ private fun ToolCallRow(
   val diffLines = remember(item.argsJson) { editDiffForTool(item.name, item.argsJson) }
   // Terminal cards show the real shell command instead of {"command": …}.
   val command = remember(item.argsJson) { displayCommandForTool(item.name, item.argsJson) }
+  val statusColor = when {
+    item.running -> ElectricBlueGlow
+    item.cancelled -> WarningAmber
+    item.success == false -> DangerRed
+    item.success == true -> TerminalGreen
+    else -> iconColor
+  }
+  val statusIcon = when {
+    item.cancelled -> Icons.Default.Stop
+    item.success == false -> Icons.Default.Close
+    item.success == true -> Icons.Default.Check
+    else -> icon
+  }
 
   Column(
     modifier = Modifier
@@ -1011,12 +1051,7 @@ private fun ToolCallRow(
       .background(DarkSurface.copy(alpha = 0.5f))
       .border(
         1.dp,
-        when {
-          item.running -> ElectricBlue.copy(alpha = 0.45f)
-          item.cancelled -> WarningAmber.copy(alpha = 0.5f)
-          item.success == false -> DangerRed.copy(alpha = 0.5f)
-          else -> DarkBorderSubtle
-        },
+        statusColor.copy(alpha = if (item.running) 0.45f else 0.28f),
         RoundedCornerShape(8.dp)
       )
       .combinedClickable(
@@ -1027,7 +1062,7 @@ private fun ToolCallRow(
       .testTag("stream_tool_${item.name}")
   ) {
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-      Icon(icon, contentDescription = verb, tint = iconColor, modifier = Modifier.size(15.dp))
+      StatusCircle(icon = statusIcon, color = statusColor, filled = true)
       Spacer(modifier = Modifier.width(8.dp))
       Text(verb, color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
       if (target.isNotBlank()) {
@@ -1043,31 +1078,23 @@ private fun ToolCallRow(
         )
       }
       Spacer(modifier = Modifier.weight(1f))
-      when {
-        item.running -> {
-          CircularProgressIndicator(modifier = Modifier.size(12.dp), color = ElectricBlueGlow, strokeWidth = 1.8.dp)
-          // SIGKILL this specific call without stopping the whole task.
-          if (item.callId.isNotBlank()) {
-            Spacer(modifier = Modifier.width(4.dp))
-            IconButton(
-              onClick = onCancelTool,
-              modifier = Modifier
-                .size(22.dp)
-                .clip(RoundedCornerShape(6.dp))
-                .testTag("btn_cancel_tool")
-            ) {
-              Icon(Icons.Default.Stop, contentDescription = "Cancel this step", tint = DangerRed, modifier = Modifier.size(13.dp))
-            }
+      // A settled step states its result in the leading circle; only a running
+      // one still needs the right-hand spinner and its own kill switch.
+      if (item.running) {
+        CircularProgressIndicator(modifier = Modifier.size(12.dp), color = ElectricBlueGlow, strokeWidth = 1.8.dp)
+        // SIGKILL this specific call without stopping the whole task.
+        if (item.callId.isNotBlank()) {
+          Spacer(modifier = Modifier.width(4.dp))
+          IconButton(
+            onClick = onCancelTool,
+            modifier = Modifier
+              .size(22.dp)
+              .clip(RoundedCornerShape(6.dp))
+              .testTag("btn_cancel_tool")
+          ) {
+            Icon(Icons.Default.Stop, contentDescription = "Cancel this step", tint = DangerRed, modifier = Modifier.size(13.dp))
           }
         }
-        item.cancelled -> Icon(
-          Icons.Default.Stop,
-          contentDescription = "Cancelled",
-          tint = WarningAmber,
-          modifier = Modifier.size(13.dp)
-        )
-        item.success == true -> Icon(Icons.Default.CheckCircle, contentDescription = "Done", tint = TerminalGreen, modifier = Modifier.size(13.dp))
-        item.success == false -> Icon(Icons.Default.Close, contentDescription = "Failed", tint = DangerRed, modifier = Modifier.size(13.dp))
       }
       if (!item.running && item.detail.isNotBlank()) {
         Spacer(modifier = Modifier.width(6.dp))
@@ -1301,7 +1328,7 @@ private fun ToolCallRow(
 }
 
 @Composable
-private fun ApprovalCard(
+internal fun ApprovalCard(
   item: ApprovalBlock,
   onAllow: () -> Unit,
   onDeny: (String?) -> Unit,
@@ -1310,31 +1337,31 @@ private fun ApprovalCard(
 ) {
   val clipboard = LocalClipboardManager.current
   val isTerminal = item.command.isNotBlank()
+  val accent = if (item.isQuestion) ElectricBlueGlow else WarningAmber
 
   Column(
     modifier = Modifier
       .fillMaxWidth()
-      .clip(RoundedCornerShape(8.dp))
-      .background(DarkSurface.copy(alpha = 0.5f))
-      .border(1.dp, DarkBorderSubtle, RoundedCornerShape(8.dp))
-      .padding(10.dp)
+      .cardWithRail(accent, DarkSurface.copy(alpha = 0.5f))
+      .padding(start = 14.dp, end = 10.dp, top = 10.dp, bottom = 10.dp)
       .testTag("stream_approval")
   ) {
     // The title says who is asking — a delegated agent's command strip alone
     // would not name the agent that wants to run it.
     Row(verticalAlignment = Alignment.CenterVertically) {
-      Box(
-        modifier = Modifier
-          .size(7.dp)
-          .clip(CircleShape)
-          .background(if (item.isQuestion) ElectricBlueGlow else WarningAmber)
+      StatusCircle(
+        icon = if (item.isQuestion) Icons.Outlined.QuestionAnswer else Icons.Outlined.Terminal,
+        color = accent
       )
-      Spacer(modifier = Modifier.width(6.dp))
+      Spacer(modifier = Modifier.width(8.dp))
       Text(
         item.title,
-        color = if (item.isQuestion) ElectricBlueGlow else WarningAmber,
-        fontSize = 12.sp,
-        fontWeight = FontWeight.Bold
+        color = accent,
+        fontSize = 12.5.sp,
+        fontWeight = FontWeight.Bold,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis,
+        modifier = Modifier.weight(1f)
       )
     }
 
@@ -1387,7 +1414,7 @@ private fun ApprovalCard(
         fontSize = 11.sp,
         lineHeight = 15.sp
       )
-    } else if (item.impact.isNotBlank() && item.impact != item.command && !isTerminal) {
+    } else if (item.impact.isNotBlank() && item.impact != item.command) {
       Spacer(modifier = Modifier.height(4.dp))
       Text(item.impact, color = TextSecondary, fontSize = 11.sp, lineHeight = 15.sp)
     }
@@ -1586,37 +1613,29 @@ private fun ThinkingBlock(block: ReasoningBlock) {
 
 /** Single red error card for runtime/stream/provider failures. */
 @Composable
-private fun ErrorCard(block: ErrorBlock, showRetry: Boolean, onRetry: () -> Unit) {
+internal fun ErrorCard(block: ErrorBlock, showRetry: Boolean, onRetry: () -> Unit) {
   val clipboard = LocalClipboardManager.current
   Column(
     modifier = Modifier
       .fillMaxWidth()
-      .clip(RoundedCornerShape(8.dp))
-      .background(DangerRed.copy(alpha = 0.08f))
-      .border(1.dp, DangerRed.copy(alpha = 0.35f), RoundedCornerShape(8.dp))
-      .padding(horizontal = 10.dp, vertical = 8.dp)
+      .cardWithRail(DangerRed, DangerRed.copy(alpha = 0.08f))
+      .padding(start = 14.dp, end = 10.dp, top = 10.dp, bottom = 10.dp)
       .testTag("stream_error_card")
   ) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-      Box(
-        modifier = Modifier
-          .size(16.dp)
-          .clip(CircleShape)
-          .background(DangerRed.copy(alpha = 0.2f)),
-        contentAlignment = Alignment.Center
-      ) {
-        Icon(Icons.Default.Close, contentDescription = null, tint = DangerRed, modifier = Modifier.size(11.dp))
-      }
+      StatusCircle(icon = Icons.Default.Close, color = DangerRed)
       Spacer(modifier = Modifier.width(8.dp))
-      Text(
-        text = block.message,
-        color = DangerRed.copy(alpha = 0.95f),
-        fontSize = 12.sp,
-        fontWeight = FontWeight.Medium,
-        modifier = Modifier.weight(1f),
-        maxLines = 2,
-        overflow = TextOverflow.Ellipsis
-      )
+      Column(modifier = Modifier.weight(1f)) {
+        Text("Error", color = DangerRed, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+        Text(
+          text = block.message,
+          color = TextSecondary,
+          fontSize = 11.5.sp,
+          lineHeight = 15.sp,
+          maxLines = 4,
+          overflow = TextOverflow.Ellipsis
+        )
+      }
       Icon(
         Icons.Outlined.ContentCopy,
         contentDescription = "Copy error",
