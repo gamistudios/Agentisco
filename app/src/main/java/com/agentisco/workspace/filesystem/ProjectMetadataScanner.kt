@@ -107,16 +107,64 @@ object ProjectMetadataScanner {
   }
 
   /**
-   * Looks for a real project icon. Ordered most-specific first; the first
-   * existing candidate wins. `.ico` is last because Android can only decode
-   * ICO files that embed a PNG payload (see the UI-side loader).
+   * Looks for a real project icon. Scans root candidates and performs a bounded
+   * search up to depth 5 for `favicon.ico`, `favicon.png`, `logo.png`, etc.,
+   * with fallback to Android launcher icons.
    */
   private fun findIcon(root: File): File? {
+    // 1. Direct candidates in common well-known spots
     for (relative in ICON_CANDIDATES) {
       val file = File(root, relative)
       if (file.isFile && file.canRead() && file.length() in 1..MAX_ICON_BYTES) return file
     }
-    // Android launcher icons live under mipmap-<density>; prefer the densest.
+
+    // 2. Scan up to depth 5 for favicon.ico / favicon.png / logo / app icons
+    val ignoredDirs = setOf(
+      ".git", "node_modules", "build", ".gradle", "dist", "target",
+      ".next", "venv", ".venv", "__pycache__", ".idea", ".vscode", "vendor", "cache"
+    )
+    val priorityFavicon = setOf("favicon.ico", "favicon.png", "favicon.svg")
+    val secondaryIcons = setOf(
+      "icon.ico", "icon.png", "logo.png", "logo.ico", "app-icon.png",
+      "apple-touch-icon.png", "project-icon.png"
+    )
+
+    var foundSecondary: File? = null
+    val queue = ArrayDeque<Pair<File, Int>>()
+    queue.add(root to 0)
+
+    while (queue.isNotEmpty()) {
+      val (currentDir, depth) = queue.removeFirst()
+      if (depth >= 5) continue
+
+      val entries = currentDir.listFiles() ?: continue
+      val subdirs = ArrayList<File>()
+
+      for (entry in entries) {
+        if (entry.isDirectory) {
+          if (!entry.name.startsWith(".") && entry.name !in ignoredDirs) {
+            subdirs.add(entry)
+          }
+        } else if (entry.isFile && entry.canRead() && entry.length() in 1..MAX_ICON_BYTES) {
+          val nameLower = entry.name.lowercase()
+          if (nameLower in priorityFavicon) {
+            return entry
+          } else if (nameLower in secondaryIcons && foundSecondary == null) {
+            foundSecondary = entry
+          } else if (nameLower.endsWith(".ico") && foundSecondary == null) {
+            foundSecondary = entry
+          }
+        }
+      }
+
+      for (subdir in subdirs) {
+        queue.add(subdir to depth + 1)
+      }
+    }
+
+    if (foundSecondary != null) return foundSecondary
+
+    // 3. Android launcher icons live under mipmap-<density>; prefer the densest.
     for (base in LAUNCHER_ICON_DIRS) {
       val resDir = File(root, base)
       val densities = resDir.listFiles { f -> f.isDirectory && f.name.startsWith("mipmap") } ?: continue
@@ -175,15 +223,16 @@ object ProjectMetadataScanner {
     if (project.path.isBlank()) null else scan(File(project.path))
 
   private val ICON_CANDIDATES = listOf(
+    "favicon.ico", "favicon.png", "favicon.svg",
+    "public/favicon.ico", "public/favicon.png", "public/logo.png", "public/icon.png",
+    "src/favicon.ico", "src/assets/favicon.ico", "src/assets/logo.png",
+    "static/favicon.ico", "static/favicon.png", "static/logo.png",
+    "assets/favicon.ico", "assets/logo.png", "assets/icon.png",
+    "app/favicon.ico", "app/favicon.png",
+    "web/favicon.ico", "web/favicon.png", "web/logo.png",
     ".agentisco/icon.png", ".agentisco/icon.webp", ".agentisco/icon.jpg",
-    "logo.png", "logo.webp", "logo.jpg",
-    "icon.png", "app-icon.png", "project-icon.png",
-    "public/favicon.png", "public/logo.png", "public/icon.png",
-    "static/favicon.png", "static/logo.png",
-    "assets/logo.png", "assets/icon.png",
-    "web/favicon.png", "web/logo.png",
-    "favicon.png",
-    "favicon.ico"
+    "logo.png", "logo.webp", "logo.jpg", "logo.ico",
+    "icon.png", "icon.ico", "app-icon.png", "project-icon.png"
   )
 
   private val LAUNCHER_ICON_DIRS = listOf(

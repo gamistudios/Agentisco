@@ -17,6 +17,7 @@ import androidx.compose.material3.*
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -559,15 +560,17 @@ fun ProjectsScreenContent(
   onProjectAction: (Project, ProjectOverflowAction) -> Unit,
   modifier: Modifier = Modifier
 ) {
+  var isGridView by rememberSaveable { mutableStateOf(false) }
+
   LazyColumn(
     modifier = modifier
       .fillMaxSize()
       .background(DarkBackground)
       .padding(horizontal = 14.dp),
-    verticalArrangement = Arrangement.spacedBy(10.dp)
+    verticalArrangement = Arrangement.spacedBy(8.dp)
   ) {
     item {
-      Spacer(modifier = Modifier.height(10.dp))
+      Spacer(modifier = Modifier.height(6.dp))
       WorkspaceOverview(
         projectCount = projects.size,
         workspacePath = workspacePath,
@@ -584,30 +587,30 @@ fun ProjectsScreenContent(
           onClick = onNewProject,
           modifier = Modifier
             .weight(1f)
-            .height(42.dp)
+            .height(36.dp)
             .testTag("btn_new_project"),
           colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
-          contentPadding = PaddingValues(horizontal = 12.dp),
-          shape = RoundedCornerShape(10.dp)
+          contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+          shape = RoundedCornerShape(8.dp)
         ) {
-          Icon(imageVector = Icons.Default.Add, contentDescription = "New", modifier = Modifier.size(16.dp))
-          Spacer(modifier = Modifier.width(7.dp))
-          Text("New Project", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+          Icon(imageVector = Icons.Default.Add, contentDescription = "New", modifier = Modifier.size(15.dp))
+          Spacer(modifier = Modifier.width(6.dp))
+          Text("New Project", fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
         }
         OutlinedButton(
           onClick = onOpenFolder,
           modifier = Modifier
             .weight(1f)
-            .height(42.dp)
+            .height(36.dp)
             .testTag("btn_import_folder"),
           colors = ButtonDefaults.outlinedButtonColors(contentColor = TextPrimary),
           border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder),
-          contentPadding = PaddingValues(horizontal = 12.dp),
-          shape = RoundedCornerShape(10.dp)
+          contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
+          shape = RoundedCornerShape(8.dp)
         ) {
-          Icon(imageVector = Icons.Outlined.FolderOpen, contentDescription = "Import", modifier = Modifier.size(16.dp))
-          Spacer(modifier = Modifier.width(7.dp))
-          Text("Open Folder", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+          Icon(imageVector = Icons.Outlined.FolderOpen, contentDescription = "Import", modifier = Modifier.size(15.dp))
+          Spacer(modifier = Modifier.width(6.dp))
+          Text("Open Folder", fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
         }
       }
     }
@@ -619,7 +622,7 @@ fun ProjectsScreenContent(
         Row(
           modifier = Modifier
             .fillMaxWidth()
-            .padding(top = 2.dp),
+            .padding(top = 2.dp, bottom = 2.dp),
           verticalAlignment = Alignment.CenterVertically
         ) {
           Text(
@@ -629,39 +632,114 @@ fun ProjectsScreenContent(
             fontWeight = FontWeight.Bold,
             letterSpacing = 0.8.sp
           )
+          Spacer(modifier = Modifier.width(6.dp))
+          Box(
+            modifier = Modifier
+              .clip(RoundedCornerShape(4.dp))
+              .background(DarkSurfaceElevated)
+              .padding(horizontal = 5.dp, vertical = 1.dp)
+          ) {
+            Text(
+              text = "${projects.size}",
+              color = TextSecondary,
+              fontSize = 9.sp,
+              fontFamily = FontFamily.Monospace,
+              fontWeight = FontWeight.Medium
+            )
+          }
           Spacer(modifier = Modifier.width(8.dp))
           HorizontalDivider(color = DarkBorderSubtle, modifier = Modifier.weight(1f))
           Spacer(modifier = Modifier.width(8.dp))
-          Text(
-            text = "${projects.size}",
-            color = TextSecondary,
-            fontSize = 10.sp,
-            fontFamily = FontFamily.Monospace
+
+          // View toggle: Linear vs Grid
+          Row(
+            modifier = Modifier
+              .clip(RoundedCornerShape(7.dp))
+              .background(DarkSurface)
+              .border(1.dp, DarkBorderSubtle, RoundedCornerShape(7.dp))
+              .padding(2.dp),
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Box(
+              modifier = Modifier
+                .size(24.dp)
+                .clip(RoundedCornerShape(5.dp))
+                .background(if (!isGridView) ElectricBlue.copy(alpha = 0.22f) else Color.Transparent)
+                .clickable { isGridView = false }
+                .testTag("btn_linear_view"),
+              contentAlignment = Alignment.Center
+            ) {
+              Icon(
+                imageVector = Icons.AutoMirrored.Outlined.ViewList,
+                contentDescription = "List view",
+                tint = if (!isGridView) ElectricBlueGlow else TextMuted,
+                modifier = Modifier.size(14.dp)
+              )
+            }
+            Box(
+              modifier = Modifier
+                .size(24.dp)
+                .clip(RoundedCornerShape(5.dp))
+                .background(if (isGridView) ElectricBlue.copy(alpha = 0.22f) else Color.Transparent)
+                .clickable { isGridView = true }
+                .testTag("btn_grid_view"),
+              contentAlignment = Alignment.Center
+            ) {
+              Icon(
+                imageVector = Icons.Outlined.GridView,
+                contentDescription = "Grid view",
+                tint = if (isGridView) ElectricBlueGlow else TextMuted,
+                modifier = Modifier.size(13.dp)
+              )
+            }
+          }
+        }
+      }
+
+      if (isGridView) {
+        val pairs = projects.chunked(2)
+        items(pairs, key = { row -> row.joinToString("_") { it.id } }) { row ->
+          Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+          ) {
+            for (proj in row) {
+              Box(modifier = Modifier.weight(1f)) {
+                ProjectGridCard(
+                  project = proj,
+                  isActive = proj.id == activeProject.id,
+                  onClick = { onProjectClick(proj) },
+                  onAction = { action -> onProjectAction(proj, action) }
+                )
+              }
+            }
+            if (row.size == 1) {
+              Spacer(modifier = Modifier.weight(1f))
+            }
+          }
+        }
+      } else {
+        items(projects, key = { it.id }) { project ->
+          ProjectCard(
+            project = project,
+            isActive = project.id == activeProject.id,
+            onClick = { onProjectClick(project) },
+            onCopyPath = onCopyPath,
+            onAction = { action -> onProjectAction(project, action) }
           )
         }
       }
     }
 
-    items(projects, key = { it.id }) { project ->
-      ProjectCard(
-        project = project,
-        isActive = project.id == activeProject.id,
-        onClick = { onProjectClick(project) },
-        onCopyPath = onCopyPath,
-        onAction = { action -> onProjectAction(project, action) }
-      )
-    }
-
     item {
-      Spacer(modifier = Modifier.height(20.dp))
+      Spacer(modifier = Modifier.height(16.dp))
     }
   }
 }
 
 /**
- * "Your Workspace" summary: where the workspace lives, how many projects it
- * holds and how much room is left. One compact row — deliberately not a
- * dashboard card.
+ * Compact "Your Workspace" summary: reduced height, cute glowing folder badge,
+ * path, and compact storage indicator.
  */
 @Composable
 private fun WorkspaceOverview(
@@ -669,90 +747,90 @@ private fun WorkspaceOverview(
   workspacePath: String,
   storage: WorkspaceStorageInfo?
 ) {
-  val shape = RoundedCornerShape(12.dp)
+  val shape = RoundedCornerShape(10.dp)
   Row(
     modifier = Modifier
       .fillMaxWidth()
       .clip(shape)
       .background(DarkSurface)
       .border(1.dp, DarkBorderSubtle, shape)
-      .padding(horizontal = 11.dp, vertical = 10.dp),
+      .padding(horizontal = 10.dp, vertical = 7.dp),
     verticalAlignment = Alignment.CenterVertically
   ) {
     Box(
       modifier = Modifier
-        .size(32.dp)
-        .clip(RoundedCornerShape(9.dp))
+        .size(28.dp)
+        .clip(RoundedCornerShape(7.dp))
         .background(TerminalGreen.copy(alpha = 0.12f))
-        .border(1.dp, TerminalGreen.copy(alpha = 0.3f), RoundedCornerShape(9.dp)),
+        .border(1.dp, TerminalGreen.copy(alpha = 0.3f), RoundedCornerShape(7.dp)),
       contentAlignment = Alignment.Center
     ) {
       Icon(
         imageVector = Icons.Outlined.Folder,
         contentDescription = null,
         tint = TerminalGreen,
-        modifier = Modifier.size(17.dp)
+        modifier = Modifier.size(15.dp)
       )
     }
 
-    Spacer(modifier = Modifier.width(10.dp))
+    Spacer(modifier = Modifier.width(9.dp))
 
     Column(modifier = Modifier.weight(1f)) {
       Row(verticalAlignment = Alignment.CenterVertically) {
         Text(
           text = "Your Workspace",
           color = TextPrimary,
-          fontSize = 13.sp,
+          fontSize = 12.sp,
           fontWeight = FontWeight.SemiBold,
           maxLines = 1
         )
-        Spacer(modifier = Modifier.width(7.dp))
-        Text(
-          text = "$projectCount project${if (projectCount == 1) "" else "s"}",
-          color = TextMuted,
-          fontSize = 10.sp,
-          maxLines = 1
-        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Box(
+          modifier = Modifier
+            .clip(RoundedCornerShape(4.dp))
+            .background(DarkSurfaceHighlight)
+            .padding(horizontal = 4.dp, vertical = 1.dp)
+        ) {
+          Text(
+            text = "$projectCount project${if (projectCount == 1) "" else "s"}",
+            color = TextSecondary,
+            fontSize = 8.5.sp,
+            fontFamily = FontFamily.Monospace,
+            maxLines = 1
+          )
+        }
       }
-      Spacer(modifier = Modifier.height(2.dp))
+      Spacer(modifier = Modifier.height(1.dp))
       Text(
         text = workspacePath,
-        color = TextSecondary,
-        fontSize = 10.sp,
+        color = TextMuted,
+        fontSize = 9.5.sp,
         fontFamily = FontFamily.Monospace,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis
       )
     }
 
-    Spacer(modifier = Modifier.width(10.dp))
+    Spacer(modifier = Modifier.width(8.dp))
 
-    Column(horizontalAlignment = Alignment.End) {
-      Text(
-        text = storage?.let { "${formatBytes(it.freeBytes)} free" } ?: "—",
-        color = when {
-          storage == null -> TextMuted
-          storage.usedFraction > 0.9f -> DangerRed
-          storage.usedFraction > 0.75f -> WarningAmber
-          else -> TerminalGreen
-        },
-        fontSize = 10.sp,
-        fontFamily = FontFamily.Monospace,
-        fontWeight = FontWeight.Medium
-      )
-      Spacer(modifier = Modifier.height(2.dp))
-      Text(
-        text = storage?.let { "of ${formatBytes(it.totalBytes)}" } ?: "storage unavailable",
-        color = TextMuted,
-        fontSize = 9.sp,
-        fontFamily = FontFamily.Monospace
-      )
-      if (storage != null) {
-        Spacer(modifier = Modifier.height(5.dp))
+    if (storage != null) {
+      Column(horizontalAlignment = Alignment.End) {
+        Text(
+          text = "${formatBytes(storage.freeBytes)} free",
+          color = when {
+            storage.usedFraction > 0.9f -> DangerRed
+            storage.usedFraction > 0.75f -> WarningAmber
+            else -> TerminalGreen
+          },
+          fontSize = 9.5.sp,
+          fontFamily = FontFamily.Monospace,
+          fontWeight = FontWeight.SemiBold
+        )
+        Spacer(modifier = Modifier.height(3.dp))
         Box(
           modifier = Modifier
-            .width(64.dp)
-            .height(3.dp)
+            .width(52.dp)
+            .height(2.5.dp)
             .clip(RoundedCornerShape(2.dp))
             .background(DarkSurfaceHighlight)
         ) {
@@ -766,20 +844,27 @@ private fun WorkspaceOverview(
           )
         }
       }
+    } else {
+      Text(
+        text = "—",
+        color = TextMuted,
+        fontSize = 9.5.sp,
+        fontFamily = FontFamily.Monospace
+      )
     }
   }
 }
 
 @Composable
 private fun EmptyWorkspaceHint() {
-  val shape = RoundedCornerShape(12.dp)
+  val shape = RoundedCornerShape(10.dp)
   Column(
     modifier = Modifier
       .fillMaxWidth()
       .clip(shape)
       .background(DarkSurface)
       .border(1.dp, DarkBorderSubtle, shape)
-      .padding(horizontal = 14.dp, vertical = 18.dp),
+      .padding(horizontal = 14.dp, vertical = 16.dp),
     horizontalAlignment = Alignment.CenterHorizontally
   ) {
     Icon(
@@ -788,27 +873,26 @@ private fun EmptyWorkspaceHint() {
       tint = TextMuted,
       modifier = Modifier.size(22.dp)
     )
-    Spacer(modifier = Modifier.height(8.dp))
+    Spacer(modifier = Modifier.height(7.dp))
     Text(
       text = "No projects yet",
       color = TextPrimary,
-      fontSize = 13.sp,
+      fontSize = 12.5.sp,
       fontWeight = FontWeight.SemiBold
     )
     Spacer(modifier = Modifier.height(3.dp))
     Text(
       text = "Create a project or open an existing folder — it is copied into the Linux workspace so git, builds and terminals behave like on a desktop.",
       color = TextMuted,
-      fontSize = 10.sp,
-      lineHeight = 14.sp
+      fontSize = 9.5.sp,
+      lineHeight = 13.5.sp
     )
   }
 }
 
 /**
- * One project, as a compact developer card: icon, name, status, path, kind,
- * size and recency, with the secondary actions behind an overflow menu so the
- * row itself stays clickable (opens the project overview).
+ * Compact linear project row: minimal wasted space, crisp icon, subtle badges,
+ * clean path, and aligned action buttons.
  */
 @Composable
 private fun ProjectCard(
@@ -819,17 +903,17 @@ private fun ProjectCard(
   onAction: (ProjectOverflowAction) -> Unit
 ) {
   var menuOpen by remember { mutableStateOf(false) }
-  val shape = RoundedCornerShape(12.dp)
+  val shape = RoundedCornerShape(10.dp)
 
   val container = when {
-    isActive -> lerp(DarkSurface, ElectricBlue, 0.07f)
+    isActive -> lerp(DarkSurface, ElectricBlue, 0.08f)
     project.isMissing -> lerp(DarkSurface, DangerRed, 0.05f)
     else -> DarkSurface
   }
   val borderColor = when {
     project.isMissing -> DangerRed.copy(alpha = 0.5f)
     isActive -> ElectricBlue.copy(alpha = 0.75f)
-    else -> DarkBorder
+    else -> DarkBorderSubtle
   }
 
   Card(
@@ -841,163 +925,264 @@ private fun ProjectCard(
       .testTag("project_card_${project.id}"),
     colors = CardDefaults.cardColors(containerColor = container),
     shape = shape,
-    elevation = CardDefaults.cardElevation(defaultElevation = if (isActive) 2.dp else 0.dp)
+    elevation = CardDefaults.cardElevation(defaultElevation = if (isActive) 1.dp else 0.dp)
   ) {
-    Column(modifier = Modifier.padding(start = 11.dp, end = 6.dp, top = 10.dp, bottom = 10.dp)) {
-      Row(verticalAlignment = Alignment.CenterVertically) {
-        ProjectIcon(project = project, size = 36.dp)
+    Row(
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(start = 9.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
+      verticalAlignment = Alignment.CenterVertically
+    ) {
+      ProjectIcon(project = project, size = 32.dp)
 
-        Spacer(modifier = Modifier.width(10.dp))
+      Spacer(modifier = Modifier.width(9.dp))
 
-        Column(modifier = Modifier.weight(1f)) {
-          Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-              text = project.name,
-              color = TextPrimary,
-              fontSize = 14.sp,
-              fontWeight = FontWeight.Bold,
-              maxLines = 1,
-              overflow = TextOverflow.Ellipsis,
-              modifier = Modifier.weight(1f, fill = false)
-            )
-            if (isActive) {
-              Spacer(modifier = Modifier.width(6.dp))
-              StatusBadge("CURRENT", ElectricBlueGlow, ElectricBlue.copy(alpha = 0.2f))
-            }
-            if (project.isMissing) {
-              Spacer(modifier = Modifier.width(6.dp))
-              StatusBadge("MISSING", DangerRed, DangerRed.copy(alpha = 0.18f))
-            } else if (project.isImported) {
-              Spacer(modifier = Modifier.width(6.dp))
-              StatusBadge("IMPORTED", TextMuted, DarkSurfaceElevated)
+      Column(modifier = Modifier.weight(1f)) {
+        // Line 1: Name, Status badges, and subtle KindChip
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          Text(
+            text = project.name,
+            color = TextPrimary,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.weight(1f, fill = false)
+          )
+          if (isActive) {
+            Spacer(modifier = Modifier.width(5.dp))
+            StatusBadge("CURRENT", ElectricBlueGlow, ElectricBlue.copy(alpha = 0.2f))
+          }
+          if (project.isMissing) {
+            Spacer(modifier = Modifier.width(5.dp))
+            StatusBadge("MISSING", DangerRed, DangerRed.copy(alpha = 0.18f))
+          } else if (project.isImported) {
+            Spacer(modifier = Modifier.width(5.dp))
+            StatusBadge("IMPORTED", TextMuted, DarkSurfaceElevated)
+          }
+          if (project.changedFilesCount > 0) {
+            Spacer(modifier = Modifier.width(5.dp))
+            Box(
+              modifier = Modifier
+                .clip(RoundedCornerShape(4.dp))
+                .background(WarningAmber.copy(alpha = 0.14f))
+                .border(1.dp, WarningAmber.copy(alpha = 0.35f), RoundedCornerShape(4.dp))
+                .padding(horizontal = 4.dp, vertical = 1.dp)
+            ) {
+              Text(
+                text = "+${project.changedFilesCount}",
+                color = WarningAmber,
+                fontSize = 8.sp,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold
+              )
             }
           }
+          if (!project.isMissing && project.kind != ProjectKind.UNKNOWN) {
+            Spacer(modifier = Modifier.width(5.dp))
+            KindChip(project.kind)
+          }
+        }
 
-          Spacer(modifier = Modifier.height(3.dp))
+        Spacer(modifier = Modifier.height(2.dp))
 
-          // The path is the densest thing on the card, so it spans the full row
-          // width and gets a readable (not muted) token. Red only when the folder
-          // is gone — the MISSING badge and the meta row carry the same story.
+        // Line 2: Path · Size · Modified
+        val sizeLabel = if (project.sizeBytes >= 0) formatBytes(project.sizeBytes) else null
+        val modifiedLabel = if (project.lastModified > 0) relativeModified(project.lastModified) else null
+        val facts = listOfNotNull(sizeLabel, modifiedLabel)
+
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          verticalAlignment = Alignment.CenterVertically
+        ) {
           Text(
             text = project.path,
-            color = if (project.isMissing) DangerRed else TextSecondary,
-            fontSize = 10.sp,
+            color = if (project.isMissing) DangerRed else TextMuted,
+            fontSize = 9.5.sp,
             fontFamily = FontFamily.Monospace,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.weight(1f, fill = false)
           )
+          if (facts.isNotEmpty()) {
+            MetaSeparator()
+            Text(
+              text = facts.joinToString(" · "),
+              color = TextSecondary,
+              fontSize = 9.sp,
+              fontFamily = FontFamily.Monospace,
+              maxLines = 1
+            )
+          }
         }
+      }
 
-        Spacer(modifier = Modifier.width(6.dp))
+      Spacer(modifier = Modifier.width(6.dp))
 
-        // Both card actions live on the same right-aligned column, so the card's
-        // right edge reads as one straight line instead of two ragged ones.
+      // Compact right actions
+      CardAction(
+        icon = Icons.Outlined.ContentCopy,
+        contentDescription = "Copy project path",
+        tint = TextSecondary,
+        size = 26.dp,
+        iconSize = 13.dp,
+        onClick = { onCopyPath(project.path) }
+      )
+      Box {
         CardAction(
-          icon = Icons.Outlined.ContentCopy,
-          contentDescription = "Copy project path",
+          icon = Icons.Outlined.MoreVert,
+          contentDescription = "More actions for ${project.name}",
           tint = TextSecondary,
-          onClick = { onCopyPath(project.path) }
+          size = 26.dp,
+          iconSize = 15.dp,
+          testTag = "project_overflow_${project.id}",
+          onClick = { menuOpen = true }
         )
+        ProjectOverflowMenu(
+          project = project,
+          expanded = menuOpen,
+          onDismiss = { menuOpen = false },
+          onAction = onAction
+        )
+      }
+    }
+  }
+}
+
+/**
+ * Compact 2-column project grid card for modern developer aesthetic.
+ */
+@Composable
+private fun ProjectGridCard(
+  project: Project,
+  isActive: Boolean,
+  onClick: () -> Unit,
+  onAction: (ProjectOverflowAction) -> Unit
+) {
+  var menuOpen by remember { mutableStateOf(false) }
+  val shape = RoundedCornerShape(10.dp)
+  val container = when {
+    isActive -> lerp(DarkSurface, ElectricBlue, 0.08f)
+    project.isMissing -> lerp(DarkSurface, DangerRed, 0.06f)
+    else -> DarkSurface
+  }
+  val borderColor = when {
+    project.isMissing -> DangerRed.copy(alpha = 0.5f)
+    isActive -> ElectricBlue.copy(alpha = 0.75f)
+    else -> DarkBorderSubtle
+  }
+
+  Card(
+    modifier = Modifier
+      .fillMaxWidth()
+      .clip(shape)
+      .border(if (isActive) 1.5.dp else 1.dp, borderColor, shape)
+      .clickable(onClick = onClick)
+      .testTag("project_card_${project.id}"),
+    colors = CardDefaults.cardColors(containerColor = container),
+    shape = shape,
+    elevation = CardDefaults.cardElevation(defaultElevation = if (isActive) 1.dp else 0.dp)
+  ) {
+    Column(modifier = Modifier.padding(9.dp)) {
+      // Top row: Project icon + Kind + Overflow button
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        ProjectIcon(project = project, size = 28.dp)
+        Spacer(modifier = Modifier.width(6.dp))
+        if (!project.isMissing && project.kind != ProjectKind.UNKNOWN) {
+          KindChip(project.kind)
+        }
+        Spacer(modifier = Modifier.weight(1f))
         Box {
           CardAction(
             icon = Icons.Outlined.MoreVert,
             contentDescription = "More actions for ${project.name}",
             tint = TextSecondary,
+            size = 24.dp,
+            iconSize = 14.dp,
             testTag = "project_overflow_${project.id}",
             onClick = { menuOpen = true }
           )
-
-          DropdownMenu(
+          ProjectOverflowMenu(
+            project = project,
             expanded = menuOpen,
-            onDismissRequest = { menuOpen = false },
-            containerColor = DarkSurfaceElevated
-          ) {
-            val disabled = project.isMissing
-            OverflowItem("Open in Agent", Icons.Outlined.AutoAwesome, enabled = !disabled) {
-              menuOpen = false; onAction(ProjectOverflowAction.OPEN_IN_AGENT)
-            }
-            OverflowItem("Chats", Icons.AutoMirrored.Outlined.Chat, enabled = !disabled) {
-              menuOpen = false; onAction(ProjectOverflowAction.CHATS)
-            }
-            OverflowItem("Files", Icons.Outlined.Folder, enabled = !disabled) {
-              menuOpen = false; onAction(ProjectOverflowAction.FILES)
-            }
-            OverflowItem("Terminal", Icons.Outlined.Terminal, enabled = !disabled) {
-              menuOpen = false; onAction(ProjectOverflowAction.TERMINAL)
-            }
-            OverflowItem("Changes", Icons.Outlined.Difference, enabled = !disabled) {
-              menuOpen = false; onAction(ProjectOverflowAction.CHANGES)
-            }
-            if (project.sourcePath.isNotBlank()) {
-              OverflowItem("Save to original folder", Icons.Outlined.SaveAlt, enabled = !disabled) {
-                menuOpen = false; onAction(ProjectOverflowAction.SAVE_TO_ORIGINAL)
-              }
-            }
-            HorizontalDivider(color = DarkBorderSubtle)
-            OverflowItem("Remove project", Icons.Outlined.Delete, tint = DangerRed) {
-              menuOpen = false; onAction(ProjectOverflowAction.REMOVE)
-            }
-          }
+            onDismiss = { menuOpen = false },
+            onAction = onAction
+          )
         }
       }
 
-      Spacer(modifier = Modifier.height(8.dp))
+      Spacer(modifier = Modifier.height(6.dp))
 
-      // Meta row. Built from the facts that actually exist, so a missing folder
-      // (or a project the scanner has not reached yet) never renders bare "— · —"
-      // separators — the placeholder values are never printed at all.
+      // Title & Status
+      Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+          text = project.name,
+          color = TextPrimary,
+          fontSize = 12.5.sp,
+          fontWeight = FontWeight.Bold,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
+          modifier = Modifier.weight(1f, fill = false)
+        )
+        if (isActive) {
+          Spacer(modifier = Modifier.width(4.dp))
+          StatusBadge("CURRENT", ElectricBlueGlow, ElectricBlue.copy(alpha = 0.2f))
+        }
+        if (project.isMissing) {
+          Spacer(modifier = Modifier.width(4.dp))
+          StatusBadge("MISSING", DangerRed, DangerRed.copy(alpha = 0.18f))
+        }
+      }
+
+      Spacer(modifier = Modifier.height(2.dp))
+
+      // Monospace Path
+      Text(
+        text = project.path,
+        color = if (project.isMissing) DangerRed else TextMuted,
+        fontSize = 9.sp,
+        fontFamily = FontFamily.Monospace,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis
+      )
+
+      Spacer(modifier = Modifier.height(5.dp))
+
+      // Facts & Changes
       val sizeLabel = if (project.sizeBytes >= 0) formatBytes(project.sizeBytes) else null
       val modifiedLabel = if (project.lastModified > 0) relativeModified(project.lastModified) else null
-      val showKind = project.kind != ProjectKind.UNKNOWN
       val facts = listOfNotNull(sizeLabel, modifiedLabel)
 
       Row(
         modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically
       ) {
-        if (project.isMissing) {
-          Icon(
-            Icons.Outlined.Warning,
-            contentDescription = null,
-            tint = DangerRed,
-            modifier = Modifier.size(11.dp)
-          )
-          Spacer(modifier = Modifier.width(5.dp))
-          Text(
-            text = "Folder not found",
-            color = DangerRed,
-            fontSize = 10.sp,
-            fontWeight = FontWeight.Medium
-          )
-        } else {
-          if (showKind) KindChip(project.kind)
-          facts.forEachIndexed { index, fact ->
-            if (showKind || index > 0) MetaSeparator()
-            MetaValue(fact)
-          }
-          if (!showKind && facts.isEmpty()) {
-            // Folder exists but the scanner has not measured it yet. Saying so is
-            // better than printing the "—" placeholders.
-            Text(text = "Not scanned yet", color = TextMuted, fontSize = 10.sp)
-          }
-        }
-
-        Spacer(modifier = Modifier.weight(1f))
-
+        Text(
+          text = facts.joinToString(" · ").ifBlank { "—" },
+          color = TextSecondary,
+          fontSize = 8.5.sp,
+          fontFamily = FontFamily.Monospace,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis,
+          modifier = Modifier.weight(1f)
+        )
         if (project.changedFilesCount > 0) {
           Box(
             modifier = Modifier
-              .clip(RoundedCornerShape(5.dp))
-              .background(WarningAmber.copy(alpha = 0.14f))
-              .border(1.dp, WarningAmber.copy(alpha = 0.35f), RoundedCornerShape(5.dp))
-              .padding(horizontal = 5.dp, vertical = 2.dp)
+              .clip(RoundedCornerShape(3.dp))
+              .background(WarningAmber.copy(alpha = 0.15f))
+              .border(1.dp, WarningAmber.copy(alpha = 0.35f), RoundedCornerShape(3.dp))
+              .padding(horizontal = 3.5.dp, vertical = 0.5.dp)
           ) {
             Text(
-              text = "${project.changedFilesCount} changed",
+              text = "+${project.changedFilesCount}",
               color = WarningAmber,
-              fontSize = 9.sp,
-              fontFamily = FontFamily.Monospace
+              fontSize = 8.sp,
+              fontFamily = FontFamily.Monospace,
+              fontWeight = FontWeight.Bold
             )
           }
         }
@@ -1006,12 +1191,49 @@ private fun ProjectCard(
   }
 }
 
+/** Shared overflow menu for projects. */
+@Composable
+private fun ProjectOverflowMenu(
+  project: Project,
+  expanded: Boolean,
+  onDismiss: () -> Unit,
+  onAction: (ProjectOverflowAction) -> Unit
+) {
+  DropdownMenu(
+    expanded = expanded,
+    onDismissRequest = onDismiss,
+    containerColor = DarkSurfaceElevated
+  ) {
+    val disabled = project.isMissing
+    OverflowItem("Open in Agent", Icons.Outlined.AutoAwesome, enabled = !disabled) {
+      onDismiss(); onAction(ProjectOverflowAction.OPEN_IN_AGENT)
+    }
+    OverflowItem("Chats", Icons.AutoMirrored.Outlined.Chat, enabled = !disabled) {
+      onDismiss(); onAction(ProjectOverflowAction.CHATS)
+    }
+    OverflowItem("Files", Icons.Outlined.Folder, enabled = !disabled) {
+      onDismiss(); onAction(ProjectOverflowAction.FILES)
+    }
+    OverflowItem("Terminal", Icons.Outlined.Terminal, enabled = !disabled) {
+      onDismiss(); onAction(ProjectOverflowAction.TERMINAL)
+    }
+    OverflowItem("Changes", Icons.Outlined.Difference, enabled = !disabled) {
+      onDismiss(); onAction(ProjectOverflowAction.CHANGES)
+    }
+    if (project.sourcePath.isNotBlank()) {
+      OverflowItem("Save to original folder", Icons.Outlined.SaveAlt, enabled = !disabled) {
+        onDismiss(); onAction(ProjectOverflowAction.SAVE_TO_ORIGINAL)
+      }
+    }
+    HorizontalDivider(color = DarkBorderSubtle)
+    OverflowItem("Remove project", Icons.Outlined.Delete, tint = DangerRed) {
+      onDismiss(); onAction(ProjectOverflowAction.REMOVE)
+    }
+  }
+}
+
 /**
- * A card-level icon action. Both the copy-path and overflow actions use it so
- * they sit on the same right-aligned edge with the same 30dp footprint and the
- * same 16dp glyph — the row reads as one straight line. 30dp matches the box the
- * overflow button already occupied; the copy affordance previously had only a
- * 12dp target, so this is wider than what it replaces.
+ * Card action button with configurable size and icon size.
  */
 @Composable
 private fun CardAction(
@@ -1019,12 +1241,14 @@ private fun CardAction(
   contentDescription: String,
   tint: Color,
   onClick: () -> Unit,
+  size: Dp = 26.dp,
+  iconSize: Dp = 14.dp,
   testTag: String? = null
 ) {
   Box(
     modifier = Modifier
-      .size(30.dp)
-      .clip(RoundedCornerShape(8.dp))
+      .size(size)
+      .clip(RoundedCornerShape(6.dp))
       .clickable(onClick = onClick)
       .then(if (testTag != null) Modifier.testTag(testTag) else Modifier),
     contentAlignment = Alignment.Center
@@ -1033,18 +1257,17 @@ private fun CardAction(
       imageVector = icon,
       contentDescription = contentDescription,
       tint = tint,
-      modifier = Modifier.size(16.dp)
+      modifier = Modifier.size(iconSize)
     )
   }
 }
 
-/** One measured fact in the card's meta row. */
 @Composable
 private fun MetaValue(text: String) {
   Text(
     text = text,
     color = TextSecondary,
-    fontSize = 10.sp,
+    fontSize = 9.5.sp,
     fontFamily = FontFamily.Monospace
   )
 }
@@ -1079,67 +1302,70 @@ private fun OverflowItem(
 }
 
 /**
- * Real project icon when one exists in the folder, otherwise a type icon, and
- * otherwise an initial derived from the project name. Never an emoji.
+ * Project icon: displays favicon / logo when present in the project folder,
+ * otherwise a stylish monogram derived from the project name so the project icon
+ * remains the primary visual identifier.
  */
 @Composable
 private fun ProjectIcon(project: Project, size: Dp) {
   val bitmap = rememberProjectIcon(project.iconPath)
-  val shape = RoundedCornerShape(size / 4)
-  // Known kinds get a stable type colour; everything else is derived from the
-  // project name so the same project always looks the same.
-  val accent = if (project.kind != ProjectKind.UNKNOWN) {
-    accentForKind(project.kind)
-  } else {
-    accentForName(project.name)
-  }
+  val shape = RoundedCornerShape(size / 3.5f)
+  val accent = accentForName(project.name)
 
   Box(
     modifier = Modifier
       .size(size)
       .clip(shape)
-      .background(if (bitmap != null) DarkSurfaceHighlight else accent.copy(alpha = 0.14f))
+      .background(if (bitmap != null) DarkSurfaceHighlight else accent.copy(alpha = 0.16f))
       .border(1.dp, if (bitmap != null) DarkBorder else accent.copy(alpha = 0.35f), shape),
     contentAlignment = Alignment.Center
   ) {
-    when {
-      bitmap != null -> Image(
+    if (bitmap != null) {
+      Image(
         bitmap = bitmap,
-        contentDescription = null,
+        contentDescription = "${project.name} icon",
         contentScale = ContentScale.Fit,
         modifier = Modifier
           .fillMaxSize()
-          .padding(3.dp)
+          .padding(2.5.dp)
       )
-      project.kind != ProjectKind.UNKNOWN -> Icon(
-        imageVector = iconForKind(project.kind),
-        contentDescription = project.kind.label,
-        tint = accent,
-        modifier = Modifier.size(size * 0.5f)
-      )
-      else -> Text(
+    } else {
+      Text(
         text = project.name.trim().take(1).uppercase().ifBlank { "·" },
         color = accent,
-        fontSize = (size.value * 0.42f).sp,
-        fontWeight = FontWeight.Bold
+        fontSize = (size.value * 0.44f).sp,
+        fontWeight = FontWeight.ExtraBold
       )
     }
   }
 }
 
+/**
+ * Subtle project type chip (e.g. Node, Python, Android) with a mini colored dot,
+ * keeping the type informative yet subtle so the project icon remains the hero.
+ */
 @Composable
 private fun KindChip(kind: ProjectKind) {
-  Box(
+  val dotColor = accentForKind(kind)
+  Row(
     modifier = Modifier
       .clip(RoundedCornerShape(4.dp))
-      .background(DarkSurfaceHighlight)
+      .background(DarkSurfaceHighlight.copy(alpha = 0.75f))
       .border(1.dp, DarkBorderSubtle, RoundedCornerShape(4.dp))
-      .padding(horizontal = 5.dp, vertical = 1.dp)
+      .padding(horizontal = 4.5.dp, vertical = 1.dp),
+    verticalAlignment = Alignment.CenterVertically
   ) {
+    Box(
+      modifier = Modifier
+        .size(4.dp)
+        .clip(CircleShape)
+        .background(dotColor)
+    )
+    Spacer(modifier = Modifier.width(3.5.dp))
     Text(
       text = kind.label,
       color = TextSecondary,
-      fontSize = 9.sp,
+      fontSize = 8.5.sp,
       fontWeight = FontWeight.Medium
     )
   }
@@ -1150,8 +1376,8 @@ private fun MetaSeparator() {
   Text(
     text = "·",
     color = TextMuted,
-    fontSize = 10.sp,
-    modifier = Modifier.padding(horizontal = 5.dp)
+    fontSize = 9.sp,
+    modifier = Modifier.padding(horizontal = 4.dp)
   )
 }
 
@@ -1161,7 +1387,7 @@ private fun StatusBadge(text: String, color: Color, background: Color) {
     modifier = Modifier
       .clip(RoundedCornerShape(4.dp))
       .background(background)
-      .padding(horizontal = 5.dp, vertical = 1.dp)
+      .padding(horizontal = 4.5.dp, vertical = 1.dp)
   ) {
     Text(text = text, color = color, fontSize = 8.sp, fontWeight = FontWeight.Bold)
   }

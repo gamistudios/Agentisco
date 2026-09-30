@@ -72,6 +72,17 @@ class ProjectMetadataScannerTest {
   }
 
   @Test
+  fun `finds favicon ico in nested directory up to depth 5`() {
+    val root = tempDir("nested_favicon")
+    val publicDir = File(root, "client/public").apply { mkdirs() }
+    val favicon = File(publicDir, "favicon.ico")
+    favicon.writeBytes(byteArrayOf(0, 0, 1, 0, 1, 0))
+    val scanned = ProjectMetadataScanner.scan(root)
+    assertNotNull(scanned)
+    assertEquals(favicon.absolutePath, scanned?.iconPath)
+  }
+
+  @Test
   fun `returns null for missing folders and memoizes results`() {
     val root = tempDir("cache")
     File(root, "a.txt").writeText("abc")
