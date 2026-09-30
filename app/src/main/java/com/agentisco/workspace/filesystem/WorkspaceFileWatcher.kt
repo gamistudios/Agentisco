@@ -83,26 +83,36 @@ class WorkspaceFileWatcher(
     // Prevent watching redundant large metadata directories
     if (IGNORED_FOLDER_NAMES.contains(dir.name)) return
 
-    if (!activeObservers.containsKey(path)) {
-      val obs = createObserver(dir)
-      activeObservers[path] = obs
-      runCatching { obs.startWatching() }
-    }
+    registerObserver(dir)
 
     // Traverse children up to a reasonable depth
     dir.listFiles()?.forEach { child ->
-      if (child.isDirectory && !IGNORED_FOLDER_NAMES.contains(child.name)) {
-        registerTree(child)
+      if (!child.isDirectory) return@forEach
+      when {
+        // Watched for HEAD/index only (see handleFileEvent), never recursed into.
+        child.name == ".git" -> registerObserver(child)
+        !IGNORED_FOLDER_NAMES.contains(child.name) -> registerTree(child)
       }
     }
+  }
+
+  private fun registerObserver(dir: File) {
+    val path = dir.absolutePath
+    if (activeObservers.containsKey(path)) return
+    val obs = createObserver(dir)
+    activeObservers[path] = obs
+    runCatching { obs.startWatching() }
   }
 
   private fun notifyChange(changedPath: String?) {
     // If a new directory was created, attach an observer to it
     if (changedPath != null) {
       val f = File(changedPath)
-      if (f.isDirectory && !IGNORED_FOLDER_NAMES.contains(f.name) && !activeObservers.containsKey(f.absolutePath)) {
-        registerTree(f)
+      if (f.isDirectory && !activeObservers.containsKey(f.absolutePath)) {
+        when {
+          f.name == ".git" -> if (f.parentFile == currentRoot) registerObserver(f)
+          !IGNORED_FOLDER_NAMES.contains(f.name) -> registerTree(f)
+        }
       }
     }
 
@@ -124,14 +134,20 @@ class WorkspaceFileWatcher(
 
   private fun handleFileEvent(folderPath: String, path: String?) {
     if (path == null) return
+    if (folderPath.endsWith("/.git")) {
+      // A branch switch shows up as HEAD being replaced (and the index being
+      // rewritten) with the working tree untouched. Everything else in .git is
+      // object churn.
+      if (path == "HEAD" || path == "index") notifyChange("$folderPath/$path")
+      return
+    }
     // Ignore internal git objects, locks, and swap/temp files to prevent feedback loops
     if (path.endsWith(".swp") ||
         path.endsWith(".tmp") ||
         path.endsWith(".lock") ||
         path == "index.lock" ||
         path == "objects" ||
-        folderPath.contains("/.git") ||
-        folderPath.endsWith("/.git")
+        folderPath.contains("/.git")
     ) {
       return
     }

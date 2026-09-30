@@ -98,6 +98,7 @@ fun AgentIDEApp(
 ) {
   val currentDestination by viewModel.currentDestination.collectAsState()
   val activeProject by viewModel.activeProject.collectAsState()
+  val gitBranches by viewModel.branches.collectAsState()
   val selectedModel by viewModel.selectedModel.collectAsState()
   val aiModels by viewModel.aiModels.collectAsState()
   val providers by viewModel.providers.collectAsState()
@@ -194,6 +195,8 @@ fun AgentIDEApp(
         updateState = updateUiState.updateState,
         updateProgress = updateUiState.downloadProgress,
         hasNewUpdate = updateUiState.availableUpdate != null,
+        branches = gitBranches,
+        onCheckoutBranch = { name -> viewModel.checkoutBranch(name) },
         onUpdateClick = {
           when {
             // A known update (even mid-download) reopens the dialog so the

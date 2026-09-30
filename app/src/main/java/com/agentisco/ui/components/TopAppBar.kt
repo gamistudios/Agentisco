@@ -11,6 +11,10 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -27,6 +31,7 @@ import com.agentisco.core.model.AppDestination
 import com.agentisco.data.model.Project
 import com.agentisco.data.repository.UpdateRepository
 import com.agentisco.ui.theme.*
+import com.agentisco.workspace.git.GitBranch
 
 /**
  * Modern compact IDE header. Row 1 is the brand/workspace header (status dot +
@@ -46,6 +51,9 @@ fun AgentIDETopAppBar(
   updateProgress: Float = 0f,
   hasNewUpdate: Boolean = false,
   onUpdateClick: (() -> Unit)? = null,
+  /** Local branches of [activeProject]; empty until Git has scanned the repo. */
+  branches: List<GitBranch> = emptyList(),
+  onCheckoutBranch: (String) -> Unit = {},
   /** Debug builds only: opens the last-run crash trace. Null hides the button. */
   onShowCrashLog: (() -> Unit)? = null
 ) {
@@ -96,40 +104,100 @@ fun AgentIDETopAppBar(
 
             Spacer(modifier = Modifier.width(10.dp))
 
-            // Branch selector pill (compact & monospace)
+            // Branch pill: with more than one local branch it is a switcher,
+            // otherwise there is nothing to pick and it stays a Projects shortcut.
+            val localBranches = remember(branches) { branches.filter { !it.isRemote } }
+            val canSwitchBranch = localBranches.size > 1
             val branch = activeProject.branch.ifBlank { "main" }
-            Row(
-              verticalAlignment = Alignment.CenterVertically,
-              modifier = Modifier
-                .clip(RoundedCornerShape(8.dp))
-                .background(DarkSurfaceElevated)
-                .border(1.dp, DarkBorderSubtle, RoundedCornerShape(8.dp))
-                .clickable { onNavigate(AppDestination.PROJECTS) }
-                .padding(horizontal = 8.dp, vertical = 4.dp)
-                .testTag("top_project_selector")
-            ) {
-              Icon(
-                imageVector = Icons.Outlined.AccountTree,
-                contentDescription = null,
-                tint = TextMuted,
-                modifier = Modifier.size(11.dp)
-              )
-              Spacer(modifier = Modifier.width(5.dp))
-              Text(
-                text = branch,
-                color = TextSecondary,
-                fontSize = 11.sp,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1
-              )
-              Spacer(modifier = Modifier.width(4.dp))
-              Icon(
-                imageVector = Icons.Default.ArrowDropDown,
-                contentDescription = "Switch project",
-                tint = TextMuted,
-                modifier = Modifier.size(14.dp)
-              )
+            var branchMenuOpen by remember { mutableStateOf(false) }
+            Box {
+              Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                  .widthIn(max = 150.dp)
+                  .clip(RoundedCornerShape(8.dp))
+                  .background(DarkSurfaceElevated)
+                  .border(1.dp, DarkBorderSubtle, RoundedCornerShape(8.dp))
+                  .clickable {
+                    if (canSwitchBranch) branchMenuOpen = true
+                    else onNavigate(AppDestination.PROJECTS)
+                  }
+                  .padding(horizontal = 8.dp, vertical = 4.dp)
+                  .testTag(if (canSwitchBranch) "top_branch_switcher" else "top_project_selector")
+              ) {
+                Icon(
+                  imageVector = Icons.Outlined.AccountTree,
+                  contentDescription = null,
+                  tint = TextMuted,
+                  modifier = Modifier.size(11.dp)
+                )
+                Spacer(modifier = Modifier.width(5.dp))
+                Text(
+                  text = branch,
+                  color = TextSecondary,
+                  fontSize = 11.sp,
+                  fontFamily = FontFamily.Monospace,
+                  fontWeight = FontWeight.Medium,
+                  maxLines = 1,
+                  overflow = TextOverflow.Ellipsis
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Icon(
+                  imageVector = Icons.Default.ArrowDropDown,
+                  contentDescription = if (canSwitchBranch) "Switch branch" else "Switch project",
+                  tint = TextMuted,
+                  modifier = Modifier.size(14.dp)
+                )
+              }
+
+              DropdownMenu(
+                expanded = branchMenuOpen,
+                onDismissRequest = { branchMenuOpen = false },
+                containerColor = DarkSurfaceElevated
+              ) {
+                localBranches.forEach { item ->
+                  val isCurrent = item.name == branch
+                  DropdownMenuItem(
+                    text = {
+                      Text(
+                        text = item.name,
+                        fontSize = 12.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = if (isCurrent) TerminalGreen else TextPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                      )
+                    },
+                    leadingIcon = {
+                      Icon(
+                        imageVector = if (isCurrent) Icons.Default.Check else Icons.Outlined.AccountTree,
+                        contentDescription = null,
+                        tint = if (isCurrent) TerminalGreen else TextMuted,
+                        modifier = Modifier.size(15.dp)
+                      )
+                    },
+                    trailingIcon = {
+                      if (item.ahead > 0 || item.behind > 0) {
+                        Text(
+                          text = buildString {
+                            if (item.ahead > 0) append("↑${item.ahead}")
+                            if (item.ahead > 0 && item.behind > 0) append(" ")
+                            if (item.behind > 0) append("↓${item.behind}")
+                          },
+                          color = TextMuted,
+                          fontSize = 10.sp,
+                          fontFamily = FontFamily.Monospace
+                        )
+                      }
+                    },
+                    onClick = {
+                      branchMenuOpen = false
+                      if (!isCurrent) onCheckoutBranch(item.name)
+                    },
+                    modifier = Modifier.testTag("branch_option_${item.name}")
+                  )
+                }
+              }
             }
           }
 
