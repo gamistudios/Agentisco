@@ -31,7 +31,10 @@ import com.agentisco.workspace.git.GitRepositoryManager
 import com.agentisco.workspace.git.GitRunResult
 import com.agentisco.workspace.terminal.TerminalProcessManager
 import java.io.File
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -432,6 +435,9 @@ class SubagentToolTest {
     val requests = mutableListOf<LlmRequest>()
     private var index = 0
 
+    /** Runs the moment a request arrives, before any of it is answered. */
+    var onArriving: (LlmRequest) -> Unit = {}
+
     override suspend fun streamChat(
       provider: AIProvider,
       model: AIModel,
@@ -442,6 +448,7 @@ class SubagentToolTest {
       // The runtime hands over a live transcript it keeps appending to, so what
       // this records must be the state at the moment the model was asked.
       requests += request.copy(messages = request.messages.toList())
+      onArriving(request)
       onEvent(LlmStreamEvent.Started)
       when (val turn = turns.getOrElse(index) { Turn.Answer("SCRIPT EXHAUSTED") }) {
         is Turn.Call -> {
@@ -458,7 +465,13 @@ class SubagentToolTest {
     }
   }
 
-  private class PairingRun(val dir: File, val service: ScriptedService, val events: List<AgentStreamEvent>) {
+  private class PairingRun(
+    val dir: File,
+    val service: ScriptedService,
+    val events: List<AgentStreamEvent>,
+    /** The orchestrator's runtime, still addressable after its turn has run. */
+    val runtime: AgentRuntime
+  ) {
     val file get() = File(dir, "src/App.tsx")
     /** The child's requests: everything between the parent's first call and its last. */
     val childFirst get() = service.requests[1]
@@ -476,7 +489,11 @@ class SubagentToolTest {
   private fun delegationRun(
     role: AgentRole,
     childTurns: List<Turn>,
-    answer: (PendingApproval) -> Pair<Boolean, String?> = { false to null }
+    answer: (PendingApproval) -> Pair<Boolean, String?> = { false to null },
+    /** Acts on a request the moment it reaches the model, before it is answered. */
+    onRequest: (AgentRuntime, ScriptedService) -> Unit = { _, _ -> },
+    /** Runs beside the turn, so the test can act on a run still in flight. */
+    whileRunning: suspend (AgentRuntime, ScriptedService) -> Unit = { _, _ -> }
   ): PairingRun {
     val dir = File(ws.root, "project_${System.nanoTime()}")
     File(dir, "src").mkdirs()
@@ -530,32 +547,37 @@ class SubagentToolTest {
     )
     val parent = AgentRuntime(fileSystem, terminals, git, service, registry) { null }
     runtime = parent
+    service.onArriving = { onRequest(parent, service) }
 
     runBlocking {
-      parent.executeTask(
-        prompt = "find who reads value",
-        project = project,
-        provider = provider,
-        model = model,
-        apiKey = "k",
-        permissions = {
-          AgentPermissions(
-            planMode = false,
-            fileEditing = PermissionMode.ALLOW_ALL,
-            terminalCommands = PermissionMode.ALLOW_ALL,
-            deleteFiles = true
-          )
-        },
-        terminalSession = terminal,
-        // The user's dialog: whatever the turn asks, this test answers.
-        onRequestApproval = { approval ->
-          val (allowed, text) = answer(approval)
-          runtime!!.resolvePendingApproval(allowed = allowed, answer = text)
-        },
-        onEvent = { events.add(it) }
-      )
+      val running = async {
+        parent.executeTask(
+          prompt = "find who reads value",
+          project = project,
+          provider = provider,
+          model = model,
+          apiKey = "k",
+          permissions = {
+            AgentPermissions(
+              planMode = false,
+              fileEditing = PermissionMode.ALLOW_ALL,
+              terminalCommands = PermissionMode.ALLOW_ALL,
+              deleteFiles = true
+            )
+          },
+          terminalSession = terminal,
+          // The user's dialog: whatever the turn asks, this test answers.
+          onRequestApproval = { approval ->
+            val (allowed, text) = answer(approval)
+            runtime!!.resolvePendingApproval(allowed = allowed, answer = text)
+          },
+          onEvent = { events.add(it) }
+        )
+      }
+      whileRunning(parent, service)
+      running.await()
     }
-    return PairingRun(dir, service, events)
+    return PairingRun(dir, service, events, parent)
   }
 
   private val editTurn = Turn.Call(
@@ -605,6 +627,66 @@ class SubagentToolTest {
     val report = run.parentFinal.messages.last { it.role == LlmRole.TOOL }.content
     assertTrue(report, report.contains("Report from the Backend Engineer"))
     assertTrue(report, report.contains("Files it changed: src/App.tsx"))
+  }
+
+  /**
+   * A specialist's report is its own closing message, whole. The parent reads the
+   * findings at the end of it as much as the ones at the start, so nothing may
+   * clip the run down to a first screen of text on the way back.
+   */
+  @Test
+  fun `a specialist's long report reaches the parent with its tail intact`() {
+    val findings = (1..120).joinToString(" ") { "finding-$it" }
+    assertTrue("fixture too short: ${findings.length}", findings.length > 1_000)
+
+    val run = delegationRun(
+      AgentRoles.BACKEND,
+      listOf(editTurn, Turn.Answer("Changed value to 2. $findings — end of report."))
+    )
+
+    val delivered = run.parentFinal.messages.last { it.role == LlmRole.TOOL }.content
+    assertTrue(delivered, delivered.contains("finding-118"))
+    assertTrue(delivered, delivered.contains("— end of report."))
+    assertFalse(delivered, delivered.contains("truncated"))
+  }
+
+  /**
+   * Pausing holds one specialist between its steps: the step already begun is
+   * allowed to finish, and no next step is asked for while the user holds it.
+   * Letting it go on continues the same transcript, so it picks up where it
+   * stopped instead of starting the task again.
+   */
+  @Test
+  fun `a paused specialist waits between steps and resumes with its progress`() {
+    val readTurn = Turn.Call("read_file", """{"path":"src/App.tsx"}""")
+
+    val run = delegationRun(
+      AgentRoles.BACKEND,
+      listOf(editTurn, readTurn, Turn.Answer("Report: value is 2, and re-reading confirms it.")),
+      // The requests so far are the parent's, then the child's two steps. The
+      // pause lands while the second is answered, so the boundary after it holds.
+      onRequest = { parent, service ->
+        if (service.requests.size == 3) parent.setDelegationPaused("call_0", paused = true)
+      },
+      whileRunning = { parent, service ->
+        val wentOn = withTimeoutOrNull(1_500) {
+          while (service.requests.size < 4) delay(25)
+          true
+        }
+        assertNull("a paused specialist kept taking steps", wentOn)
+        assertEquals(true, parent.delegationPhases.value["call_0"])
+        parent.setDelegationPaused("call_0", paused = false)
+      }
+    )
+
+    assertEquals(5, run.service.requests.size)
+    // Held at the boundary, then sent on: both steps it had done are still there.
+    val resumed = run.service.requests[3]
+    assertEquals(2, resumed.messages.count { it.role == LlmRole.TOOL })
+    val report = run.parentFinal.messages.last { it.role == LlmRole.TOOL }.content
+    assertTrue(report, report.contains("re-reading confirms it"))
+    // The report is in, so nothing is left held: the gate is let go with the run.
+    assertEquals(emptyMap<String, Boolean>(), run.runtime.delegationPhases.value)
   }
 
   /** The user watches the specialist work, not only its report. */

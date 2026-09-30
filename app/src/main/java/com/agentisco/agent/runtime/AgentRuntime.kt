@@ -41,6 +41,10 @@ import com.agentisco.settings.model.AIProvider
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -92,6 +96,14 @@ class AgentRuntime(
    */
   private val skillStore: com.agentisco.agent.skill.SkillStore =
     com.agentisco.agent.skill.SkillStore(),
+  /**
+   * The pause registry this run shares with the turn that delegated to it. Every
+   * agent of one tree writes to the same map, keyed by the `delegate` call that
+   * started it, so the control on any specialist's card reaches the run that card
+   * shows — however deep the delegation goes. Null gives a run a registry of its
+   * own, which is what the root of a turn has.
+   */
+  sharedDelegationPhases: MutableStateFlow<Map<String, Boolean>>? = null,
   /**
    * Compaction sink for the run in progress. Null (the default, and what unit
    * tests use) disables compaction entirely, so the runtime behaves exactly as
@@ -240,6 +252,17 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
   private var activeApprovalChannel: (suspend (PendingApproval) -> UserDecision)? = null
   private val toolParallelism = Semaphore(MAX_PARALLEL_TOOLS)
 
+  /**
+   * The specialists this run has in flight, keyed by the id of the `delegate` call
+   * that started one, and whether the user has paused it. A delegated run reads its
+   * own entry at the boundary between steps, so pausing stops it from taking
+   * another one while its transcript, its claimed files and its place in the turn
+   * all stay exactly as they were.
+   */
+  private val _delegationPhases: MutableStateFlow<Map<String, Boolean>> =
+    sharedDelegationPhases ?: MutableStateFlow(emptyMap())
+  val delegationPhases: StateFlow<Map<String, Boolean>> = _delegationPhases
+
   /** Tool calls the user SIGKILLed; keyed by the model's call id. */
   private val userCancelledCalls: MutableSet<String> =
     java.util.Collections.synchronizedSet(HashSet())
@@ -311,6 +334,22 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
     toolCancelDecisions.remove(callId)?.complete(retry)
   }
 
+  /**
+   * Pauses or resumes one specialist by the id of the `delegate` call that started
+   * it. False when no run of this turn answers to that id — its report has already
+   * come back, so there is nothing left to hold.
+   */
+  fun setDelegationPaused(delegationId: String, paused: Boolean): Boolean {
+    if (delegationId !in _delegationPhases.value) return false
+    _delegationPhases.update { it + (delegationId to paused) }
+    return true
+  }
+
+  /** Holds a delegated run at its step boundary until the user lets it go on. */
+  private suspend fun awaitDelegationResume(delegationId: String) {
+    _delegationPhases.first { it[delegationId] != true }
+  }
+
   suspend fun executeTask(
     prompt: String,
     project: Project,
@@ -333,6 +372,13 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
      * it - there is no user watching this run to present a plan to.
      */
     role: com.agentisco.agent.model.AgentRole? = null,
+    /**
+     * Set for a delegated run: waits here between the agent's steps while the user
+     * holds that specialist paused, so it stops taking steps without losing the
+     * transcript it built and continues from the exact step it reached. A no-op for
+     * a run the user drives directly, which has the composer's own stop and resume.
+     */
+    pauseGate: suspend () -> Unit = {},
     /**
      * Compaction budget for this run: the selected model's real context window
      * plus the user's Settings choices. Null derives it from the model.
@@ -466,6 +512,9 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
     try {
       var finalText = ""
       taskLoop@ for (iteration in 1..maxIterations) {
+        // The boundary between one step and the next: everything the run has done
+        // is already in its transcript, and no tool is half-finished.
+        pauseGate()
         var attempt = 0
         while (true) {
           attempt++
@@ -600,7 +649,11 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
             rowIds.add(0L)
           }
           if (iteration == maxIterations) {
-            finalText = message.content.ifBlank { "Stopped after $maxIterations tool iterations." }
+            // What it said beside the last request is part of the answer, so the
+            // ceiling note goes after it instead of replacing it.
+            val said = message.content.ifBlank { assistantText.toString() }.trim()
+            finalText = if (said.isBlank()) "Stopped after $maxIterations tool iterations."
+            else "$said\n\n(Stopped after $maxIterations tool iterations.)"
             break@taskLoop
           }
           break // next iteration: request a new model response
@@ -610,7 +663,7 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
       onEvent(AgentStreamEvent.Completed(finalText.ifBlank { "Task completed." }))
       AgentTaskResult(
         success = true,
-        summary = finalText.take(500).ifBlank { "Task completed." },
+        summary = finalText.ifBlank { "Task completed." },
         modifiedFiles = modifiedFiles.toList()
       )
     } catch (e: CancellationException) {
@@ -676,39 +729,52 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
       // and every run it starts in turn is counted beside them.
       teamBoard,
       // The same skills: a specialist working in this repo reads the same files.
-      skillStore
-    ) { null }
+      skillStore,
+      // One pause registry for the whole tree, so a specialist nested inside
+      // another is held by the card that shows it.
+      sharedDelegationPhases = _delegationPhases,
+      compactSinkProvider = { null }
+    )
     // This turn's dialog, if the user is watching one: the specialist's requests go
     // through it, so it can ask rather than be answered for.
     val parentChannel = activeApprovalChannel
-    val result = child.executeTask(
-      prompt = "${role.name} task (${description.ifBlank { "delegated work" }}): $prompt",
-      role = role,
-      project = project,
-      provider = provider,
-      model = model,
-      apiKey = apiKey,
-      permissions = { SubagentTool.childPermissions(role, parentPermissions) },
-      terminalSession = terminalSession,
-      // The specialist speaks to the user through this turn's one dialog: what it
-      // asks is shown as its own question, and the answer comes from the user
-      // rather than being decided for them. A run with no parent turn in flight
-      // (a test, a call outside a turn) has no dialog to borrow, so its requests
-      // are answered by the fallback below instead of hanging.
-      approvalChannel = parentChannel?.let { channel ->
-        { approval ->
-          channel(
-            approval.copy(
-              title = if (approval.isQuestion) "${role.name} has a question" else "${role.name}: ${approval.title}"
+    // The user holds this specialist by the id of the call that started it, which
+    // is the id the card in the chat already carries. It is let go again on every
+    // way the run can end, including a cancelled one.
+    if (delegationId.isNotBlank()) _delegationPhases.update { it + (delegationId to false) }
+    val result = try {
+      child.executeTask(
+        prompt = "${role.name} task (${description.ifBlank { "delegated work" }}): $prompt",
+        role = role,
+        project = project,
+        provider = provider,
+        model = model,
+        apiKey = apiKey,
+        permissions = { SubagentTool.childPermissions(role, parentPermissions) },
+        terminalSession = terminalSession,
+        // The specialist speaks to the user through this turn's one dialog: what it
+        // asks is shown as its own question, and the answer comes from the user
+        // rather than being decided for them. A run with no parent turn in flight
+        // (a test, a call outside a turn) has no dialog to borrow, so its requests
+        // are answered by the fallback below instead of hanging.
+        approvalChannel = parentChannel?.let { channel ->
+          { approval ->
+            channel(
+              approval.copy(
+                title = if (approval.isQuestion) "${role.name} has a question" else "${role.name}: ${approval.title}"
+              )
             )
-          )
-        }
-      },
-      // Nothing reached here got through to the user: record it as a request that
-      // was never made, which is what the tool then reports to the model.
-      onRequestApproval = { child.resolvePendingApproval(allowed = false, termination = true) },
-      onEvent = { event -> relay(role, delegationId, event, onEvent) }
-    )
+          }
+        },
+        // Nothing reached here got through to the user: record it as a request that
+        // was never made, which is what the tool then reports to the model.
+        onRequestApproval = { child.resolvePendingApproval(allowed = false, termination = true) },
+        pauseGate = { awaitDelegationResume(delegationId) },
+        onEvent = { event -> relay(role, delegationId, event, onEvent) }
+      )
+    } finally {
+      if (delegationId.isNotBlank()) _delegationPhases.update { it - delegationId }
+    }
     return SubagentOutcome(
       success = result.success,
       summary = result.summary,
@@ -1279,6 +1345,13 @@ private fun normalizeArgsJson(raw: String): String {
   return runCatching { org.json.JSONObject(text).toString() }.getOrDefault("{}")
 }
 
+/**
+ * [summary] is the run's own closing words in full, or the reason it did not
+ * finish. Nothing clips it here: a delegated run's report travels to the agent
+ * that delegated it through this field, and a specialist that wrote a long
+ * answer must not lose the tail of it. A surface that shows one line shortens
+ * it for itself.
+ */
 data class AgentTaskResult(
   val success: Boolean,
   val summary: String,

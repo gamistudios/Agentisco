@@ -122,6 +122,8 @@ fun AgentScreen(
   val chatDisplay by viewModel.chatDisplay.collectAsState()
   val compactSettings by viewModel.compactSettings.collectAsState()
   val contextUsage by viewModel.contextUsage.collectAsState()
+  val delegationPhases by viewModel.delegationPhases.collectAsState()
+  val pausedDelegations = delegationPhases.filterValues { it }.keys
 
   var promptText by remember { mutableStateOf("") }
   var showSessionSheet by remember { mutableStateOf(false) }
@@ -296,6 +298,9 @@ fun AgentScreen(
                 onCancelTool = { viewModel.cancelToolCall(it) },
                 onRetryTool = { viewModel.resolveToolCancellation(it, retry = true) },
                 onContinueTool = { viewModel.resolveToolCancellation(it, retry = false) },
+                pausedDelegations = pausedDelegations,
+                onPauseSubagent = { viewModel.setSubagentPaused(it, paused = true) },
+                onResumeSubagent = { viewModel.setSubagentPaused(it, paused = false) },
                 onNavigate = onNavigate
               )
             }
@@ -695,6 +700,10 @@ private fun AgentTurnCard(
   onCancelTool: (String) -> Unit,
   onRetryTool: (String) -> Unit,
   onContinueTool: (String) -> Unit,
+  /** The delegate calls the user is holding still, by their own call id. */
+  pausedDelegations: Set<String>,
+  onPauseSubagent: (String) -> Unit,
+  onResumeSubagent: (String) -> Unit,
   onNavigate: (AppDestination) -> Unit
 ) {
   val clipboard = LocalClipboardManager.current
@@ -834,7 +843,10 @@ private fun AgentTurnCard(
           showToolJson = showToolJson,
           onCancelTool = { onCancelTool(block.callId) },
           onRetryTool = { onRetryTool(block.callId) },
-          onContinueTool = { onContinueTool(block.callId) }
+          onContinueTool = { onContinueTool(block.callId) },
+          pausedDelegations = pausedDelegations,
+          onPauseSubagent = onPauseSubagent,
+          onResumeSubagent = onResumeSubagent
         )
         is ApprovalBlock -> ApprovalCard(
           item = block,
@@ -989,12 +1001,18 @@ private fun CompactionCard(block: CompactionBlock) {
  * The work of a delegated agent, rendered with the same cards the orchestrator's
  * own actions use, nested inside the delegation that asked for it.
  *
- * Nothing here is interactive by design: a specialist cannot answer the user
- * (its approvals are refused at once by the runtime), and its calls are stopped
- * with the turn, not individually.
+ * A step of this work has no controls of its own — the specialist's approvals are
+ * asked through the parent turn's single dialog. A delegation nested in here is the
+ * one exception: it is held and released by its own card, as any other is.
  */
 @Composable
-private fun DelegationActivityStream(blocks: List<TurnBlock>, showToolJson: Boolean) {
+private fun DelegationActivityStream(
+  blocks: List<TurnBlock>,
+  showToolJson: Boolean,
+  pausedDelegations: Set<String>,
+  onPauseSubagent: (String) -> Unit,
+  onResumeSubagent: (String) -> Unit
+) {
   if (blocks.isEmpty()) return
   Column(
     modifier = Modifier
@@ -1011,7 +1029,13 @@ private fun DelegationActivityStream(blocks: List<TurnBlock>, showToolJson: Bool
           MarkdownText(text = block.text, streaming = block.streaming, modifier = Modifier.fillMaxWidth())
         }
         is ReasoningBlock -> ThinkingBlock(block)
-        is ActionBlock -> ToolCallRow(item = block, showToolJson = showToolJson)
+        is ActionBlock -> ToolCallRow(
+          item = block,
+          showToolJson = showToolJson,
+          pausedDelegations = pausedDelegations,
+          onPauseSubagent = onPauseSubagent,
+          onResumeSubagent = onResumeSubagent
+        )
         is ApprovalBlock -> ApprovalCard(item = block, onAllow = {}, onDeny = {}, onAnswer = {}, onReopen = {})
         is ErrorBlock -> ErrorCard(block, showRetry = false, onRetry = {})
         is CompactionBlock -> CompactionCard(block)
@@ -1026,8 +1050,13 @@ internal fun ToolCallRow(
   showToolJson: Boolean = false,
   onCancelTool: () -> Unit = {},
   onRetryTool: () -> Unit = {},
-  onContinueTool: () -> Unit = {}
+  onContinueTool: () -> Unit = {},
+  /** The specialists the user is holding still, by the id of their delegate call. */
+  pausedDelegations: Set<String> = emptySet(),
+  onPauseSubagent: (String) -> Unit = {},
+  onResumeSubagent: (String) -> Unit = {}
 ) {
+  val subagentPaused = item.callId in pausedDelegations
   var expanded by remember(item.id) { mutableStateOf(false) }
   val clipboard = LocalClipboardManager.current
   val (verb, target) = friendlyToolLabel(item.name, item.argsJson)
@@ -1038,6 +1067,7 @@ internal fun ToolCallRow(
   // Terminal cards show the real shell command instead of {"command": …}.
   val command = remember(item.argsJson) { displayCommandForTool(item.name, item.argsJson) }
   val statusColor = when {
+    subagentPaused -> WarningAmber
     item.running -> ElectricBlueGlow
     item.cancelled -> WarningAmber
     item.success == false -> DangerRed
@@ -1045,6 +1075,7 @@ internal fun ToolCallRow(
     else -> iconColor
   }
   val statusIcon = when {
+    subagentPaused -> Icons.Default.Pause
     item.cancelled -> Icons.Default.Stop
     item.success == false -> Icons.Default.Close
     item.success == true -> Icons.Default.Check
@@ -1088,7 +1119,28 @@ internal fun ToolCallRow(
       // A settled step states its result in the leading circle; only a running
       // one still needs the right-hand spinner and its own kill switch.
       if (item.running) {
-        CircularProgressIndicator(modifier = Modifier.size(12.dp), color = ElectricBlueGlow, strokeWidth = 1.8.dp)
+        // A delegated card is held and released by its own control: the spinner
+        // says it is working, and it stops saying so the moment the user holds it.
+        if (item.delegation == null || !subagentPaused) {
+          CircularProgressIndicator(modifier = Modifier.size(12.dp), color = ElectricBlueGlow, strokeWidth = 1.8.dp)
+        }
+        if (item.delegation != null && item.callId.isNotBlank()) {
+          Spacer(modifier = Modifier.width(4.dp))
+          IconButton(
+            onClick = { if (subagentPaused) onResumeSubagent(item.callId) else onPauseSubagent(item.callId) },
+            modifier = Modifier
+              .size(22.dp)
+              .clip(RoundedCornerShape(6.dp))
+              .testTag(if (subagentPaused) "btn_resume_subagent" else "btn_pause_subagent")
+          ) {
+            Icon(
+              imageVector = if (subagentPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
+              contentDescription = if (subagentPaused) "Resume this agent" else "Pause this agent",
+              tint = if (subagentPaused) TerminalGreen else WarningAmber,
+              modifier = Modifier.size(13.dp)
+            )
+          }
+        }
         // SIGKILL this specific call without stopping the whole task.
         if (item.callId.isNotBlank()) {
           Spacer(modifier = Modifier.width(4.dp))
@@ -1227,6 +1279,7 @@ internal fun ToolCallRow(
       var workOpen by remember(item.id) { mutableStateOf(false) }
       val liveChild = item.children.filterIsInstance<ActionBlock>().lastOrNull { it.running }
       val headline = when {
+        subagentPaused -> "paused"
         liveChild != null -> friendlyToolLabel(liveChild.name, liveChild.argsJson).first
         item.running -> "thinking"
         else -> "finished"
@@ -1264,7 +1317,7 @@ internal fun ToolCallRow(
           overflow = TextOverflow.Ellipsis,
           modifier = Modifier.weight(1f)
         )
-        if (liveChild != null) {
+        if (liveChild != null && !subagentPaused) {
           CircularProgressIndicator(
             modifier = Modifier.size(10.dp),
             color = ElectricBlueGlow,
@@ -1272,7 +1325,13 @@ internal fun ToolCallRow(
           )
         }
       }
-      if (workOpen) DelegationActivityStream(item.children, showToolJson)
+      if (workOpen) DelegationActivityStream(
+        blocks = item.children,
+        showToolJson = showToolJson,
+        pausedDelegations = pausedDelegations,
+        onPauseSubagent = onPauseSubagent,
+        onResumeSubagent = onResumeSubagent
+      )
     }
 
     // Git-style diff for file edits: -removed / +added with line numbers.

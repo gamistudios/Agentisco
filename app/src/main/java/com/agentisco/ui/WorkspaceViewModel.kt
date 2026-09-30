@@ -72,6 +72,8 @@ class WorkspaceViewModel(
 
   val isAgentWorking: StateFlow<Boolean> = repository.isAgentWorking
   val agentStatusText: StateFlow<String> = repository.agentStatusText
+  /** Delegate call id -> whether the user is holding that specialist still. */
+  val delegationPhases: StateFlow<Map<String, Boolean>> = repository.delegationPhases
 
   // ---- Background execution ----
   private val background = repository.backgroundExecution
@@ -1627,6 +1629,11 @@ class WorkspaceViewModel(
   /** Retry re-runs the cancelled call; continue tells the model it was cancelled. */
   fun resolveToolCancellation(callId: String, retry: Boolean) {
     repository.resolveToolCancellation(callId, retry)
+  }
+
+  /** Holds one specialist at its next step, or lets a held one go on. */
+  fun setSubagentPaused(delegationId: String, paused: Boolean) {
+    repository.setSubagentPaused(delegationId, paused)
   }
 
   val defaultTaskModelId: StateFlow<String?> = repository.defaultTaskModelId

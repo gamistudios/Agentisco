@@ -5,6 +5,9 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
@@ -24,6 +27,7 @@ import com.agentisco.ui.theme.AgentiscoTheme
 import com.agentisco.ui.theme.DarkBackground
 import com.github.takahirom.roborazzi.RobolectricDeviceQualifiers
 import com.github.takahirom.roborazzi.captureRoboImage
+import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -76,6 +80,28 @@ class AgentCardStyleScreenshotTest {
     allowed = true
   )
 
+  /** A delegation in flight: two steps of its own, still running. */
+  private val delegation = ActionBlock(
+    id = "d1",
+    name = "delegate",
+    argsJson = """{"role":"Explore / Research Engineer","description":"map the repo","prompt":"Read the scanner"}""",
+    running = true,
+    success = null,
+    summary = "",
+    detail = "",
+    exitCode = null,
+    callId = "call-d1",
+    children = listOf(
+      readTool,
+      readTool.copy(id = "d1-c2", name = "list_files", argsJson = """{"path":"app/src"}""")
+    ),
+    delegation = com.agentisco.ui.DelegationBrief(
+      role = "Explore / Research Engineer",
+      description = "map the repo",
+      prompt = "Read the scanner"
+    )
+  )
+
   @Test
   fun `cards carry a status rail, a status circle and the impact line`() {
     composeTestRule.setContent {
@@ -115,26 +141,6 @@ class AgentCardStyleScreenshotTest {
    */
   @Test
   fun `sub-agent work stays collapsed until opened, then closes again`() {
-    val delegation = ActionBlock(
-      id = "d1",
-      name = "delegate",
-      argsJson = """{"role":"Explore / Research Engineer","description":"map the repo","prompt":"Read the scanner"}""",
-      running = true,
-      success = null,
-      summary = "",
-      detail = "",
-      exitCode = null,
-      children = listOf(
-        readTool,
-        readTool.copy(id = "d1-c2", name = "list_files", argsJson = """{"path":"app/src"}""")
-      ),
-      delegation = com.agentisco.ui.DelegationBrief(
-        role = "Explore / Research Engineer",
-        description = "map the repo",
-        prompt = "Read the scanner"
-      )
-    )
-
     composeTestRule.setContent {
       AgentiscoTheme {
         Column(modifier = Modifier.fillMaxSize().background(DarkBackground).padding(12.dp)) {
@@ -152,5 +158,42 @@ class AgentCardStyleScreenshotTest {
 
     composeTestRule.onNodeWithTag("btn_toggle_subagent_work").performClick()
     composeTestRule.onNodeWithTag("stream_tool_list_files").assertDoesNotExist()
+  }
+
+  /**
+   * One specialist of its own: the user can hold it between its steps and let it
+   * go on again, and the card says which of the two it is looking at.
+   */
+  @Test
+  fun `a delegation is held and released from its own card`() {
+    var paused by mutableStateOf(false)
+    var holds = 0
+    var releases = 0
+    composeTestRule.setContent {
+      AgentiscoTheme {
+        Column(modifier = Modifier.fillMaxSize().background(DarkBackground).padding(12.dp)) {
+          ToolCallRow(
+            item = delegation,
+            pausedDelegations = if (paused) setOf(delegation.callId) else emptySet(),
+            onPauseSubagent = { holds++; paused = true },
+            onResumeSubagent = { releases++; paused = false }
+          )
+        }
+      }
+    }
+
+    composeTestRule.onNodeWithTag("btn_pause_subagent").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("btn_resume_subagent").assertDoesNotExist()
+
+    composeTestRule.onNodeWithTag("btn_pause_subagent").performClick()
+    assertEquals(1, holds)
+    composeTestRule.onNodeWithTag("btn_resume_subagent").assertIsDisplayed()
+    composeTestRule.onNodeWithTag("btn_pause_subagent").assertDoesNotExist()
+    composeTestRule.onNodeWithText("2 steps · paused").assertIsDisplayed()
+    composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/agent_subagent_paused.png")
+
+    composeTestRule.onNodeWithTag("btn_resume_subagent").performClick()
+    assertEquals(1, releases)
+    composeTestRule.onNodeWithTag("btn_pause_subagent").assertIsDisplayed()
   }
 }

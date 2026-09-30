@@ -846,7 +846,7 @@ class WorkspaceRepository(
     }
   }
 
-  private val _commitMessage = MutableStateFlow("Fix chat message lifecycle and store recreation")
+  private val _commitMessage = MutableStateFlow("")
   val commitMessage: StateFlow<String> = _commitMessage.asStateFlow()
 
   private val _commitHistory = MutableStateFlow<List<GitCommit>>(emptyList())
@@ -2760,6 +2760,20 @@ class WorkspaceRepository(
     agentRuntime.resolveToolCancellation(callId, retry)
   }
 
+  /** Which specialists the user is holding still, keyed by their delegate call id. */
+  val delegationPhases: StateFlow<Map<String, Boolean>> get() = agentRuntime.delegationPhases
+
+  /**
+   * Pauses or resumes one specialist by the id of the `delegate` call that started
+   * it. It stops at the boundary after its current step and keeps everything it
+   * has learned, so resuming sends it on from the exact step it reached. The agent
+   * that delegated to it waits for the report either way — the turn is still
+   * running, one of its specialists is just standing still.
+   */
+  fun setSubagentPaused(delegationId: String, paused: Boolean) {
+    agentRuntime.setDelegationPaused(delegationId, paused)
+  }
+
   // Permission handling
   fun updatePermissions(transform: (AgentPermissions) -> AgentPermissions) {
     _permissions.update(transform)
@@ -2982,7 +2996,13 @@ class WorkspaceRepository(
       _isEditorDirty.value = false
     }
 
-    _agentStatusText.value = if (result.success) result.summary else "Task failed — ${result.summary}"
+    // The status line is one line, so it takes the run's first sentence rather
+    // than the whole report the delegating agent received.
+    val closing = result.summary.lineSequence().first().let {
+      if (it.length > 140) it.take(139) + "…" else it
+    }
+    _agentStatusText.value =
+      if (result.success) closing.ifBlank { "Task completed." } else "Task failed — $closing"
     // Mirror the agent's changes to the original folder (if enabled).
     maybeAutoSync(_activeProject.value)
   }
