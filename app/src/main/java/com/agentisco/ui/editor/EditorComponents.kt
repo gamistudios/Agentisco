@@ -24,6 +24,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
@@ -32,7 +33,10 @@ import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -915,47 +919,12 @@ fun CodeEditorCanvas(
         .fillMaxSize()
         .verticalScroll(verticalScrollState)
     ) {
-      // 1. Line Numbers Gutter
       if (settings.showLineNumbers) {
-        Column(
-          modifier = Modifier
-            .width(46.dp)
-            .background(theme.gutterBg)
-            .padding(vertical = 6.dp),
-          horizontalAlignment = Alignment.End
-        ) {
-          lines.indices.forEach { idx ->
-            val lineNum = idx + 1
-            val isActive = settings.highlightActiveLine && idx == activeLineIndex
-            Box(
-              modifier = Modifier
-                .fillMaxWidth()
-                .height(lineHeightDp)
-                .background(if (isActive) theme.activeLineBg else Color.Transparent)
-                .padding(end = 6.dp),
-              contentAlignment = Alignment.CenterEnd
-            ) {
-              Text(
-                text = "$lineNum",
-                color = if (isActive) ElectricBlueGlow else theme.gutterText,
-                fontSize = (settings.fontSize - 1).sp,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal
-              )
-            }
-          }
-        }
-
-        // Gutter vertical separator line
-        Box(
-          modifier = Modifier
-            .width(1.dp)
-            .height(lineHeightDp * lines.size.coerceAtLeast(1))
-            .background(theme.activeLineBg)
-        )
+        // Reserves the strip the pinned gutter paints over
+        Box(modifier = Modifier.width(47.dp))
       }
 
-      // 2. Syntax-Highlighted Code Editor Canvas
+      // 1. Syntax-Highlighted Code Editor Canvas
       Box(
         modifier = Modifier
           .weight(1f)
@@ -996,6 +965,80 @@ fun CodeEditorCanvas(
           ),
           cursorBrush = SolidColor(ElectricBlueGlow)
         )
+      }
+    }
+
+    // 2. Line numbers gutter — pinned over the scroll, so it mirrors the code
+    //    without ever growing with the document. It takes no pointer input, so a
+    //    drag that starts here still scrolls the code underneath it.
+    if (settings.showLineNumbers) {
+      BoxWithConstraints(
+        modifier = Modifier
+          .align(Alignment.TopStart)
+          .fillMaxHeight()
+          .testTag("editor_gutter")
+      ) {
+        val lineHeightPx = with(density) { lineHeightDp.toPx() }
+        val topPadPx = with(density) { 6.dp.toPx() }
+        val viewportPx = with(density) { maxHeight.toPx() }
+
+        Row {
+          Box(
+            modifier = Modifier
+              .width(46.dp)
+              .fillMaxHeight()
+              .background(theme.gutterBg)
+              .clipToBounds()
+          ) {
+            if (lineHeightPx > 0f && lines.isNotEmpty()) {
+              val scrollPx = verticalScrollState.value
+              val first = ((scrollPx - topPadPx) / lineHeightPx)
+                .toInt()
+                .coerceIn(0, (lines.size - 1).coerceAtLeast(0))
+              val visible = (viewportPx / lineHeightPx).toInt() + 2
+              // The list starts at `first`, so it is placed where that line sits
+              // in the viewport — not where line 1 would have been.
+              val windowOffsetPx = topPadPx + first * lineHeightPx - scrollPx
+              Column(
+                modifier = Modifier
+                  .fillMaxWidth()
+                  .offset(y = with(density) { windowOffsetPx.toDp() }),
+                horizontalAlignment = Alignment.End
+              ) {
+                (first until minOf(first + visible, lines.size)).forEach { idx ->
+                  val lineNum = idx + 1
+                  val isActive = settings.highlightActiveLine && idx == activeLineIndex
+                  Box(
+                    modifier = Modifier
+                      .fillMaxWidth()
+                      .height(lineHeightDp)
+                      .background(if (isActive) theme.activeLineBg else Color.Transparent)
+                      .padding(end = 6.dp)
+                      .testTag("editor_line_number")
+                      .semantics { contentDescription = "line_$lineNum" },
+                    contentAlignment = Alignment.CenterEnd
+                  ) {
+                    Text(
+                      text = "$lineNum",
+                      color = if (isActive) ElectricBlueGlow else theme.gutterText,
+                      fontSize = (settings.fontSize - 1).sp,
+                      fontFamily = FontFamily.Monospace,
+                      fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal
+                    )
+                  }
+                }
+              }
+            }
+          }
+
+          // Gutter vertical separator line — spans the viewport, never the document
+          Box(
+            modifier = Modifier
+              .width(1.dp)
+              .fillMaxHeight()
+              .background(theme.activeLineBg)
+          )
+        }
       }
     }
   }
