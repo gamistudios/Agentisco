@@ -2,6 +2,8 @@ package com.agentisco.local
 
 import com.agentisco.local.model.LocalModel
 import com.agentisco.local.model.LocalModelFormat
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
@@ -23,6 +25,31 @@ data class RemoteAssetInfo(
 )
 
 /**
+ * Where the app can ask "how big is this asset and what digest does it have?".
+ *
+ * Completeness is what these answers buy: without a size the progress bar and the
+ * resume decision have nothing to measure against, and without a digest there is no
+ * proof the bytes on disk are the bytes the author uploaded. A source that answers
+ * nothing is not an error — the installer simply has less to check.
+ */
+interface LocalModelAssetSource {
+
+  /** Blocking read; call [fetch] from a coroutine. */
+  fun lookup(downloadUrl: String): RemoteAssetInfo?
+
+  companion object {
+    /** For a host Agentisco cannot introspect, and for tests. */
+    val None = object : LocalModelAssetSource {
+      override fun lookup(downloadUrl: String): RemoteAssetInfo? = null
+    }
+  }
+}
+
+/** Reads the source's own numbers, off the calling thread. */
+suspend fun LocalModelAssetSource.fetch(downloadUrl: String): RemoteAssetInfo? =
+  withContext(Dispatchers.IO) { runCatching { lookup(downloadUrl) }.getOrNull() }
+
+/**
  * Reads asset metadata from Hugging Face's model API.
  *
  * The size and SHA-256 a repository publishes for each file are what the
@@ -31,7 +58,7 @@ data class RemoteAssetInfo(
  * uploaded. Anything the API withholds stays unknown, and a checksum-less
  * download still gets the format and size checks.
  */
-class HuggingFaceAssetSource(httpClient: OkHttpClient? = null) {
+class HuggingFaceAssetSource(httpClient: OkHttpClient? = null) : LocalModelAssetSource {
 
   private val http = (httpClient ?: OkHttpClient()).newBuilder()
     .connectTimeout(15, TimeUnit.SECONDS)
@@ -44,7 +71,7 @@ class HuggingFaceAssetSource(httpClient: OkHttpClient? = null) {
    * request fails — a missing entry is never treated as a reason to block a
    * download the user explicitly asked for.
    */
-  fun lookup(downloadUrl: String): RemoteAssetInfo? {
+  override fun lookup(downloadUrl: String): RemoteAssetInfo? {
     val parsed = parseResolveUrl(downloadUrl) ?: return null
     val (repo, revision, path) = parsed
 
@@ -149,6 +176,26 @@ object LocalModelCatalog {
       sizeBytes = if (info.sizeBytes > 0L) info.sizeBytes else model.sizeBytes,
       checksum = info.checksum ?: model.checksum,
       version = info.version.takeIf { it.isNotBlank() } ?: model.version
+    )
+  }
+
+  /**
+   * Reconciles a stored built-in row with the catalog it came from.
+   *
+   * The catalog is the authority on a built-in model's name, source, size and
+   * digest, so an app update that changes one of those reaches devices that
+   * already saved the row. What the *user* owns stays untouched: the id, the
+   * installed flag, and every runtime and generation setting they edited.
+   */
+  fun mergeWithDefaults(stored: LocalModel): LocalModel {
+    val default = builtIn.firstOrNull { it.id == stored.id } ?: return stored
+    return default.copy(
+      installed = stored.installed,
+      localPath = stored.localPath,
+      configuration = stored.configuration,
+      sizeBytes = stored.sizeBytes.takeIf { it > 0L } ?: default.sizeBytes,
+      checksum = stored.checksum ?: default.checksum,
+      version = stored.version.ifBlank { default.version }
     )
   }
 }
