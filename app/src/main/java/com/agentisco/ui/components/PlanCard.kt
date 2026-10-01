@@ -73,9 +73,10 @@ fun PlanCard(
   modifier: Modifier = Modifier
 ) {
   // An open step counts up while the agent works, so "in progress" is live
-  // rather than a claim frozen at the moment the plan was published.
+  // rather than a claim frozen at the moment the plan was published. Only while
+  // the list is showing: collapsed, no elapsed time is on screen to keep fresh.
   var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
-  val ticking = plan.running && plan.current != null
+  val ticking = expanded && plan.running && plan.current != null
   if (ticking) {
     LaunchedEffect(plan.turnId, plan.current?.content) {
       while (true) {
