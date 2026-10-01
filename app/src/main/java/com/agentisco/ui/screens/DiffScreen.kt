@@ -46,9 +46,214 @@ import com.agentisco.workspace.git.GitRepoStatus
 import com.agentisco.workspace.git.GitStatusCode
 import kotlinx.coroutines.launch
 
-private enum class ChangesViewMode {
+internal enum class ChangesViewMode {
   FILES_LIST,
   DIFF_VIEWER
+}
+
+/**
+ * The Changes page header: back, title, branch chip and the file metrics under
+ * them, then the actions that switch view mode, search, refresh and jump to Git.
+ *
+ * It has to survive a narrow phone with a long branch name. The actions keep
+ * their width, so the title side is the one that gives way — it scrolls
+ * horizontally and its text is capped at one ellipsized line, because text that
+ * wraps here grows the header downward and eats the file list.
+ */
+@Composable
+internal fun ChangesHeader(
+  branch: String,
+  filesChanged: Int,
+  additions: Int,
+  deletions: Int,
+  viewMode: ChangesViewMode,
+  canShowDiff: Boolean,
+  isSearchOpen: Boolean,
+  onToggleSearch: () -> Unit,
+  onViewModeChange: (ChangesViewMode) -> Unit,
+  onRefresh: () -> Unit,
+  onBack: () -> Unit,
+  onOpenGit: () -> Unit,
+  modifier: Modifier = Modifier
+) {
+  Row(
+    modifier = modifier
+      .fillMaxWidth()
+      .padding(horizontal = 14.dp, vertical = 10.dp),
+    horizontalArrangement = Arrangement.SpaceBetween,
+    verticalAlignment = Alignment.CenterVertically
+  ) {
+    Row(
+      verticalAlignment = Alignment.CenterVertically,
+      modifier = Modifier.weight(1f, fill = false)
+    ) {
+      IconButton(
+        onClick = onBack,
+        modifier = Modifier
+          .size(32.dp)
+          .testTag("btn_changes_back")
+      ) {
+        Icon(Icons.Default.ChevronLeft, contentDescription = "Back", tint = TextPrimary)
+      }
+      Spacer(modifier = Modifier.width(6.dp))
+      Column(modifier = Modifier.horizontalScroll(rememberScrollState())) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          Text(
+            text = "Changes",
+            color = TextPrimary,
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1
+          )
+          Spacer(modifier = Modifier.width(8.dp))
+          // Branch chip
+          Surface(
+            shape = RoundedCornerShape(4.dp),
+            color = DarkSurfaceHighlight,
+            border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorderSubtle)
+          ) {
+            Row(
+              modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              Icon(
+                imageVector = Icons.Outlined.Commit,
+                contentDescription = null,
+                tint = ElectricBlueGlow,
+                modifier = Modifier.size(11.dp)
+              )
+              Spacer(modifier = Modifier.width(3.dp))
+              Text(
+                text = branch.ifBlank { "main" },
+                color = ElectricBlueGlow,
+                fontSize = 10.sp,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.widthIn(max = 140.dp).testTag("changes_branch")
+              )
+            }
+          }
+        }
+        // Subtitle metrics
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          Text(
+            text = "$filesChanged files changed",
+            color = TextSecondary,
+            fontSize = 11.sp,
+            maxLines = 1
+          )
+          if (additions > 0 || deletions > 0) {
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+              text = "+$additions",
+              color = TerminalGreen,
+              fontSize = 11.sp,
+              fontWeight = FontWeight.Bold,
+              fontFamily = FontFamily.Monospace,
+              maxLines = 1
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text(
+              text = "-$deletions",
+              color = DangerRed,
+              fontSize = 11.sp,
+              fontWeight = FontWeight.Bold,
+              fontFamily = FontFamily.Monospace,
+              maxLines = 1
+            )
+          }
+        }
+      }
+    }
+
+    // Header action buttons
+    Row(
+      verticalAlignment = Alignment.CenterVertically,
+      horizontalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+      // Refresh
+      IconButton(
+        onClick = onRefresh,
+        modifier = Modifier
+          .size(32.dp)
+          .testTag("btn_refresh_changes")
+      ) {
+        Icon(Icons.Default.Refresh, contentDescription = "Refresh changes", tint = TextSecondary, modifier = Modifier.size(18.dp))
+      }
+
+      // Search toggle
+      IconButton(
+        onClick = onToggleSearch,
+        modifier = Modifier.size(32.dp)
+      ) {
+        Icon(
+          if (isSearchOpen) Icons.Default.Close else Icons.Default.Search,
+          contentDescription = "Search files",
+          tint = if (isSearchOpen) ElectricBlue else TextSecondary,
+          modifier = Modifier.size(18.dp)
+        )
+      }
+
+      // View mode toggle (Files List vs Diff Viewer)
+      Surface(
+        shape = RoundedCornerShape(6.dp),
+        color = DarkSurfaceHighlight,
+        border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorderSubtle),
+        modifier = Modifier.padding(start = 2.dp)
+      ) {
+        Row(modifier = Modifier.padding(2.dp)) {
+          Box(
+            modifier = Modifier
+              .clip(RoundedCornerShape(4.dp))
+              .background(if (viewMode == ChangesViewMode.FILES_LIST) ElectricBlue else Color.Transparent)
+              .clickable { onViewModeChange(ChangesViewMode.FILES_LIST) }
+              .padding(horizontal = 7.dp, vertical = 4.dp)
+          ) {
+            Icon(
+              Icons.AutoMirrored.Outlined.FormatListBulleted,
+              contentDescription = "Files List",
+              tint = if (viewMode == ChangesViewMode.FILES_LIST) Color.White else TextSecondary,
+              modifier = Modifier.size(15.dp)
+            )
+          }
+          Box(
+            modifier = Modifier
+              .clip(RoundedCornerShape(4.dp))
+              .background(if (viewMode == ChangesViewMode.DIFF_VIEWER) ElectricBlue else Color.Transparent)
+              .clickable {
+                if (canShowDiff) {
+                  onViewModeChange(ChangesViewMode.DIFF_VIEWER)
+                }
+              }
+              .padding(horizontal = 7.dp, vertical = 4.dp)
+          ) {
+            Icon(
+              Icons.Outlined.Difference,
+              contentDescription = "Diff Viewer",
+              tint = if (viewMode == ChangesViewMode.DIFF_VIEWER) Color.White else TextSecondary,
+              modifier = Modifier.size(15.dp)
+            )
+          }
+        }
+      }
+
+      // Link to Git page
+      OutlinedButton(
+        onClick = onOpenGit,
+        modifier = Modifier
+          .height(30.dp)
+          .testTag("btn_goto_git"),
+        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder)
+      ) {
+        Icon(Icons.Outlined.ForkRight, contentDescription = null, tint = ElectricBlueGlow, modifier = Modifier.size(13.dp))
+        Spacer(modifier = Modifier.width(3.dp))
+        Text("Git", color = TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+      }
+    }
+  }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -183,180 +388,23 @@ fun DiffScreen(
       border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorderSubtle)
     ) {
       Column {
-        Row(
-          modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 14.dp, vertical = 10.dp),
-          horizontalArrangement = Arrangement.SpaceBetween,
-          verticalAlignment = Alignment.CenterVertically
-        ) {
-          Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.weight(1f)
-          ) {
-            IconButton(
-              onClick = { onNavigate(AppDestination.AGENT) },
-              modifier = Modifier
-                .size(32.dp)
-                .testTag("btn_changes_back")
-            ) {
-              Icon(Icons.Default.ChevronLeft, contentDescription = "Back", tint = TextPrimary)
-            }
-            Spacer(modifier = Modifier.width(6.dp))
-            Column {
-              Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                  text = "Changes",
-                  color = TextPrimary,
-                  fontSize = 16.sp,
-                  fontWeight = FontWeight.Bold
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                // Branch chip
-                Surface(
-                  shape = RoundedCornerShape(4.dp),
-                  color = DarkSurfaceHighlight,
-                  border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorderSubtle)
-                ) {
-                  Row(
-                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                  ) {
-                    Icon(
-                      imageVector = Icons.Outlined.Commit,
-                      contentDescription = null,
-                      tint = ElectricBlueGlow,
-                      modifier = Modifier.size(11.dp)
-                    )
-                    Spacer(modifier = Modifier.width(3.dp))
-                    Text(
-                      text = activeProject.branch.ifBlank { "main" },
-                      color = ElectricBlueGlow,
-                      fontSize = 10.sp,
-                      fontFamily = FontFamily.Monospace,
-                      fontWeight = FontWeight.SemiBold
-                    )
-                  }
-                }
-              }
-              // Subtitle metrics
-              Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                  text = "$totalFilesCount files changed",
-                  color = TextSecondary,
-                  fontSize = 11.sp
-                )
-                if (totalAdditions > 0 || totalDeletions > 0) {
-                  Spacer(modifier = Modifier.width(6.dp))
-                  Text(
-                    text = "+$totalAdditions",
-                    color = TerminalGreen,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace
-                  )
-                  Spacer(modifier = Modifier.width(4.dp))
-                  Text(
-                    text = "-$totalDeletions",
-                    color = DangerRed,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace
-                  )
-                }
-              }
-            }
-          }
-
-          // Header action buttons
-          Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
-          ) {
-            // Refresh
-            IconButton(
-              onClick = { viewModel.refreshDiffsAndGit() },
-              modifier = Modifier
-                .size(32.dp)
-                .testTag("btn_refresh_changes")
-            ) {
-              Icon(Icons.Default.Refresh, contentDescription = "Refresh changes", tint = TextSecondary, modifier = Modifier.size(18.dp))
-            }
-
-            // Search toggle
-            IconButton(
-              onClick = {
-                isSearchOpen = !isSearchOpen
-                if (!isSearchOpen) searchQuery = ""
-              },
-              modifier = Modifier.size(32.dp)
-            ) {
-              Icon(
-                if (isSearchOpen) Icons.Default.Close else Icons.Default.Search,
-                contentDescription = "Search files",
-                tint = if (isSearchOpen) ElectricBlue else TextSecondary,
-                modifier = Modifier.size(18.dp)
-              )
-            }
-
-            // View mode toggle (Files List vs Diff Viewer)
-            Surface(
-              shape = RoundedCornerShape(6.dp),
-              color = DarkSurfaceHighlight,
-              border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorderSubtle),
-              modifier = Modifier.padding(start = 2.dp)
-            ) {
-              Row(modifier = Modifier.padding(2.dp)) {
-                Box(
-                  modifier = Modifier
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(if (viewMode == ChangesViewMode.FILES_LIST) ElectricBlue else Color.Transparent)
-                    .clickable { viewMode = ChangesViewMode.FILES_LIST }
-                    .padding(horizontal = 7.dp, vertical = 4.dp)
-                ) {
-                  Icon(
-                    Icons.AutoMirrored.Outlined.FormatListBulleted,
-                    contentDescription = "Files List",
-                    tint = if (viewMode == ChangesViewMode.FILES_LIST) Color.White else TextSecondary,
-                    modifier = Modifier.size(15.dp)
-                  )
-                }
-                Box(
-                  modifier = Modifier
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(if (viewMode == ChangesViewMode.DIFF_VIEWER) ElectricBlue else Color.Transparent)
-                    .clickable {
-                      if (fileDiffs.isNotEmpty()) {
-                        viewMode = ChangesViewMode.DIFF_VIEWER
-                      }
-                    }
-                    .padding(horizontal = 7.dp, vertical = 4.dp)
-                ) {
-                  Icon(
-                    Icons.Outlined.Difference,
-                    contentDescription = "Diff Viewer",
-                    tint = if (viewMode == ChangesViewMode.DIFF_VIEWER) Color.White else TextSecondary,
-                    modifier = Modifier.size(15.dp)
-                  )
-                }
-              }
-            }
-
-            // Link to Git page
-            OutlinedButton(
-              onClick = { onNavigate(AppDestination.GIT) },
-              modifier = Modifier
-                .height(30.dp)
-                .testTag("btn_goto_git"),
-              contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-              border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder)
-            ) {
-              Icon(Icons.Outlined.ForkRight, contentDescription = null, tint = ElectricBlueGlow, modifier = Modifier.size(13.dp))
-              Spacer(modifier = Modifier.width(3.dp))
-              Text("Git", color = TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.Medium)
-            }
-          }
-        }
+        ChangesHeader(
+          branch = activeProject.branch,
+          filesChanged = totalFilesCount,
+          additions = totalAdditions,
+          deletions = totalDeletions,
+          viewMode = viewMode,
+          canShowDiff = fileDiffs.isNotEmpty(),
+          isSearchOpen = isSearchOpen,
+          onToggleSearch = {
+            isSearchOpen = !isSearchOpen
+            if (!isSearchOpen) searchQuery = ""
+          },
+          onViewModeChange = { viewMode = it },
+          onRefresh = { viewModel.refreshDiffsAndGit() },
+          onBack = { onNavigate(AppDestination.AGENT) },
+          onOpenGit = { onNavigate(AppDestination.GIT) }
+        )
 
         // Inline Search Bar
         AnimatedVisibility(

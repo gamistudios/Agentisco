@@ -131,7 +131,10 @@ fun GitScreen(
           horizontalArrangement = Arrangement.SpaceBetween,
           verticalAlignment = Alignment.CenterVertically
         ) {
-          Row(verticalAlignment = Alignment.CenterVertically) {
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.weight(1f, fill = false)
+          ) {
             IconButton(
               onClick = { onNavigate(AppDestination.AGENT) },
               modifier = Modifier
@@ -141,12 +144,15 @@ fun GitScreen(
               Icon(Icons.Default.ChevronLeft, contentDescription = "Back", tint = TextPrimary)
             }
             Spacer(modifier = Modifier.width(6.dp))
-            Column {
+            // Same as the Changes header: the title side scrolls instead of
+            // wrapping a long branch name into a taller header.
+            Column(modifier = Modifier.horizontalScroll(rememberScrollState())) {
               Text(
                 text = "Source Control",
                 color = TextPrimary,
                 fontSize = 16.sp,
-                fontWeight = FontWeight.Bold
+                fontWeight = FontWeight.Bold,
+                maxLines = 1
               )
               Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Outlined.Commit, contentDescription = null, tint = ElectricBlueGlow, modifier = Modifier.size(11.dp))
@@ -156,7 +162,10 @@ fun GitScreen(
                   color = ElectricBlueGlow,
                   fontSize = 11.sp,
                   fontFamily = FontFamily.Monospace,
-                  fontWeight = FontWeight.SemiBold
+                  fontWeight = FontWeight.SemiBold,
+                  maxLines = 1,
+                  overflow = TextOverflow.Ellipsis,
+                  modifier = Modifier.widthIn(max = 140.dp)
                 )
                 if (repoStatus.aheadCount > 0 || repoStatus.behindCount > 0) {
                   Spacer(modifier = Modifier.width(6.dp))
@@ -164,7 +173,8 @@ fun GitScreen(
                     text = "↑${repoStatus.aheadCount}  ↓${repoStatus.behindCount}",
                     color = TextSecondary,
                     fontSize = 10.sp,
-                    fontFamily = FontFamily.Monospace
+                    fontFamily = FontFamily.Monospace,
+                    maxLines = 1
                   )
                 }
               }
