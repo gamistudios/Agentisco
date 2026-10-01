@@ -9,6 +9,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Star
@@ -26,6 +27,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.agentisco.agent.llm.CatalogModel
@@ -716,38 +718,26 @@ private fun ModelFormDialog(
         modifier = Modifier.verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(10.dp)
       ) {
-        ExposedDropdownMenuBox(expanded = showMatches, onExpandedChange = { showMatches = it }) {
-          OutlinedTextField(
-            value = fields.modelId,
-            onValueChange = { fields = fields.copy(modelId = it); showMatches = catalog.isNotEmpty() },
-            label = { Text("Model ID", fontSize = 11.sp) },
-            supportingText = {
-              Text(
-                if (catalog.isEmpty()) "Wire identifier, e.g. openai/gpt-oss-120b"
-                else "Typing suggests from the ${catalog.size} models this provider lists.",
-                fontSize = 9.sp, fontFamily = FontFamily.Monospace
-              )
-            },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth().testTag("input_model_id")
+        OutlinedTextField(
+          value = fields.modelId,
+          onValueChange = { fields = fields.copy(modelId = it); showMatches = catalog.isNotEmpty() },
+          label = { Text("Model ID", fontSize = 11.sp) },
+          supportingText = {
+            Text(
+              if (catalog.isEmpty()) "Wire identifier, e.g. openai/gpt-oss-120b"
+              else "Typing suggests from the ${catalog.size} models this provider lists.",
+              fontSize = 9.sp, fontFamily = FontFamily.Monospace
+            )
+          },
+          singleLine = true,
+          modifier = Modifier.fillMaxWidth().testTag("input_model_id")
+        )
+        if (showMatches && matches.isNotEmpty()) {
+          CatalogSuggestions(
+            matches = matches,
+            onPick = { pickFromCatalog(it) },
+            onDismiss = { showMatches = false }
           )
-          ExposedDropdownMenu(
-            expanded = showMatches && matches.isNotEmpty(),
-            onDismissRequest = { showMatches = false },
-            modifier = Modifier.heightIn(max = 240.dp)
-          ) {
-            matches.forEach { m ->
-              DropdownMenuItem(
-                text = {
-                  Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(m.modelId, color = TextPrimary, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-                    Text(catalogLimitsLabel(m), color = TextMuted, fontSize = 9.sp)
-                  }
-                },
-                onClick = { pickFromCatalog(m) }
-              )
-            }
-          }
         }
         OutlinedTextField(
           value = fields.displayName,
@@ -824,6 +814,66 @@ private fun ModelFormDialog(
       TextButton(onClick = onDismiss) { Text("Cancel", color = TextMuted, fontSize = 12.sp) }
     }
   )
+}
+
+/**
+ * The provider's own listing, offered as rows under the Model ID field. Not a
+ * Material dropdown: ExposedDropdownMenuBox asks its anchor for focus as it
+ * opens, and inside this dialog that anchor is never initialised, so typing a
+ * model id crashed the app. Rows in the form's own column scroll with it.
+ */
+@Composable
+internal fun CatalogSuggestions(
+  matches: List<CatalogModel>,
+  onPick: (CatalogModel) -> Unit,
+  onDismiss: () -> Unit,
+  modifier: Modifier = Modifier
+) {
+  Column(
+    modifier = modifier
+      .fillMaxWidth()
+      .clip(RoundedCornerShape(8.dp))
+      .background(DarkSurfaceElevated)
+      .border(1.dp, DarkBorderSubtle, RoundedCornerShape(8.dp))
+  ) {
+    Row(
+      modifier = Modifier.fillMaxWidth().padding(start = 8.dp, end = 2.dp, top = 2.dp),
+      verticalAlignment = Alignment.CenterVertically
+    ) {
+      Text("From this provider", color = TextMuted, fontSize = 9.sp, modifier = Modifier.weight(1f))
+      IconButton(
+        onClick = onDismiss,
+        modifier = Modifier.size(22.dp).testTag("btn_suggestions_dismiss")
+      ) {
+        Icon(Icons.Default.Close, contentDescription = "Hide suggestions", tint = TextMuted, modifier = Modifier.size(12.dp))
+      }
+    }
+    Column(
+      modifier = Modifier
+        .fillMaxWidth()
+        .heightIn(max = 176.dp)
+        .verticalScroll(rememberScrollState())
+        .testTag("catalog_suggestions")
+    ) {
+      matches.forEach { m ->
+        Row(
+          modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onPick(m) }
+            .padding(horizontal = 8.dp, vertical = 5.dp)
+            .testTag("catalog_suggestion"),
+          horizontalArrangement = Arrangement.spacedBy(8.dp),
+          verticalAlignment = Alignment.CenterVertically
+        ) {
+          Text(
+            m.modelId, color = TextPrimary, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
+            maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f)
+          )
+          Text(catalogLimitsLabel(m), color = TextMuted, fontSize = 9.sp, maxLines = 1)
+        }
+      }
+    }
+  }
 }
 
 /** The size a catalog entry claims, in the shorthand the rest of the UI uses. */
