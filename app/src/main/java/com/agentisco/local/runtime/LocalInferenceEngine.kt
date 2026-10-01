@@ -37,14 +37,20 @@ class LocalInferenceEngine(
     val modelId: String,
     /** The settings the model was opened with, so a change forces a reload. */
     val runtime: LocalRuntimeSettings,
-    val session: LoadedLocalModel
+    val session: LoadedLocalModel,
+    /** Read once at load: answering what the template can do must not touch the handle. */
+    val capabilities: LocalTemplateCapabilities
   )
 
-  /** Guards [resident]; held only across load and unload, never across a generation. */
-  private val stateMutex = Mutex()
-
-  /** One decode at a time: the KV cache belongs to the sequence currently running. */
-  private val generateMutex = Mutex()
+  /**
+   * Every native call — load, unload, render, decode — holds this.
+   *
+   * One decode at a time because the KV cache belongs to the sequence currently
+   * running, and one load/unload at a time for the same reason in reverse: a swap that
+   * freed the handle a decode is writing through is a crash with no stack trace worth
+   * reading. Rendering waits too, since it reads the template compiled at load.
+   */
+  private val engineMutex = Mutex()
 
   @Volatile
   private var resident: Resident? = null
@@ -73,21 +79,38 @@ class LocalInferenceEngine(
     seed: Long? = null,
     onPiece: (String) -> Boolean
   ): LocalFinishReason {
-    val session = open(model)
-    val settings = repository.configuration(model.id).generation
     return withContext(dispatcher) {
-      generateMutex.withLock {
+      engineMutex.withLock {
+        val session = openLocked(model)
+        val settings = repository.configuration(model.id).generation
         try {
-          session.generate(LocalGenerationRequest(prompt, settings, grammar, seed), onPiece)
+          session.session.generate(LocalGenerationRequest(prompt, settings, grammar, seed), onPiece)
         } catch (e: LocalEngineException) {
           // A mid-run engine failure leaves the context in an unknown state; the next
           // request should not inherit it.
-          unload(model.id)
+          unloadLocked()
           throw e
         }
       }
     }
   }
+
+  /**
+   * Renders a request with the model's own chat template. The caller owns the turn and
+   * must close it; its prompt, grammar and stop sequences are what [generate] runs with,
+   * and its [LocalChatTurn.parse] is what reads the answer back.
+   */
+  suspend fun openTurn(model: LocalModel, inputs: LocalChatInputs): LocalChatTurn = withContext(dispatcher) {
+    engineMutex.withLock { openLocked(model).session.openTurn(inputs) }
+  }
+
+  /** What this model's template can do, loading the model if nothing like it is resident. */
+  suspend fun capabilities(model: LocalModel): LocalTemplateCapabilities = withContext(dispatcher) {
+    engineMutex.withLock { openLocked(model).capabilities }
+  }
+
+  /** Capabilities of whatever is resident right now, without touching the engine. */
+  fun loadedCapabilities(): LocalTemplateCapabilities? = resident?.capabilities
 
   /** Metadata of the resident model, or null while nothing is loaded. */
   fun loadedInfo(): LoadedModelInfo? = resident?.session?.info
@@ -99,42 +122,35 @@ class LocalInferenceEngine(
 
   /** Unloads whatever is resident, giving its memory back. */
   suspend fun release() = withContext(dispatcher) {
-    stateMutex.withLock { unloadLocked() }
+    engineMutex.withLock { unloadLocked() }
   }
 
-  /** Returns the resident session, loading and verifying the model first. */
-  private suspend fun open(model: LocalModel): LoadedLocalModel {
+  /** Returns the resident session, loading and verifying the model first. Holds [engineMutex]. */
+  private suspend fun openLocked(model: LocalModel): Resident {
     val wanted = repository.configuration(model.id).runtime
-    resident?.takeIf { it.modelId == model.id && it.runtime == wanted }?.let { return it.session }
+    resident?.takeIf { it.modelId == model.id && it.runtime == wanted }?.let { return it }
 
     if (!engine.isAvailable) throw LocalEngineException(unavailableReason ?: "No engine")
 
-    return stateMutex.withLock {
-      resident?.takeIf { it.modelId == model.id && it.runtime == wanted }?.let { return@withLock it.session }
-
-      // Cheap checks first, and the expensive one only when the model is actually
-      // about to be opened: hashing 142 MB per request would be slower than the
-      // inference itself.
-      val file = repository.fileFor(model)
-        ?: throw LocalEngineException("${model.name} is not installed")
-      if (!repository.verifyInstalled(model.id)) {
-        throw LocalEngineException(
-          "${model.name} no longer matches its checksum. Reinstall it before using it offline."
-        )
-      }
-
-      unloadLocked()
-      val threads = wanted.threadCount.takeIf { it > 0 } ?: engine.systemThreads()
-      val session = engine.load(file.absolutePath, wanted.copy(threadCount = threads))
-      resident = Resident(model.id, wanted, session)
-      return@withLock session
+    // Cheap checks first, and the expensive one only when the model is actually
+    // about to be opened: hashing 142 MB per request would be slower than the
+    // inference itself.
+    val file = repository.fileFor(model)
+      ?: throw LocalEngineException("${model.name} is not installed")
+    if (!repository.verifyInstalled(model.id)) {
+      throw LocalEngineException(
+        "${model.name} no longer matches its checksum. Reinstall it before using it offline."
+      )
     }
-  }
 
-  private suspend fun unload(modelId: String) = withContext(dispatcher) {
-    stateMutex.withLock {
-      if (resident?.modelId == modelId) unloadLocked()
-    }
+    unloadLocked()
+    val threads = wanted.threadCount.takeIf { it > 0 } ?: engine.systemThreads()
+    val session = engine.load(file.absolutePath, wanted.copy(threadCount = threads))
+    // Read before the model is ever asked to answer: a file whose template cannot be
+    // compiled is a model the user should hear about now, not mid-conversation.
+    val residentNow = Resident(model.id, wanted, session, session.templateCapabilities())
+    resident = residentNow
+    return residentNow
   }
 
   private fun unloadLocked() {

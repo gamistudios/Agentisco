@@ -1,20 +1,16 @@
 // JNI bridge between Agentisco and the pinned llama.cpp engine.
 //
 // Deliberately thin: it owns model + context lifetime and the decode loop, and
-// nothing else. Prompt rendering, tool-call grammar, stop-sequence handling and
-// the OpenAI-compatible wire format all live in Kotlin, so the engine stays
-// replaceable and the parts that carry product rules stay testable on the JVM.
-//
-// Text crosses as UTF-8 byte arrays in both directions. JNI's own string
-// functions use modified UTF-8, which turns an emoji into two three-byte
-// surrogate encodings the tokenizer would then mis-read, so Kotlin does the
-// encoding and this file never has to care.
+// nothing else. Prompt rendering and tool-call grammar live next door, in chat_jni.cpp,
+// which hands the engine a prompt and a grammar and takes back the parsed answer; the
+// OpenAI-compatible wire format lives in Kotlin, so the parts that carry product rules
+// stay testable on the JVM.
 //
 // Finish codes returned by nativeComplete:
 //   0 = end of sequence   1 = max tokens   2 = caller stopped   3 = aborted
 //   4 = context full      negative = engine error (see nativeLastError)
 
-#include <jni.h>
+#include "engine_shared.h"
 #include <android/log.h>
 
 #include <llama.h>
@@ -31,22 +27,14 @@
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 
-namespace {
-
-struct Session {
-  llama_model *model = nullptr;
-  llama_context *ctx = nullptr;
-  const llama_vocab *vocab = nullptr;
-  int32_t n_batch = 128;
-  std::atomic<bool> abort{false};
-};
-
 std::string g_last_error;
 
-void set_error(const std::string &msg) {
-  g_last_error = msg;
-  LOGE("%s", msg.c_str());
+void set_error(const std::string &message) {
+  g_last_error = message;
+  LOGE("%s", message.c_str());
 }
+
+namespace {
 
 // A UTF-8 codepoint can straddle two token pieces. Emitting a half sequence
 // would corrupt it, so only the complete prefix is handed to the caller and the
@@ -70,51 +58,6 @@ std::string meta_string(llama_model *model, const char *key) {
   const int32_t len = llama_model_meta_val_str(model, key, buf, sizeof(buf));
   if (len < 0) return std::string();
   return std::string(buf, (size_t) (len < (int32_t) sizeof(buf) ? len : (int32_t) sizeof(buf) - 1));
-}
-
-// UTF-8 bytes as Kotlin produced them, with no JNI string conversion anywhere in
-// the path. A null array reads as empty text.
-std::vector<char> copy_bytes(JNIEnv *env, jbyteArray array) {
-  std::vector<char> out;
-  if (array == nullptr) return out;
-  const jsize len = env->GetArrayLength(array);
-  out.resize((size_t) (len > 0 ? len : 0));
-  if (!out.empty()) env->GetByteArrayRegion(array, 0, len, (jbyte *) out.data());
-  return out;
-}
-
-jbyteArray to_bytes(JNIEnv *env, const std::string &text) {
-  jbyteArray out = env->NewByteArray((jsize) text.size());
-  if (!text.empty()) env->SetByteArrayRegion(out, 0, (jsize) text.size(), (const jbyte *) text.data());
-  return out;
-}
-
-// Metadata strings come out of the model file, which for a custom model is
-// whatever the user pointed at; they are quoted into JSON, so they are escaped
-// rather than trusted to be well-formed. UTF-8 bytes pass through untouched —
-// they are already valid JSON string content.
-std::string json_escape(const std::string &raw) {
-  std::string out;
-  out.reserve(raw.size() + 8);
-  for (const unsigned char c : raw) {
-    switch (c) {
-      case '"': out += "\\\""; break;
-      case '\\': out += "\\\\"; break;
-      case '\n': out += "\\n"; break;
-      case '\r': out += "\\r"; break;
-      case '\t': out += "\\t"; break;
-      default:
-        if (c < 0x20) {
-          static const char *hex = "0123456789abcdef";
-          out += "\\u00";
-          out += hex[(c >> 4) & 0xF];
-          out += hex[c & 0xF];
-        } else {
-          out += (char) c;
-        }
-    }
-  }
-  return out;
 }
 
 llama_sampler *build_sampler(const Session *s,
@@ -204,12 +147,24 @@ Java_com_agentisco_local_runtime_LlamaNative_nativeLoadModel(JNIEnv *env,
   s->vocab = llama_model_get_vocab(model);
   s->n_batch = (int32_t) cparams.n_batch;
   g_last_error.clear();
+
+  // Compile the template this file ships, once, at load. A model whose template does
+  // not compile is still a usable model for plain completions, so the failure is
+  // recorded rather than fatal — chat_jni.cpp reports it when a chat is asked for.
+  // llama.cpp falls back to ChatML when a file carries no template at all; `explicit`
+  // in nativeChatTemplatesInfo is how Kotlin learns that happened.
+  try {
+    s->templates = common_chat_templates_init(model, std::string());
+  } catch (const std::exception &e) {
+    s->templates = nullptr;
+    set_error(std::string("This model's chat template could not be compiled: ") + e.what());
+  }
   return (jlong) (intptr_t) s;
 }
 
 JNIEXPORT jbyteArray JNICALL
 Java_com_agentisco_local_runtime_LlamaNative_nativeModelInfo(JNIEnv *env, jobject, jlong handle) {
-  auto *s = (Session *) (intptr_t) handle;
+  Session *s = session_of(handle);
   if (s == nullptr) return to_bytes(env, "{}");
 
   char arch[256] = {0};
@@ -246,7 +201,7 @@ Java_com_agentisco_local_runtime_LlamaNative_nativeComplete(JNIEnv *env,
                                                             jlong seed,
                                                             jbyteArray grammar,
                                                             jobject callback) {
-  auto *s = (Session *) (intptr_t) handle;
+  Session *s = session_of(handle);
   if (s == nullptr) return -1;
 
   jclass cb_class = env->GetObjectClass(callback);
@@ -395,19 +350,19 @@ Java_com_agentisco_local_runtime_LlamaNative_nativeComplete(JNIEnv *env,
 
 JNIEXPORT void JNICALL
 Java_com_agentisco_local_runtime_LlamaNative_nativeAbort(JNIEnv *, jobject, jlong handle) {
-  auto *s = (Session *) (intptr_t) handle;
+  Session *s = session_of(handle);
   if (s != nullptr) s->abort.store(true);
 }
 
 JNIEXPORT void JNICALL
 Java_com_agentisco_local_runtime_LlamaNative_nativeResetAbort(JNIEnv *, jobject, jlong handle) {
-  auto *s = (Session *) (intptr_t) handle;
+  Session *s = session_of(handle);
   if (s != nullptr) s->abort.store(false);
 }
 
 JNIEXPORT void JNICALL
 Java_com_agentisco_local_runtime_LlamaNative_nativeUnload(JNIEnv *, jobject, jlong handle) {
-  auto *s = (Session *) (intptr_t) handle;
+  Session *s = session_of(handle);
   if (s == nullptr) return;
   if (s->ctx) llama_free(s->ctx);
   if (s->model) llama_model_free(s->model);

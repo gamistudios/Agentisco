@@ -54,6 +54,29 @@ class LlamaNative private constructor() {
 
   external fun nativeSystemThreads(): Int
 
+  // ---- chat templates, in the engine's own code ----
+
+  /**
+   * Capability flags of the loaded model's own template, as JSON. llama.cpp reads the
+   * template out of the GGUF file and reports what it can express, which is the only
+   * honest answer to "can this model do tool calls".
+   */
+  external fun nativeChatTemplatesInfo(handle: Long): ByteArray
+
+  /**
+   * Applies that template to one OpenAI-shaped request, given as UTF-8 JSON bytes.
+   * Returns a turn handle, or 0 when the request or the template was rejected —
+   * [nativeLastError] then holds the reason.
+   */
+  external fun nativeChatOpenTurn(handle: Long, inputs: ByteArray): Long
+
+  external fun nativeChatTurnInfo(turn: Long): ByteArray
+
+  /** Reads generated text back with the parser the template produced. */
+  external fun nativeChatParse(turn: Long, text: ByteArray, partial: Boolean): ByteArray
+
+  external fun nativeChatCloseTurn(turn: Long)
+
   /**
    * Receives each decoded piece. Returning false stops generation, which the engine
    * reports as finish code 2.

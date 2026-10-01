@@ -14,11 +14,17 @@ import com.agentisco.local.model.LocalModelInstallStatus
 import com.agentisco.local.model.LocalRuntimeSettings
 import com.agentisco.local.runtime.LoadedLocalModel
 import com.agentisco.local.runtime.LoadedModelInfo
+import com.agentisco.local.runtime.LocalChatInputs
+import com.agentisco.local.runtime.LocalChatMessage
+import com.agentisco.local.runtime.LocalChatTool
+import com.agentisco.local.runtime.LocalChatTurn
 import com.agentisco.local.runtime.LocalEngineException
 import com.agentisco.local.runtime.LocalFinishReason
 import com.agentisco.local.runtime.LocalGenerationRequest
 import com.agentisco.local.runtime.LocalInferenceEngine
 import com.agentisco.local.runtime.LocalModelEngine
+import com.agentisco.local.runtime.LocalParsedMessage
+import com.agentisco.local.runtime.LocalTemplateCapabilities
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -69,14 +75,35 @@ class LocalInferenceEngineTest {
         val runtime: LocalRuntimeSettings
     ) : LoadedLocalModel {
         val requests = mutableListOf<LocalGenerationRequest>()
+        val turns = mutableListOf<LocalChatInputs>()
         var reply = listOf("hello")
         var finish = LocalFinishReason.END_OF_SEQUENCE
         var failure: Throwable? = null
         var aborts = 0
         var closes = 0
+        var capabilityReads = 0
+        var capabilities = LocalTemplateCapabilities(
+            available = true,
+            usesOwnTemplate = true,
+            supportsTools = true,
+            supportsParallelToolCalls = true,
+            supportsThinking = false,
+            supportsSystemMessage = true,
+            supportsTypedContent = false
+        )
 
         override val info: LoadedModelInfo =
             LoadedModelInfo("fake", "lfm2", "", "</s>", 65536, runtime.contextSize, 8192, true)
+
+        override fun templateCapabilities(): LocalTemplateCapabilities {
+            capabilityReads++
+            return capabilities
+        }
+
+        override fun openTurn(inputs: LocalChatInputs): LocalChatTurn {
+            if (!capabilities.available) throw LocalEngineException(capabilities.reason)
+            return FakeTurn(inputs).also { turns += inputs }
+        }
 
         override fun generate(request: LocalGenerationRequest, onPiece: (String) -> Boolean): LocalFinishReason {
             requests += request
@@ -89,6 +116,26 @@ class LocalInferenceEngineTest {
             aborts++
         }
 
+        override fun close() {
+            closes++
+        }
+    }
+
+    /** A turn that renders by joining the messages, so the layer above can be asserted on. */
+    private class FakeTurn(val inputs: LocalChatInputs) : LocalChatTurn {
+        var closes = 0
+        var parses = 0
+        var reply = LocalParsedMessage("ok", "", emptyList(), emptyList(), rejected = false)
+        override val prompt: String get() = inputs.messages.joinToString("\n") { "${it.role}: ${it.content}" }
+        override val grammar: String? get() = null
+        override val stopSequences: List<String> get() = listOf("end of turn")
+        override val format: String get() = "FAKE"
+        override val expectsToolCalls: Boolean get() = inputs.tools.isNotEmpty()
+        override val supportsThinking: Boolean get() = false
+        override fun parse(text: String, partial: Boolean): LocalParsedMessage {
+            parses++
+            return reply
+        }
         override fun close() {
             closes++
         }
@@ -418,5 +465,129 @@ class LocalInferenceEngineTest {
 
         assertEquals(LocalFinishReason.CONTEXT_FULL, finish)
         assertEquals(0, fake.sessions.single().closes)
+    }
+
+    // ---- chat templates ----
+
+    private fun chatInputs(id: String) = LocalChatInputs(
+        messages = listOf(
+            LocalChatMessage("system", "be terse"),
+            LocalChatMessage("user", "what is $id?")
+        ),
+        tools = listOf(LocalChatTool("lookup", "find a thing", """{"type":"object"}"""))
+    )
+
+    @Test
+    fun `a turn is rendered by the model's own template and its prompt is what runs`() = runTest {
+        val payload = ggufBytes(4096)
+        val repository = repositoryFor(payload)
+        val installed = install(repository, "alpha", payload)
+        val fake = FakeEngine()
+        val engine = engineFor(repository, fake)
+
+        val turn = engine.openTurn(installed, chatInputs("alpha"))
+        val pieces = StringBuilder()
+        val finish = engine.generate(installed, turn.prompt, turn.grammar) {
+            pieces.append(it)
+            true
+        }
+
+        assertEquals(LocalFinishReason.END_OF_SEQUENCE, finish)
+        assertEquals(listOf("system: be terse", "user: what is alpha?").joinToString("\n"), turn.prompt)
+        assertTrue(turn.expectsToolCalls)
+        assertEquals(listOf(turn.prompt), fake.sessions.single().requests.map { it.prompt })
+        assertEquals("hello", pieces.toString())
+    }
+
+    @Test
+    fun `what a model can do is read once when it loads, not on every request`() = runTest {
+        val payload = ggufBytes(4096)
+        val repository = repositoryFor(payload)
+        val installed = install(repository, "alpha", payload)
+        val fake = FakeEngine()
+        val engine = engineFor(repository, fake)
+
+        assertTrue(engine.capabilities(installed).supportsTools)
+        engine.generate(installed, "hi") { true }
+        engine.capabilities(installed)
+
+        assertEquals(1, fake.sessions.size)
+        assertEquals(
+            "the template is a property of the loaded model, so it is read at load",
+            1,
+            fake.sessions.single().capabilityReads
+        )
+        assertEquals(true, engine.loadedCapabilities()?.supportsTools)
+    }
+
+    @Test
+    fun `a model with no usable template is refused instead of formatted by guesswork`() = runTest {
+        val payload = ggufBytes(4096)
+        val repository = repositoryFor(payload)
+        val installed = install(repository, "alpha", payload)
+        val fake = FakeEngine()
+        val engine = engineFor(repository, fake)
+        // Capabilities are read when the model loads, so a file whose template will not
+        // compile is known before any turn is asked for.
+        val unavailable = LocalTemplateCapabilities(
+            available = false,
+            usesOwnTemplate = false,
+            supportsTools = false,
+            supportsParallelToolCalls = false,
+            supportsThinking = false,
+            supportsSystemMessage = false,
+            supportsTypedContent = false,
+            reason = "This model's chat template could not be compiled"
+        )
+        val engineWithBrokenTemplate = object : LocalModelEngine by fake {
+            override fun load(path: String, runtime: LocalRuntimeSettings): LoadedLocalModel =
+                FakeSession(path, runtime).apply { capabilities = unavailable }
+        }
+        val manager = LocalInferenceEngine(repository, engineWithBrokenTemplate, Dispatchers.Unconfined)
+
+        assertFalse(manager.capabilities(installed).available)
+        val error = runCatching { manager.openTurn(installed, chatInputs("alpha")) }.exceptionOrNull()
+        assertTrue(error is LocalEngineException)
+        assertTrue(error!!.message!!.contains("could not be compiled"))
+    }
+
+    @Test
+    fun `switching models replaces the capabilities on offer`() = runTest {
+        val payload = ggufBytes(4096)
+        val repository = repositoryFor(payload)
+        val alpha = install(repository, "alpha", payload)
+        val beta = install(repository, "beta", payload)
+        val fake = FakeEngine()
+        val engine = engineFor(repository, fake)
+
+        engine.capabilities(alpha)
+        val betaTurn = engine.openTurn(beta, chatInputs("beta"))
+
+        assertEquals("beta", engine.loadedModelId)
+        assertEquals(1, fake.sessions.first().closes)
+        assertEquals(listOf("system: be terse", "user: what is beta?").joinToString("\n"), betaTurn.prompt)
+        assertTrue("the new model renders the request, not the one that was swapped out",
+            fake.sessions.last().turns.single().tools.isNotEmpty())
+    }
+
+    @Test
+    fun `a turn the caller never closes is still not a model left loaded`() = runTest {
+        val payload = ggufBytes(4096)
+        val repository = repositoryFor(payload)
+        val installed = install(repository, "alpha", payload)
+        val fake = FakeEngine()
+        val engine = engineFor(repository, fake)
+
+        val turn = engine.openTurn(installed, chatInputs("alpha")) as FakeTurn
+        turn.parse("partial answer", partial = true)
+        turn.close()
+
+        assertEquals(1, turn.parses)
+        assertEquals(1, turn.closes)
+        // Closing a turn releases the render, not the model: the next request reuses it.
+        assertEquals(1, fake.sessions.size)
+        assertEquals(0, fake.sessions.single().closes)
+        engine.release()
+        assertEquals(1, fake.sessions.single().closes)
     }
 }

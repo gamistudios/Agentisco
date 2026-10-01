@@ -19,9 +19,16 @@ target_link_options(termux PRIVATE
 # one file per ABI instead of four, and the STL is embedded rather than shipped
 # as a separate libc++_shared.so.
 #
-# Only ggml + llama are built. common/, tools/, examples/, tests/ and the
-# llama-server binary stay off — the OpenAI-compatible endpoint Agentisco
-# exposes for local models is implemented in Kotlin, so nothing here needs them.
+# Only ggml + llama + the chat-template layer are built. tools/, examples/,
+# tests/ and the llama-server binary stay off — the OpenAI-compatible endpoint
+# Agentisco exposes for local models is implemented in Kotlin.
+#
+# common/ is the one exception, and only because it is the thing that must not be
+# reimplemented: it holds llama.cpp's Jinja renderer and its per-architecture
+# tool-call parsers. Every GGUF file publishes its own chat template, and a custom
+# model from an arbitrary URL carries whichever dialect its author chose. Applying
+# those with the engine's own code is the difference between supporting one model
+# and supporting the format.
 
 set(LLAMA_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../third_party/llama.cpp")
 if (NOT EXISTS "${LLAMA_DIR}/CMakeLists.txt")
@@ -31,7 +38,7 @@ if (NOT EXISTS "${LLAMA_DIR}/CMakeLists.txt")
 endif ()
 
 set(BUILD_SHARED_LIBS          OFF CACHE BOOL "" FORCE)
-set(LLAMA_BUILD_COMMON         OFF CACHE BOOL "" FORCE)
+set(LLAMA_BUILD_COMMON         ON  CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_TESTS          OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_TOOLS          OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_EXAMPLES       OFF CACHE BOOL "" FORCE)
@@ -39,6 +46,9 @@ set(LLAMA_BUILD_SERVER         OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_APP            OFF CACHE BOOL "" FORCE)
 set(LLAMA_BUILD_UI             OFF CACHE BOOL "" FORCE)
 set(LLAMA_CURL                 OFF CACHE BOOL "" FORCE)
+# common/ spawns helper processes with fork/exec, which Android's app sandbox has
+# no business doing; nothing in the chat-template path uses it.
+set(LLAMA_SUBPROCESS           OFF CACHE BOOL "" FORCE)
 set(GGML_OPENMP                OFF CACHE BOOL "" FORCE)
 set(GGML_CCACHE                OFF CACHE BOOL "" FORCE)
 # Cross-compiling must never probe the *build host* for CPU features; NDK clang
@@ -57,13 +67,16 @@ endif ()
 
 add_subdirectory("${LLAMA_DIR}" llama_build)
 
-add_library(agentisco-llm SHARED llama_jni.cpp)
+add_library(agentisco-llm SHARED
+  llama_jni.cpp
+  chat_jni.cpp
+)
 target_compile_features(agentisco-llm PRIVATE cxx_std_17)
 target_include_directories(agentisco-llm PRIVATE
   "${LLAMA_DIR}/include"
   "${LLAMA_DIR}/ggml/include"
 )
-target_link_libraries(agentisco-llm PRIVATE llama ggml log android)
+target_link_libraries(agentisco-llm PRIVATE llama llama-common ggml log android)
 target_link_options(agentisco-llm PRIVATE
   "-Wl,-z,max-page-size=16384"
   "-Wl,-z,common-page-size=16384"
