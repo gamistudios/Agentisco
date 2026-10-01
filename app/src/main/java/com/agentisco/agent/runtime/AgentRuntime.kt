@@ -15,6 +15,7 @@ import com.agentisco.agent.compact.estimateMessageTokens
 import com.agentisco.agent.compact.groupByAssistantStartedRounds
 import com.agentisco.agent.llm.LlmErrorKind
 import com.agentisco.agent.llm.LlmException
+import com.agentisco.agent.llm.LlmFinishReason
 import com.agentisco.agent.llm.LlmMessage
 import com.agentisco.agent.llm.LlmRequest
 import com.agentisco.agent.llm.LlmRole
@@ -140,6 +141,23 @@ class AgentRuntime(
     const val MAX_PARALLEL_TOOLS = 4
     /** Streamed characters between two live context-usage updates. */
     const val USAGE_EMIT_INTERVAL_CHARS = 1_000
+
+    /**
+     * Resume requests spent on one answer the provider cut at its output-token
+     * limit. A model that keeps filling the budget is not going to stop, so the
+     * run asks a few times and then says out loud that the answer is incomplete.
+     */
+    const val MAX_ANSWER_CONTINUATIONS = 3
+
+    /**
+     * Asks for the rest of a cut-off answer and nothing else. The wording matters:
+     * left to itself a model restates what it already wrote, which would duplicate
+     * the first half of the report inside the joined text.
+     */
+    val CONTINUE_ANSWER_PROMPT = """
+Your previous answer stopped because it reached the output token limit, not because it was finished.
+Continue it from the exact character where it broke off. Do not repeat, restate, or summarise anything you already wrote, do not greet the reader again, and do not close with a conclusion that assumes the whole answer was delivered. Output only the missing remainder.
+""".trim()
 
     /**
      * The tool playbook sent with every run. Models call what they have been
@@ -590,7 +608,64 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
           val message = completedMessage ?: LlmMessage(LlmRole.ASSISTANT, assistantText.toString())
 
           if (message.toolCalls.isEmpty() || !useTools) {
-            finalText = message.content.ifBlank { assistantText.toString() }
+            var answer = message.content.ifBlank { assistantText.toString() }
+            var cut = message.finishReason == LlmFinishReason.LENGTH
+            var continuations = 0
+            // The provider filled its output budget instead of finishing: the text
+            // so far is real but incomplete, and handing it over silently is the
+            // same bug as clipping it. Ask for the remainder, bounded, then say so
+            // if the model still has more to give.
+            while (cut && continuations < MAX_ANSWER_CONTINUATIONS && currentCoroutineContext().isActive) {
+              continuations++
+              onEvent(
+                AgentStreamEvent.Status(
+                  "Answer hit the model's output limit — continuing ($continuations/$MAX_ANSWER_CONTINUATIONS)…"
+                )
+              )
+              val remainder = StringBuilder()
+              var remainderMessage: LlmMessage? = null
+              var resumeFailed = false
+              try {
+                llmService.streamChat(
+                  provider = provider,
+                  model = model,
+                  apiKey = apiKey,
+                  // The answer so far is sent as the assistant turn it really was, so
+                  // the model resumes at its own last character. No tools: a resumed
+                  // answer that started a tool call would be dropped on the floor.
+                  request = LlmRequest(
+                    messages = messages +
+                      LlmMessage(LlmRole.ASSISTANT, answer) +
+                      LlmMessage(LlmRole.USER, CONTINUE_ANSWER_PROMPT),
+                    maxOutputTokens = model.maxOutputTokens,
+                    conversationKey = sessionId
+                  )
+                ) { event ->
+                  when (event) {
+                    is LlmStreamEvent.Token -> {
+                      remainder.append(event.text)
+                      onEvent(AgentStreamEvent.Token(event.text))
+                      meter.appendAssistantText(event.text)
+                    }
+                    is LlmStreamEvent.Completed -> remainderMessage = event.message
+                    is LlmStreamEvent.Interrupted, is LlmStreamEvent.Failed -> resumeFailed = true
+                    else -> Unit
+                  }
+                }
+              } catch (e: LlmException) {
+                resumeFailed = true
+              }
+              val extra = remainderMessage?.content?.ifBlank { null }
+                ?: remainder.toString().ifBlank { null }
+              if (extra != null) answer += extra
+              // Whatever arrived is still a truncated answer: keep it, mark it, stop.
+              if (resumeFailed || extra == null) break
+              cut = remainderMessage?.finishReason == LlmFinishReason.LENGTH
+            }
+            if (cut) {
+              answer += "\n\n[…the answer was cut off by the model's output-token limit and could not be completed. Ask for the rest of it.]"
+            }
+            finalText = answer
             break@taskLoop // task complete — do NOT start another request
           }
 
