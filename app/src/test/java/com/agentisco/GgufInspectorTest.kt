@@ -106,8 +106,22 @@ class GgufInspectorTest {
     }
 
     @Test
-    fun `file type maps to the quantization label the screen shows`() {
-        assertEquals("Q4_0", GgufMetadata.fileTypeLabel(2))
+    fun `reads the context length the model was trained with`() {
+        val bytes = header(Writer(), metadata = 3)
+            .string("general.architecture", "lfm2")
+            .u32Value("lfm2.context_length", 8192)
+            .u32Value("general.file_type", 2)
+            .bytes()
+        assertEquals(8192L, metadataOf(write(bytes)).contextLength)
+    }
+
+    @Test
+    fun `a file that never states a context length claims none`() {
+        assertEquals(null, metadataOf(validFile()).contextLength)
+    }
+
+    @Test
+    fun `file type maps to the quantization label the screen shows`() {        assertEquals("Q4_0", GgufMetadata.fileTypeLabel(2))
         assertEquals("Q8_0", GgufMetadata.fileTypeLabel(7))
         assertEquals("Q4_K_M", GgufMetadata.fileTypeLabel(15))
         assertEquals(null, GgufMetadata.fileTypeLabel(null))

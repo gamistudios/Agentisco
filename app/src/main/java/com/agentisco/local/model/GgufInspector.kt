@@ -23,7 +23,13 @@ data class GgufMetadata(
   /** `general.name`, the human-readable model name the publisher chose. */
   val publishedName: String?,
   /** `general.file_type`: which quantization the weights were packed with. */
-  val fileType: Long?
+  val fileType: Long?,
+  /**
+   * `<arch>.context_length` — what the model was trained for. The settings screen
+   * caps its context control with this, because offering a longer window than the
+   * weights can hold produces confident nonsense rather than an error.
+   */
+  val contextLength: Long? = null
 ) {
   companion object {
     /**
@@ -105,6 +111,9 @@ object GgufInspector {
   private const val KEY_NAME = "general.name"
   private const val KEY_FILE_TYPE = "general.file_type"
 
+  /** `<architecture>.context_length`, whichever architecture the file declares. */
+  private const val KEY_CONTEXT_LENGTH_SUFFIX = ".context_length"
+
   /**
    * Validates [file] as an installable model. A file that parses as GGUF but
    * whose metadata stops short of declaring an architecture is rejected too:
@@ -164,6 +173,7 @@ object GgufInspector {
       var architecture: String? = null
       var publishedName: String? = null
       var fileType: Long? = null
+      var contextLength: Long? = null
       var pair = 0L
       while (pair < metadataCount) {
         val key = string()
@@ -172,7 +182,10 @@ object GgufInspector {
             KEY_ARCHITECTURE -> architecture = value
             KEY_NAME -> publishedName = value
           }
-          is Long -> if (key == KEY_FILE_TYPE) fileType = value
+          is Long -> when {
+            key == KEY_FILE_TYPE -> fileType = value
+            key.endsWith(KEY_CONTEXT_LENGTH_SUFFIX) -> contextLength = value
+          }
         }
         pair++
       }
@@ -185,7 +198,8 @@ object GgufInspector {
           architecture = architecture?.takeIf { it.isNotBlank() }
             ?: throw MalformedGguf("Model metadata does not declare an architecture"),
           publishedName = publishedName?.takeIf { it.isNotBlank() },
-          fileType = fileType
+          fileType = fileType,
+          contextLength = contextLength?.takeIf { it > 0L }
         )
       )
     }

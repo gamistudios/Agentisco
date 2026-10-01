@@ -5,6 +5,11 @@
 // the OpenAI-compatible wire format all live in Kotlin, so the engine stays
 // replaceable and the parts that carry product rules stay testable on the JVM.
 //
+// Text crosses as UTF-8 byte arrays in both directions. JNI's own string
+// functions use modified UTF-8, which turns an emoji into two three-byte
+// surrogate encodings the tokenizer would then mis-read, so Kotlin does the
+// encoding and this file never has to care.
+//
 // Finish codes returned by nativeComplete:
 //   0 = end of sequence   1 = max tokens   2 = caller stopped   3 = aborted
 //   4 = context full      negative = engine error (see nativeLastError)
@@ -65,6 +70,51 @@ std::string meta_string(llama_model *model, const char *key) {
   const int32_t len = llama_model_meta_val_str(model, key, buf, sizeof(buf));
   if (len < 0) return std::string();
   return std::string(buf, (size_t) (len < (int32_t) sizeof(buf) ? len : (int32_t) sizeof(buf) - 1));
+}
+
+// UTF-8 bytes as Kotlin produced them, with no JNI string conversion anywhere in
+// the path. A null array reads as empty text.
+std::vector<char> copy_bytes(JNIEnv *env, jbyteArray array) {
+  std::vector<char> out;
+  if (array == nullptr) return out;
+  const jsize len = env->GetArrayLength(array);
+  out.resize((size_t) (len > 0 ? len : 0));
+  if (!out.empty()) env->GetByteArrayRegion(array, 0, len, (jbyte *) out.data());
+  return out;
+}
+
+jbyteArray to_bytes(JNIEnv *env, const std::string &text) {
+  jbyteArray out = env->NewByteArray((jsize) text.size());
+  if (!text.empty()) env->SetByteArrayRegion(out, 0, (jsize) text.size(), (const jbyte *) text.data());
+  return out;
+}
+
+// Metadata strings come out of the model file, which for a custom model is
+// whatever the user pointed at; they are quoted into JSON, so they are escaped
+// rather than trusted to be well-formed. UTF-8 bytes pass through untouched —
+// they are already valid JSON string content.
+std::string json_escape(const std::string &raw) {
+  std::string out;
+  out.reserve(raw.size() + 8);
+  for (const unsigned char c : raw) {
+    switch (c) {
+      case '"': out += "\\\""; break;
+      case '\\': out += "\\\\"; break;
+      case '\n': out += "\\n"; break;
+      case '\r': out += "\\r"; break;
+      case '\t': out += "\\t"; break;
+      default:
+        if (c < 0x20) {
+          static const char *hex = "0123456789abcdef";
+          out += "\\u00";
+          out += hex[(c >> 4) & 0xF];
+          out += hex[c & 0xF];
+        } else {
+          out += (char) c;
+        }
+    }
+  }
+  return out;
 }
 
 llama_sampler *build_sampler(const Session *s,
@@ -157,79 +207,59 @@ Java_com_agentisco_local_runtime_LlamaNative_nativeLoadModel(JNIEnv *env,
   return (jlong) (intptr_t) s;
 }
 
-JNIEXPORT jstring JNICALL
+JNIEXPORT jbyteArray JNICALL
 Java_com_agentisco_local_runtime_LlamaNative_nativeModelInfo(JNIEnv *env, jobject, jlong handle) {
   auto *s = (Session *) (intptr_t) handle;
-  if (s == nullptr) return env->NewStringUTF("{}");
+  if (s == nullptr) return to_bytes(env, "{}");
 
   char arch[256] = {0};
   llama_model_meta_val_str(s->model, "general.architecture", arch, sizeof(arch));
-  const std::string tmpl = meta_string(s->model, "tokenizer.chat_template");
-  const std::string name = meta_string(s->model, "general.name");
 
-  // Kotlin needs to know the engine's real limits so Settings never offers a
-  // parameter value the loaded model cannot honour.
-  std::string json = "{\"architecture\":\"" + name + "\",";
-  json += "\"arch\":\"";
-  json += arch;
-  json += "\",\"nVocab\":" + std::to_string(llama_vocab_n_tokens(s->vocab));
-  json += ",\"nCtx\":" + std::to_string(llama_n_ctx(s->ctx));
-  json += ",\"nCtxTrain\":" + std::to_string(llama_model_n_ctx_train(s->model));
-  json += ",\"eos\":" + std::to_string(llama_vocab_eos(s->vocab));
+  // Kotlin needs the engine's real limits so Settings never offers a parameter
+  // value the loaded model cannot honour, and so the prompt renderer can use the
+  // chat template this particular file ships with.
+  std::string json = "{";
+  json += "\"name\":\"" + json_escape(meta_string(s->model, "general.name")) + "\",";
+  json += "\"architecture\":\"" + json_escape(arch) + "\",";
+  json += "\"chatTemplate\":\"" + json_escape(meta_string(s->model, "tokenizer.chat_template")) + "\",";
+  json += "\"eosToken\":\"" + json_escape(meta_string(s->model, "tokenizer.ggml.eos_token")) + "\",";
+  json += "\"vocabSize\":" + std::to_string(llama_vocab_n_tokens(s->vocab));
+  json += ",\"contextSize\":" + std::to_string(llama_n_ctx(s->ctx));
+  json += ",\"trainedContextSize\":" + std::to_string(llama_model_n_ctx_train(s->model));
+  json += ",\"eosTokenId\":" + std::to_string(llama_vocab_eos(s->vocab));
   json += ",\"addBos\":" + std::string(llama_vocab_get_add_bos(s->vocab) ? "true" : "false");
-  json += ",\"addEos\":" + std::string(llama_vocab_get_add_eos(s->vocab) ? "true" : "false");
   json += ",\"supportsGrammar\":true";
-
-  std::string eos_str = meta_string(s->model, "tokenizer.ggml.eos_token");
-  json += ",\"eosToken\":\"" + eos_str + "\"";
-  json += ",\"chatTemplate\":\"";
-  for (char c : tmpl) {
-    switch (c) {
-      case '"': json += "\\\""; break;
-      case '\\': json += "\\\\"; break;
-      case '\n': json += "\\n"; break;
-      case '\r': json += "\\r"; break;
-      case '\t': json += "\\t"; break;
-      default:
-        if ((unsigned char) c >= 0x20) json += c;
-    }
-  }
-  json += "\"}";
-  return env->NewStringUTF(json.c_str());
+  json += "}";
+  return to_bytes(env, json);
 }
 
 JNIEXPORT jint JNICALL
 Java_com_agentisco_local_runtime_LlamaNative_nativeComplete(JNIEnv *env,
                                                             jobject,
                                                             jlong handle,
-                                                            jstring prompt,
+                                                            jbyteArray prompt,
                                                             jfloat temperature,
                                                             jint top_k,
                                                             jfloat top_p,
                                                             jfloat repeat_penalty,
                                                             jint max_tokens,
                                                             jlong seed,
-                                                            jstring grammar,
+                                                            jbyteArray grammar,
                                                             jobject callback) {
   auto *s = (Session *) (intptr_t) handle;
   if (s == nullptr) return -1;
 
   jclass cb_class = env->GetObjectClass(callback);
-  jmethodID on_token = env->GetMethodID(cb_class, "onToken", "([BI)Z");
+  jmethodID on_token = env->GetMethodID(cb_class, "onToken", "([B)Z");
   if (on_token == nullptr) return -2;
 
-  std::vector<char> prompt_bytes;
-  {
-    const char *chars = env->GetStringUTFChars(prompt, nullptr);
-    const jsize len = env->GetStringUTFLength(prompt);
-    prompt_bytes.assign(chars, chars + len);
-    env->ReleaseStringUTFChars(prompt, chars);
-  }
+  std::vector<char> prompt_bytes = copy_bytes(env, prompt);
+  const std::string grammar_text = [&] {
+    const std::vector<char> raw = copy_bytes(env, grammar);
+    return std::string(raw.begin(), raw.end());
+  }();
 
-  const char *cgrammar = grammar == nullptr ? nullptr : env->GetStringUTFChars(grammar, nullptr);
-  llama_sampler *smpl =
-      build_sampler(s, temperature, top_k, top_p, repeat_penalty, seed, cgrammar ? cgrammar : "");
-  if (cgrammar) env->ReleaseStringUTFChars(grammar, cgrammar);
+  llama_sampler *smpl = build_sampler(s, temperature, top_k, top_p, repeat_penalty, seed, grammar_text.c_str());
   if (smpl == nullptr) {
     set_error("Failed to build sampler");
     return -3;
@@ -238,7 +268,7 @@ Java_com_agentisco_local_runtime_LlamaNative_nativeComplete(JNIEnv *env,
   // Tokenize: a negative return is the number of tokens the buffer would need.
   std::vector<llama_token> tokens;
   {
-    const char *text = prompt_bytes.data();
+    const char *text = prompt_bytes.empty() ? "" : prompt_bytes.data();
     const int32_t text_len = (int32_t) prompt_bytes.size();
     int32_t need = llama_tokenize(s->vocab, text, text_len, nullptr, 0, true, true);
     if (need < 0) need = -need;
@@ -267,10 +297,15 @@ Java_com_agentisco_local_runtime_LlamaNative_nativeComplete(JNIEnv *env,
     if (bytes.empty()) return true;
     jbyteArray arr = env->NewByteArray((jsize) bytes.size());
     env->SetByteArrayRegion(arr, 0, (jsize) bytes.size(), (const jbyte *) bytes.data());
-    const jboolean keep = env->CallBooleanMethod(callback, on_token, arr, (jint) bytes.size());
+    const jboolean keep = env->CallBooleanMethod(callback, on_token, arr);
     env->DeleteLocalRef(arr);
     return env->ExceptionCheck() ? false : (keep == JNI_TRUE);
   };
+
+  // Each completion is a whole sequence on its own: the context outlives this call,
+  // so a KV cache left over from the previous prompt would be attended to by tokens
+  // that are writing to the same positions.
+  llama_memory_seq_rm(llama_get_memory(s->ctx), -1, -1, -1);
 
   // Prefill: the whole prompt, in chunks the context batch can take.
   bool prefill_ok = !tokens.empty();
@@ -384,9 +419,9 @@ Java_com_agentisco_local_runtime_LlamaNative_nativeBackendFree(JNIEnv *, jobject
   llama_backend_free();
 }
 
-JNIEXPORT jstring JNICALL
+JNIEXPORT jbyteArray JNICALL
 Java_com_agentisco_local_runtime_LlamaNative_nativeLastError(JNIEnv *env, jobject) {
-  return env->NewStringUTF(g_last_error.c_str());
+  return to_bytes(env, g_last_error);
 }
 
 JNIEXPORT jint JNICALL
