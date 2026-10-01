@@ -12,7 +12,6 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import org.json.JSONObject
 import java.io.File
-import java.io.RandomAccessFile
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -87,8 +86,6 @@ class UpdateRepository(
     val downloadedApkPath: StateFlow<String?> = _downloadedApkPath.asStateFlow()
 
     @Volatile private var downloadCancelled = false
-
-    class AbortedDownloadException : Exception("Download cancelled by user")
 
     private fun updateFile(): File = File(context.filesDir, UPDATE_APK_NAME)
 
@@ -297,9 +294,13 @@ class UpdateRepository(
      * SHA-256 the release reports when it publishes one (so every byte of a
      * multi-part/resumed transfer is proven present), and really our APK. Anything
      * else surfaces an error through [updateError] and removes the unusable file.
+     *
+     * The transfer itself is [ResumableFileTransfer], shared with local model
+     * installation; this method supplies the APK-specific content rules and maps the
+     * outcome onto the repository's states.
      */
-    private suspend fun runDownload(): Boolean = withContext(Dispatchers.IO) {
-        val update = _availableUpdate.value ?: return@withContext false
+    private suspend fun runDownload(): Boolean {
+        val update = _availableUpdate.value ?: return false
         val file = updateFile()
         // Resume markers written by older builds are no longer trusted; a stale one
         // could point past a truncated file and make the writer seek beyond EOF.
@@ -311,124 +312,65 @@ class UpdateRepository(
         // The completion marker only describes a finished download; once a new one
         // starts the file on disk is in flight again.
         clearMarker()
+        legacyOffsetFile.delete()
 
-        // The API's asset size is authoritative; Content-Length only fills in when
-        // the release omits it.
-        var expectedSize = update.assetSize.takeIf { it > 0L } ?: 0L
-        var lastError: String? = null
-        var attempt = 0
-
-        while (attempt < MAX_ATTEMPTS) {
-            attempt++
-            try {
-                if (downloadCancelled) throw AbortedDownloadException()
-                legacyOffsetFile.delete()
-
-                var offset = 0L
-                if (file.length() > 0L) {
-                    // Without a known size a partial file cannot be validated, so it is
-                    // re-fetched from zero (a full, non-range download) instead of trusted.
-                    offset = if (expectedSize <= 0L) {
-                        0L
-                    } else {
-                        UpdateDownloadVerifier.resumeOffset(
-                            existingBytes = file.length(),
-                            expectedSize = expectedSize,
-                            existingPrefixIsApk = UpdateDownloadVerifier.hasApkMagic(file)
-                        )
-                    }
-                    // Nothing usable to resume from: start from a clean file rather
-                    // than writing on top of a truncated or foreign one.
-                    if (offset == 0L) file.delete()
+        val outcome = ResumableFileTransfer(
+            streamSource = streamSource,
+            maxAttempts = MAX_ATTEMPTS,
+            retryDelayMs = retryDelayMs
+        ).run(
+            ResumableFileTransfer.Spec(
+                url = update.downloadUrl,
+                file = file,
+                expectedSizeBytes = update.assetSize,
+                expectedDigest = update.assetDigest,
+                assetSignaturePresent = { UpdateDownloadVerifier.hasApkMagic(it) },
+                acceptedContents = { apkContentsReason(it) },
+                isCancelled = { downloadCancelled },
+                onProgress = { bytesOnDisk, totalBytes, verified ->
+                    publishProgress(UpdateDownloadVerifier.progress(bytesOnDisk, totalBytes, verified))
                 }
+            )
+        )
 
-                streamSource.open(update.downloadUrl, offset).use { stream ->
-                    if (stream.rangeIgnored && offset > 0L) {
-                        // The server answered our Range request with the whole file;
-                        // appending it would duplicate bytes, so restart at zero.
-                        file.delete()
-                        offset = 0L
-                    }
-                    if (expectedSize <= 0L && stream.totalSizeHint > 0L) {
-                        expectedSize = stream.totalSizeHint
-                    }
-
-                    val startOffset = offset
-                    val startedAtZero = startOffset == 0L
-                    publishProgress(UpdateDownloadVerifier.progress(startOffset, expectedSize))
-
-                    RandomAccessFile(file, "rw").use { raf ->
-                        raf.seek(startOffset)
-                        // Drop anything past the resume point so the file can only
-                        // ever grow into exactly the bytes we are writing now.
-                        raf.setLength(startOffset)
-                        val buffer = ByteArray(BUFFER_SIZE)
-                        var bytesCopied = 0L
-                        while (true) {
-                            if (downloadCancelled) throw AbortedDownloadException()
-                            val read = stream.input.read(buffer)
-                            if (read == -1) break
-                            raf.write(buffer, 0, read)
-                            bytesCopied += read
-                            publishProgress(
-                                UpdateDownloadVerifier.progress(
-                                    bytesOnDisk = startOffset + bytesCopied,
-                                    expectedSize = expectedSize
-                                )
-                            )
-                        }
-                    }
-
-                    val bytesOnDisk = file.length()
-                    val decision = verifyUpdateFile(
-                        expectedSize = expectedSize,
-                        downloadedFromZero = startedAtZero,
-                        expectedDigest = update.assetDigest
-                    )
-                    if (!decision.complete) {
-                        throw Exception(decision.reason ?: "Download verification failed")
-                    }
-
-                    publishProgress(
-                        UpdateDownloadVerifier.progress(
-                            bytesOnDisk = bytesOnDisk,
-                            expectedSize = expectedSize,
-                            verified = true
-                        )
-                    )
-                    writeMarker(update)
-                    _downloadedApkPath.value = file.absolutePath
-                    _updateState.value = UpdateState.DOWNLOADED
-                    return@withContext true
-                }
-            } catch (e: AbortedDownloadException) {
-                // Cancelling keeps the partial file so the next run resumes it; the
-                // file is NOT downloaded, so no install path may be exposed.
-                _downloadedApkPath.value = null
-                _updateProgress.value = UpdateDownloadVerifier.progress(file.length(), expectedSize)
-                return@withContext false
-            } catch (e: CancellationException) {
-                _downloadedApkPath.value = null
-                _updateProgress.value = UpdateDownloadVerifier.progress(file.length(), expectedSize)
-                throw e
-            } catch (e: Exception) {
-                lastError = e.message ?: "Download failed"
+        return when (outcome) {
+            is ResumableFileTransfer.Outcome.Completed -> {
+                writeMarker(update)
+                _downloadedApkPath.value = file.absolutePath
+                _updateState.value = UpdateState.DOWNLOADED
+                true
             }
 
-            if (attempt < MAX_ATTEMPTS) {
-                kotlinx.coroutines.delay(attempt * retryDelayMs)
+            // Cancelling keeps the partial file so the next run resumes it; the file
+            // is NOT downloaded, so no install path may be exposed.
+            is ResumableFileTransfer.Outcome.Cancelled -> {
+                _downloadedApkPath.value = null
+                _updateProgress.value = UpdateDownloadVerifier.progress(outcome.bytesOnDisk, update.assetSize)
+                false
+            }
+
+            is ResumableFileTransfer.Outcome.Failed -> {
+                _downloadedApkPath.value = null
+                _updateError.value = outcome.reason
+                _updateState.value = UpdateState.ERROR
+                false
             }
         }
+    }
 
-        // Every attempt failed: drop the partial so a truncated or foreign file can
-        // never be installed later, and let the retry start from scratch.
-        file.delete()
-        legacyOffsetFile.delete()
-        _downloadedApkPath.value = null
-        _updateProgress.value = 0f
-        _updateError.value = lastError ?: "Download failed"
-        _updateState.value = UpdateState.ERROR
-        return@withContext false
+    /**
+     * Why this file is not a usable Agentisco APK, or null when it is. A manifest
+     * the platform cannot read is not a failure — only a package that positively
+     * belongs to somebody else is.
+     */
+    private fun apkContentsReason(file: File): String? {
+        if (!UpdateDownloadVerifier.hasApkMagic(file)) return UpdateDownloadVerifier.NOT_AN_APK_REASON
+        val owner = readApkPackageName(file)
+        return if (owner != null && owner != UpdateDownloadVerifier.EXPECTED_PACKAGE) {
+            UpdateDownloadVerifier.wrongPackageReason(owner)
+        } else {
+            null
+        }
     }
 
     /**
