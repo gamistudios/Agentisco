@@ -618,6 +618,45 @@ private fun StatusLine(text: String, color: Color) {
   Text(text, color = color, fontSize = 10.sp)
 }
 
+/**
+ * The part of the model form a provider's own listing can answer: the id, the
+ * name and the two limits, plus the two capabilities a listing states. The rest
+ * of the form stays the user's call.
+ */
+internal data class ModelFormFields(
+  val modelId: String,
+  val displayName: String,
+  val contextWindow: String,
+  val maxOutputTokens: String,
+  val tools: Boolean,
+  val images: Boolean
+) {
+  /**
+   * Takes what [m] states and keeps what it does not — a listing that omits a
+   * ceiling must not blank out a number the user already typed.
+   */
+  fun filledFrom(m: CatalogModel): ModelFormFields = copy(
+    modelId = m.modelId,
+    displayName = m.displayName.ifBlank { displayName },
+    contextWindow = m.contextWindow?.toString() ?: contextWindow,
+    maxOutputTokens = m.maxOutputTokens?.toString() ?: maxOutputTokens,
+    tools = m.tools ?: tools,
+    images = m.images ?: images
+  )
+}
+
+/**
+ * Entries the partial id could mean. Case-insensitive on both the wire id and
+ * the friendly name, because a user types whichever one they remember, and
+ * capped so a provider listing hundreds of models cannot fill the screen.
+ */
+internal fun catalogSuggestions(catalog: List<CatalogModel>, query: String): List<CatalogModel> =
+  if (query.isBlank()) emptyList()
+  else catalog
+    .filter { it.modelId.contains(query, ignoreCase = true) || it.displayName.contains(query, ignoreCase = true) }
+    .sortedBy { it.modelId }
+    .take(8)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ModelFormDialog(
@@ -627,41 +666,36 @@ private fun ModelFormDialog(
   onDismiss: () -> Unit,
   onSave: (providerId: String, modelId: String, displayName: String, contextWindow: Int?, maxOutputTokens: Int?, ModelCapabilities, ReasoningConfig?) -> Unit
 ) {
-  var modelId by remember { mutableStateOf(existing?.modelId ?: "") }
-  var displayName by remember { mutableStateOf(existing?.displayName ?: "") }
-  var ctxWindow by remember { mutableStateOf(existing?.contextWindow?.toString() ?: "") }
-  var maxOut by remember { mutableStateOf(existing?.maxOutputTokens?.toString() ?: "") }
-  var tools by remember { mutableStateOf(existing?.capabilities?.tools ?: true) }
+  var fields by remember {
+    mutableStateOf(
+      ModelFormFields(
+        modelId = existing?.modelId ?: "",
+        displayName = existing?.displayName ?: "",
+        contextWindow = existing?.contextWindow?.toString() ?: "",
+        maxOutputTokens = existing?.maxOutputTokens?.toString() ?: "",
+        tools = existing?.capabilities?.tools ?: true,
+        images = existing?.capabilities?.images ?: false
+      )
+    )
+  }
   var streaming by remember { mutableStateOf(existing?.capabilities?.streaming ?: true) }
-  var images by remember { mutableStateOf(existing?.capabilities?.images ?: false) }
   var promptCaching by remember { mutableStateOf(existing?.capabilities?.promptCaching ?: false) }
   var interleaved by remember { mutableStateOf(existing?.capabilities?.interleavedReasoning ?: false) }
   var maxTokensParam by remember { mutableStateOf(existing?.capabilities?.maxTokensParameter ?: true) }
   var reasoningEnabled by remember { mutableStateOf(existing?.reasoning?.enabled ?: false) }
   var reasoningEffort by remember { mutableStateOf(existing?.reasoning?.effort ?: "medium") }
 
-  val valid = provider != null && modelId.isNotBlank() && displayName.isNotBlank()
+  val valid = provider != null && fields.modelId.isNotBlank() && fields.displayName.isNotBlank()
 
   // What the provider itself lists, filtered as the user types. Picking an entry
   // fills in the limits and capabilities that model really has, so nothing has to
   // be looked up by hand — but every field stays editable and a model missing
   // from the listing can still be typed in.
   var showMatches by remember { mutableStateOf(false) }
-  val matches = remember(catalog, modelId) {
-    if (modelId.isBlank()) emptyList()
-    else catalog
-      .filter { it.modelId.contains(modelId, ignoreCase = true) || it.displayName.contains(modelId, ignoreCase = true) }
-      .sortedBy { it.modelId }
-      .take(8)
-  }
+  val matches = catalogSuggestions(catalog, fields.modelId)
 
   fun pickFromCatalog(m: CatalogModel) {
-    modelId = m.modelId
-    if (m.displayName.isNotBlank()) displayName = m.displayName
-    m.contextWindow?.let { ctxWindow = it.toString() }
-    m.maxOutputTokens?.let { maxOut = it.toString() }
-    m.tools?.let { tools = it }
-    m.images?.let { images = it }
+    fields = fields.filledFrom(m)
     showMatches = false
   }
 
@@ -684,7 +718,8 @@ private fun ModelFormDialog(
       ) {
         ExposedDropdownMenuBox(expanded = showMatches, onExpandedChange = { showMatches = it }) {
           OutlinedTextField(
-            value = modelId, onValueChange = { modelId = it; showMatches = catalog.isNotEmpty() },
+            value = fields.modelId,
+            onValueChange = { fields = fields.copy(modelId = it); showMatches = catalog.isNotEmpty() },
             label = { Text("Model ID", fontSize = 11.sp) },
             supportingText = {
               Text(
@@ -715,27 +750,30 @@ private fun ModelFormDialog(
           }
         }
         OutlinedTextField(
-          value = displayName, onValueChange = { displayName = it },
+          value = fields.displayName,
+          onValueChange = { fields = fields.copy(displayName = it) },
           label = { Text("Display Name", fontSize = 11.sp) },
           singleLine = true, modifier = Modifier.fillMaxWidth().testTag("input_model_name")
         )
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
           OutlinedTextField(
-            value = ctxWindow, onValueChange = { ctxWindow = it.filter { c -> c.isDigit() } },
+            value = fields.contextWindow,
+            onValueChange = { fields = fields.copy(contextWindow = it.filter { c -> c.isDigit() }) },
             label = { Text("Context (tokens)", fontSize = 11.sp) },
             singleLine = true, modifier = Modifier.weight(1f)
           )
           OutlinedTextField(
-            value = maxOut, onValueChange = { maxOut = it.filter { c -> c.isDigit() } },
+            value = fields.maxOutputTokens,
+            onValueChange = { fields = fields.copy(maxOutputTokens = it.filter { c -> c.isDigit() }) },
             label = { Text("Max output", fontSize = 11.sp) },
             singleLine = true, modifier = Modifier.weight(1f)
           )
         }
 
         Text("Capabilities", color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Medium)
-        CapabilityRow("Tool calling", tools) { tools = it }
+        CapabilityRow("Tool calling", fields.tools) { fields = fields.copy(tools = it) }
         CapabilityRow("Streaming", streaming) { streaming = it }
-        CapabilityRow("Images", images) { images = it }
+        CapabilityRow("Images", fields.images) { fields = fields.copy(images = it) }
         CapabilityRow("Prompt caching", promptCaching) { promptCaching = it }
         CapabilityRow("Interleaved reasoning", interleaved) { interleaved = it }
         CapabilityRow("max_tokens parameter", maxTokensParam) { maxTokensParam = it }
@@ -765,12 +803,12 @@ private fun ModelFormDialog(
         onClick = {
           onSave(
             provider!!.id,
-            modelId,
-            displayName,
-            ctxWindow.takeIf { it.isNotBlank() }?.toIntOrNull(),
-            maxOut.takeIf { it.isNotBlank() }?.toIntOrNull(),
+            fields.modelId,
+            fields.displayName,
+            fields.contextWindow.takeIf { it.isNotBlank() }?.toIntOrNull(),
+            fields.maxOutputTokens.takeIf { it.isNotBlank() }?.toIntOrNull(),
             ModelCapabilities(
-              tools = tools, images = images, streaming = streaming,
+              tools = fields.tools, images = fields.images, streaming = streaming,
               promptCaching = promptCaching, interleavedReasoning = interleaved,
               maxTokensParameter = maxTokensParam
             ),
