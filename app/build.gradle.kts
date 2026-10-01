@@ -30,9 +30,13 @@ android {
 
     externalNativeBuild {
       cmake {
-        // Builds the PTY JNI helper (libtermux.so) vendored from termux-app.
+        // Builds the PTY JNI helper (libtermux.so) vendored from termux-app, and
+        // libagentisco-llm.so — the pinned llama.cpp engine linked statically into
+        // one JNI library. c++_static because llama.cpp is C++: the STL is embedded
+        // in that single .so instead of shipping a separate libc++_shared.so, and
+        // termux.c is C, so it is unaffected either way.
         cppFlags += ""
-        arguments += listOf("-DANDROID_STL=none")
+        arguments += listOf("-DANDROID_STL=c++_static")
       }
     }
 

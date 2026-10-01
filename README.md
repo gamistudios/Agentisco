@@ -136,6 +136,13 @@ The engine (`editor/`) is headless and unit-tested; the UI (`ui/editor/`) wires 
 
 Prerequisites: JDK 21, Android SDK (platform 36), NDK 27.2.12479018 + CMake 3.22.1 (Gradle can fetch via `sdkmanager`).
 
+Clone with the vendored inference engine, otherwise CMake configuration fails:
+
+```bash
+git clone --recursive <url>          # or, in an existing checkout:
+git submodule update --init --recursive
+```
+
 ```bash
 # Debug APK
 ./gradlew :app:assembleDebug
