@@ -34,17 +34,7 @@ class ProotSessionManager(
 
     val argsBuilder = ProotArgsBuilder(nativeBinaries, rootfsDir)
 
-    // First boot inside a PTY performs the initial real apt transaction.
-    val shellScript = buildString {
-      append("if [ ! -f /root/.scoos-firstboot ]; then ")
-      append("echo 'ScoOS Linux: performing first-boot setup (real apt)...'; ")
-      append("apt-get update && ")
-      append("apt-get install -y --no-install-recommends git openssh-client ca-certificates && ")
-      append("touch /root/.scoos-firstboot; ")
-      append("echo 'First-boot setup complete.'; ")
-      append("fi; ")
-      append("exec bash -l")
-    }
+    val shellScript = guestStartupScript()
 
     val guestCommand = listOf(
       "/usr/bin/env", "-i"
@@ -73,3 +63,41 @@ class ProotSessionManager(
     ).also { it.mSessionName = name }
   }
 }
+
+/**
+ * The one-time apt transaction a fresh rootfs runs the first time a terminal
+ * opens; the marker file keeps every later session from repeating it.
+ */
+internal const val FIRST_BOOT_SETUP =
+  "if [ ! -f /root/.scoos-firstboot ]; then " +
+    "echo 'ScoOS Linux: performing first-boot setup (real apt)...'; " +
+    "apt-get update && " +
+    "apt-get install -y --no-install-recommends git openssh-client ca-certificates && " +
+    "touch /root/.scoos-firstboot; " +
+    "echo 'First-boot setup complete.'; " +
+    "fi; "
+
+/**
+ * Android hands the PTY process its own supplementary groups, and those GIDs
+ * have no entry in the guest `/etc/group`, so `groups` and `id` print
+ * "cannot find name for group ID" for each of them. The numbering differs per
+ * device and per install, so it is read at runtime rather than listed here.
+ * Only GIDs that resolve to nothing get an entry — existing groups are left
+ * exactly as the rootfs shipped them — which makes this safe to repeat on
+ * every session. A single failing `groupadd` (a race, a read-only /etc/group)
+ * must never stop the shell from starting, hence `|| true`.
+ */
+internal const val GROUP_SYNC =
+  "for gid in \$(id -G 2>/dev/null); do " +
+    "if ! getent group \"\$gid\" >/dev/null 2>&1; then " +
+    "groupadd -g \"\$gid\" \"grp\$gid\" 2>/dev/null || true; " +
+    "fi; " +
+    "done; "
+
+/** What `/bin/bash -lc` runs when a terminal opens, before the shell takes over. */
+internal fun guestStartupScript(): String =
+  buildString {
+    append(FIRST_BOOT_SETUP)
+    append(GROUP_SYNC)
+    append("exec bash -l")
+  }
