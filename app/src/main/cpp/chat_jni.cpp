@@ -275,7 +275,11 @@ Java_com_agentisco_local_runtime_LlamaNative_nativeChatParse(JNIEnv *env,
     return to_bytes(env, json);
   } catch (const std::exception &e) {
     set_error(std::string("The model produced output its own format does not allow: ") + e.what());
-    return to_bytes(env, "{\"error\":true}");
+    // A partial parse failing is normal: the answer is not finished, so there is
+    // simply nothing to report yet. Only a final failure is the model's fault, and
+    // the caller needs to tell those apart before it shows anything to the user.
+    std::string json = "{\"error\":true,\"partial\":" + std::string(partial == JNI_TRUE ? "true" : "false") + "}";
+    return to_bytes(env, json);
   }
 }
 

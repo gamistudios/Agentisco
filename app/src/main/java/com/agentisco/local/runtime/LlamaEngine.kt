@@ -253,9 +253,14 @@ class LlamaEngine : LocalModelEngine {
         JSONObject(api.nativeChatParse(handle, text.toByteArray(StandardCharsets.UTF_8), partial).toStringUtf8())
       }.getOrNull() ?: return LocalParsedMessage.empty
       if (json.optBoolean("error", false)) {
-        // The answer does not fit the model's own format. The text is still the answer
-        // the user asked for, so it is returned as content with the failure marked for
-        // whoever logs these — never as a silent empty turn.
+        if (partial || json.optBoolean("partial", false)) {
+          // The answer is not finished, so its shape is not decidable yet: there is
+          // nothing to report, and the caller keeps accumulating.
+          return LocalParsedMessage.empty
+        }
+        // A final answer that does not fit the model's own format. The text is still
+        // the answer the user asked for, so it is returned as content with the failure
+        // marked for whoever logs these — never as a silent empty turn.
         return LocalParsedMessage(text, "", emptyList(), emptyList(), rejected = true)
       }
       val message = json.optJSONObject("message") ?: return LocalParsedMessage.empty

@@ -1,6 +1,7 @@
 package com.agentisco.local.runtime
 
 import com.agentisco.data.repository.LocalModelRepository
+import com.agentisco.local.model.LocalGenerationSettings
 import com.agentisco.local.model.LocalModel
 import com.agentisco.local.model.LocalRuntimeSettings
 import kotlinx.coroutines.CoroutineDispatcher
@@ -68,23 +69,26 @@ class LocalInferenceEngine(
   fun systemThreads(): Int = engine.systemThreads()
 
   /**
-   * Generates [prompt] using the model's saved generation settings, streaming pieces
-   * to [onPiece]. Returning false from [onPiece] stops the run, which is how a client
-   * that went away ends up as a cancelled completion rather than a wasted battery.
+   * Generates [prompt] using the model's saved generation settings — or [settings] when
+   * a caller passes them, which is how one request can ask for a different temperature
+   * without editing the model's configuration — streaming pieces to [onPiece].
+   * Returning false from [onPiece] stops the run, which is how a client that went away
+   * ends up as a cancelled completion rather than a wasted battery.
    */
   suspend fun generate(
     model: LocalModel,
     prompt: String,
     grammar: String? = null,
     seed: Long? = null,
+    settings: LocalGenerationSettings? = null,
     onPiece: (String) -> Boolean
   ): LocalFinishReason {
     return withContext(dispatcher) {
       engineMutex.withLock {
-        val session = openLocked(model)
-        val settings = repository.configuration(model.id).generation
+        val resident = openLocked(model)
+        val generation = settings ?: repository.configuration(model.id).generation
         try {
-          session.session.generate(LocalGenerationRequest(prompt, settings, grammar, seed), onPiece)
+          resident.session.generate(LocalGenerationRequest(prompt, generation, grammar, seed), onPiece)
         } catch (e: LocalEngineException) {
           // A mid-run engine failure leaves the context in an unknown state; the next
           // request should not inherit it.
