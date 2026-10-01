@@ -28,6 +28,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.agentisco.agent.llm.CatalogModel
 import com.agentisco.data.repository.WorkspaceRepository
 import com.agentisco.settings.model.AIModel
 import com.agentisco.settings.model.AIProvider
@@ -47,6 +48,11 @@ fun AIProvidersSection(viewModel: WorkspaceViewModel, modifier: Modifier = Modif
   val providers by viewModel.providers.collectAsState()
   val models by viewModel.aiModels.collectAsState()
   val connectionTests by viewModel.connectionTests.collectAsState()
+  val catalogs by viewModel.modelCatalogs.collectAsState()
+
+  /** Models a provider listed for itself, once they have been fetched. */
+  fun catalogOf(providerId: String): List<CatalogModel> =
+    (catalogs[providerId] as? WorkspaceRepository.ModelCatalogState.Available)?.models.orEmpty()
 
   var editProvider by remember { mutableStateOf<AIProvider?>(null) }
   var showAddProvider by remember { mutableStateOf(false) }
@@ -180,6 +186,12 @@ fun AIProvidersSection(viewModel: WorkspaceViewModel, modifier: Modifier = Modif
             Text(state.message, color = DangerRed.copy(alpha = 0.9f), fontSize = 10.sp, maxLines = 3)
           }
         }
+
+        // Discovery is a convenience, so its failure says little and blocks nothing.
+        if (modelCount == 0 && catalogs[provider.id] is WorkspaceRepository.ModelCatalogState.Failed) {
+          Spacer(modifier = Modifier.height(6.dp))
+          Text("Model auto-discovery failed — add models manually.", color = TextMuted, fontSize = 10.sp)
+        }
       }
       Spacer(modifier = Modifier.height(10.dp))
     }
@@ -224,6 +236,7 @@ fun AIProvidersSection(viewModel: WorkspaceViewModel, modifier: Modifier = Modif
     ModelFormDialog(
       provider = provider,
       existing = null,
+      catalog = catalogOf(provider.id),
       onDismiss = { addModelFor = null },
       onSave = { providerId, modelId, name, ctxWin, maxOut, caps, reasoning ->
         viewModel.saveModel(providerId, modelId, name, ctxWin, maxOut, caps, reasoning)
@@ -237,6 +250,7 @@ fun AIProvidersSection(viewModel: WorkspaceViewModel, modifier: Modifier = Modif
     ModelFormDialog(
       provider = provider,
       existing = model,
+      catalog = catalogOf(model.providerId),
       onDismiss = { editModel = null },
       onSave = { providerId, modelId, name, ctxWin, maxOut, caps, reasoning ->
         viewModel.saveModel(providerId, modelId, name, ctxWin, maxOut, caps, reasoning, model.id)
@@ -275,9 +289,9 @@ fun AIProvidersSection(viewModel: WorkspaceViewModel, modifier: Modifier = Modif
 }
 
 @Composable
-private fun MiniAction(label: String, tint: Color = TextSecondary, onClick: () -> Unit) {
+private fun MiniAction(label: String, tint: Color = TextSecondary, modifier: Modifier = Modifier, onClick: () -> Unit) {
   Box(
-    modifier = Modifier
+    modifier = modifier
       .clip(RoundedCornerShape(6.dp))
       .background(DarkSurfaceElevated)
       .border(1.dp, DarkBorderSubtle, RoundedCornerShape(6.dp))
@@ -411,6 +425,7 @@ private fun ProviderDetailDialog(
 ) {
   val connectionTests by viewModel.connectionTests.collectAsState()
   val testState = connectionTests[provider.id]
+  val catalogs by viewModel.modelCatalogs.collectAsState()
   val defaultTaskModelId by viewModel.defaultTaskModelId.collectAsState()
 
   AlertDialog(
@@ -496,6 +511,18 @@ private fun ProviderDetailDialog(
           }
         }
 
+        // Discovery is optional and only ever costs a free request: nothing here
+        // stops a provider or model from being configured by hand.
+        when (val catalogState = catalogs[provider.id]) {
+          is WorkspaceRepository.ModelCatalogState.Loading ->
+            StatusLine("Asking the provider for its models…", WarningAmber)
+          is WorkspaceRepository.ModelCatalogState.Available ->
+            StatusLine("${catalogState.models.size} models listed — typing a Model ID offers them.", TerminalGreen)
+          is WorkspaceRepository.ModelCatalogState.Failed ->
+            StatusLine("Auto-discovery failed: ${catalogState.message} Add models manually.", TextMuted)
+          null -> Unit
+        }
+
         Surface(
           onClick = onAddModel,
           shape = RoundedCornerShape(8.dp),
@@ -516,6 +543,11 @@ private fun ProviderDetailDialog(
 
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
           MiniAction("Test Connection") { viewModel.testProviderConnection(provider.id) }
+          MiniAction(
+            "Fetch Models",
+            modifier = Modifier.testTag("btn_fetch_models"),
+            onClick = { viewModel.loadModelCatalog(provider.id, force = true) }
+          )
           MiniAction("Close") { onDismiss() }
         }
       }
@@ -586,10 +618,12 @@ private fun StatusLine(text: String, color: Color) {
   Text(text, color = color, fontSize = 10.sp)
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ModelFormDialog(
   provider: AIProvider?,
   existing: AIModel?,
+  catalog: List<CatalogModel>,
   onDismiss: () -> Unit,
   onSave: (providerId: String, modelId: String, displayName: String, contextWindow: Int?, maxOutputTokens: Int?, ModelCapabilities, ReasoningConfig?) -> Unit
 ) {
@@ -608,6 +642,29 @@ private fun ModelFormDialog(
 
   val valid = provider != null && modelId.isNotBlank() && displayName.isNotBlank()
 
+  // What the provider itself lists, filtered as the user types. Picking an entry
+  // fills in the limits and capabilities that model really has, so nothing has to
+  // be looked up by hand — but every field stays editable and a model missing
+  // from the listing can still be typed in.
+  var showMatches by remember { mutableStateOf(false) }
+  val matches = remember(catalog, modelId) {
+    if (modelId.isBlank()) emptyList()
+    else catalog
+      .filter { it.modelId.contains(modelId, ignoreCase = true) || it.displayName.contains(modelId, ignoreCase = true) }
+      .sortedBy { it.modelId }
+      .take(8)
+  }
+
+  fun pickFromCatalog(m: CatalogModel) {
+    modelId = m.modelId
+    if (m.displayName.isNotBlank()) displayName = m.displayName
+    m.contextWindow?.let { ctxWindow = it.toString() }
+    m.maxOutputTokens?.let { maxOut = it.toString() }
+    m.tools?.let { tools = it }
+    m.images?.let { images = it }
+    showMatches = false
+  }
+
   AlertDialog(
     onDismissRequest = onDismiss,
     containerColor = DarkSurface,
@@ -625,12 +682,38 @@ private fun ModelFormDialog(
         modifier = Modifier.verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(10.dp)
       ) {
-        OutlinedTextField(
-          value = modelId, onValueChange = { modelId = it },
-          label = { Text("Model ID", fontSize = 11.sp) },
-          supportingText = { Text("Wire identifier, e.g. openai/gpt-oss-120b", fontSize = 9.sp, fontFamily = FontFamily.Monospace) },
-          singleLine = true, modifier = Modifier.fillMaxWidth().testTag("input_model_id")
-        )
+        ExposedDropdownMenuBox(expanded = showMatches, onExpandedChange = { showMatches = it }) {
+          OutlinedTextField(
+            value = modelId, onValueChange = { modelId = it; showMatches = catalog.isNotEmpty() },
+            label = { Text("Model ID", fontSize = 11.sp) },
+            supportingText = {
+              Text(
+                if (catalog.isEmpty()) "Wire identifier, e.g. openai/gpt-oss-120b"
+                else "Typing suggests from the ${catalog.size} models this provider lists.",
+                fontSize = 9.sp, fontFamily = FontFamily.Monospace
+              )
+            },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth().testTag("input_model_id")
+          )
+          ExposedDropdownMenu(
+            expanded = showMatches && matches.isNotEmpty(),
+            onDismissRequest = { showMatches = false },
+            modifier = Modifier.heightIn(max = 240.dp)
+          ) {
+            matches.forEach { m ->
+              DropdownMenuItem(
+                text = {
+                  Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(m.modelId, color = TextPrimary, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                    Text(catalogLimitsLabel(m), color = TextMuted, fontSize = 9.sp)
+                  }
+                },
+                onClick = { pickFromCatalog(m) }
+              )
+            }
+          }
+        }
         OutlinedTextField(
           value = displayName, onValueChange = { displayName = it },
           label = { Text("Display Name", fontSize = 11.sp) },
@@ -704,6 +787,13 @@ private fun ModelFormDialog(
     }
   )
 }
+
+/** The size a catalog entry claims, in the shorthand the rest of the UI uses. */
+private fun catalogLimitsLabel(m: CatalogModel): String = listOfNotNull(
+  m.contextWindow?.let { "${it / 1000}k window" },
+  m.maxOutputTokens?.let { "${it / 1000}k out" },
+  if (m.tools == true) "tools" else null
+).joinToString(" · ")
 
 @Composable
 private fun CapabilityRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {

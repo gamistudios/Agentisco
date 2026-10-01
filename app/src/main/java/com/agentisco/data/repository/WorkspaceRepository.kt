@@ -54,7 +54,17 @@ class WorkspaceRepository(
   context: Context? = null,
   baseDir: File = context?.let { File(it.filesDir, "sco_projects") }
     ?: File(System.getProperty("java.io.tmpdir") ?: ".", "sco_projects"),
-  val providerStore: com.agentisco.data.local.ProviderConfigStore? = null
+  val providerStore: com.agentisco.data.local.ProviderConfigStore? = null,
+  /**
+   * LLM communication. Providers are configuration only; the protocol adapter is
+   * chosen from the provider config, never from its name. The chain store keeps
+   * Gemini Interactions' server-side conversation ids, so a session continues
+   * where it left off even after the app is restarted.
+   */
+  private val llmService: com.agentisco.agent.llm.LlmService =
+    com.agentisco.agent.llm.LlmService(
+      chainStore = com.agentisco.agent.llm.GeminiChainStoreImpl(context?.applicationContext)
+    )
 ) {
 
   private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -380,13 +390,7 @@ class WorkspaceRepository(
     configStore = BuildRunConfigStore(context)
   )
 
-  // LLM communication + agent tooling. Providers are configuration only; the
-  // protocol adapter is chosen from the provider config, never from its name.
-  // The chain store keeps Gemini Interactions' server-side conversation ids, so
-  // a session continues where it left off even after the app is restarted.
-  private val llmService = com.agentisco.agent.llm.LlmService(
-    chainStore = com.agentisco.agent.llm.GeminiChainStoreImpl(appContext)
-  )
+  // LLM communication + agent tooling.
 
   /**
    * Who is working in this workspace, shared by the chat's own run and every
@@ -952,6 +956,21 @@ class WorkspaceRepository(
   private val _connectionTests = MutableStateFlow<Map<String, ConnectionTestState>>(emptyMap())
   val connectionTests: StateFlow<Map<String, ConnectionTestState>> = _connectionTests.asStateFlow()
 
+  /** A provider's model listing, as fetched from that provider. */
+  sealed class ModelCatalogState {
+    data object Loading : ModelCatalogState()
+    data class Available(val models: List<com.agentisco.agent.llm.CatalogModel>) : ModelCatalogState()
+    data class Failed(val message: String) : ModelCatalogState()
+  }
+
+  /**
+   * Catalogs by provider id, in memory only. This is a convenience for filling
+   * in the model form — the durable record is the model the user saves, so a
+   * provider that renames a model needs no migration.
+   */
+  private val _modelCatalogs = MutableStateFlow<Map<String, ModelCatalogState>>(emptyMap())
+  val modelCatalogs: StateFlow<Map<String, ModelCatalogState>> = _modelCatalogs.asStateFlow()
+
   // Agent Permissions
   private val _permissions = MutableStateFlow(AgentPermissions())
   val permissions: StateFlow<AgentPermissions> = _permissions.asStateFlow()
@@ -1049,7 +1068,13 @@ class WorkspaceRepository(
     )
     providerStore?.upsertProvider(provider, apiKey)
     _providers.value = providerStore?.getProviders() ?: (_providers.value.filterNot { it.id == id } + provider)
+    // A new URL or key makes both the last test and the last catalog stale.
     _connectionTests.update { it - id }
+    _modelCatalogs.update { it - id }
+    // A brand-new provider discovers its own models once, so the model form has
+    // something to suggest. After that the listing is only ever re-fetched when
+    // the user asks for it.
+    if (providerId == null && provider.hasApiKey) loadModelCatalog(id, force = true)
     return provider
   }
 
@@ -1067,6 +1092,7 @@ class WorkspaceRepository(
       _selectedModel.value?.let { providerStore?.selectModel(it.id) }
     }
     _connectionTests.update { it - providerId }
+    _modelCatalogs.update { it - providerId }
   }
 
   fun saveModel(
@@ -1143,6 +1169,38 @@ class WorkspaceRepository(
         ConnectionTestState.Failed(e.message ?: "Connection test failed")
       }
       _connectionTests.update { it + (providerId to state) }
+    }
+  }
+
+  /**
+   * Asks [providerId] for the models it actually serves, so the model form can
+   * offer real ids with their limits instead of typed guesses. The listing
+   * request is free — no tokens are billed — and its result is cached until the
+   * provider's URL or key changes; [force] re-asks.
+   */
+  fun loadModelCatalog(providerId: String, force: Boolean = false) {
+    val provider = _providers.value.firstOrNull { it.id == providerId } ?: return
+    when (val current = _modelCatalogs.value[providerId]) {
+      is ModelCatalogState.Loading -> return
+      is ModelCatalogState.Available -> if (!force) return
+      else -> Unit
+    }
+    val apiKey = providerStore?.getApiKey(providerId).orEmpty()
+    if (apiKey.isBlank()) {
+      // The key is saved with the provider; a brand-new one may not have one yet.
+      _modelCatalogs.update { it + (providerId to ModelCatalogState.Failed("Save an API key for this provider to list its models.")) }
+      return
+    }
+    _modelCatalogs.update { it + (providerId to ModelCatalogState.Loading) }
+    repositoryScope.launch {
+      val next = try {
+        val listing = llmService.listModels(provider, apiKey)
+        if (listing.ok) ModelCatalogState.Available(listing.models)
+        else ModelCatalogState.Failed(listing.message)
+      } catch (e: Exception) {
+        ModelCatalogState.Failed(e.message ?: "The provider did not return its model list.")
+      }
+      _modelCatalogs.update { it + (providerId to next) }
     }
   }
 

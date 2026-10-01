@@ -171,6 +171,8 @@ class WorkspaceViewModel(
   val aiModels: StateFlow<List<AIModel>> = repository.aiModels
   val selectedModel: StateFlow<AIModel?> = repository.selectedModel
   val connectionTests: StateFlow<Map<String, WorkspaceRepository.ConnectionTestState>> = repository.connectionTests
+  /** Models each provider says it serves, fetched on demand from the provider. */
+  val modelCatalogs: StateFlow<Map<String, WorkspaceRepository.ModelCatalogState>> = repository.modelCatalogs
   val agentResponse: StateFlow<String> = repository.agentResponse
 
   // ---- Context usage & compaction ----
@@ -1321,6 +1323,11 @@ class WorkspaceViewModel(
 
   fun testProviderConnection(providerId: String) {
     repository.testProviderConnection(providerId)
+  }
+
+  /** Fetches a provider's model listing when the model form needs it. */
+  fun loadModelCatalog(providerId: String, force: Boolean = false) {
+    repository.loadModelCatalog(providerId, force)
   }
 
   /**
