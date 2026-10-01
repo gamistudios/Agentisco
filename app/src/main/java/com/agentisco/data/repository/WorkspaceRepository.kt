@@ -1055,8 +1055,18 @@ class WorkspaceRepository(
     }
   }
 
+  /**
+   * Ids for the records a user creates here. A wall-clock timestamp alone
+   * repeats within a millisecond, and two records with one id silently replace
+   * each other — the second save wins and the first provider or model is gone.
+   */
+  private val configRecordSeq = java.util.concurrent.atomic.AtomicLong()
+
+  private fun nextConfigRecordId(prefix: String) =
+    "$prefix-${System.currentTimeMillis()}-${configRecordSeq.incrementAndGet()}"
+
   fun saveProvider(name: String, baseUrl: String, protocol: com.agentisco.settings.model.LLMProtocol, apiKey: String?, providerId: String? = null): AIProvider {
-    val id = providerId ?: "provider-${System.currentTimeMillis()}"
+    val id = providerId ?: nextConfigRecordId("provider")
     val existing = _providers.value.firstOrNull { it.id == id }
     val keyChanged = apiKey != null
     val provider = AIProvider(
@@ -1108,7 +1118,7 @@ class WorkspaceRepository(
     if (modelId.isBlank() || displayName.isBlank()) return null
     if (_providers.value.none { it.id == providerId }) return null
     val model = AIModel(
-      id = recordId ?: "model-${System.currentTimeMillis()}",
+      id = recordId ?: nextConfigRecordId("model"),
       providerId = providerId,
       modelId = modelId.trim(),
       displayName = displayName.trim(),
