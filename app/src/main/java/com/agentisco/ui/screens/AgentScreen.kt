@@ -55,6 +55,7 @@ import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -64,6 +65,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -92,12 +94,15 @@ import com.agentisco.ui.TurnBlock
 import com.agentisco.ui.TurnStatus
 import com.agentisco.ui.UserMessageItem
 import com.agentisco.ui.WorkspaceViewModel
+import com.agentisco.ui.agentPlanFrom
 import com.agentisco.ui.components.DiffKind
 import com.agentisco.ui.components.DiffLine
 import com.agentisco.ui.components.DiffTable
 import com.agentisco.ui.components.MarkdownText
+import com.agentisco.ui.components.PlanCard
 import com.agentisco.ui.components.computeLineDiff
 import com.agentisco.ui.components.diffStats
+import com.agentisco.ui.isPlanPublish
 import com.agentisco.ui.theme.*
 import kotlinx.coroutines.launch
 import org.json.JSONObject
@@ -155,6 +160,12 @@ fun AgentScreen(
       listState.animateScrollToItem(chatItems.size) // bottom spacer item
     }
   }
+
+  // The plan is part of the transcript, not of this screen: reading it back out
+  // of the persisted tool calls is what lets one pinned card hold every update,
+  // and survive a restart showing the same steps.
+  val plan = remember(chatItems) { agentPlanFrom(chatItems) }
+  var planExpanded by rememberSaveable { mutableStateOf(false) }
 
   Column(
     modifier = modifier
@@ -340,6 +351,20 @@ fun AgentScreen(
           }
         }
       }
+    }
+
+    // The plan sits between the scrolling activity and the input, so activity
+    // cards always stay above it and it never scrolls out of reach.
+    if (plan != null) {
+      // An expanded plan and the keyboard together can exceed the screen, and
+      // the input has to stay reachable, so the plan folds while it is open.
+      val keyboardOpen = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+      PlanCard(
+        plan = plan,
+        expanded = planExpanded && !keyboardOpen,
+        onToggle = { planExpanded = !planExpanded },
+        modifier = Modifier.padding(horizontal = 10.dp)
+      )
     }
 
     // Sticky agent composer with inline configuration row.
@@ -813,6 +838,9 @@ private fun AgentTurnCard(
     // Turn blocks in order with sub-agent timeline continuity
     var activeSubagent: String? = null
     item.blocks.forEach { block ->
+      // The pinned plan card above the composer shows these; a plan update must
+      // not leave another card in the conversation.
+      if (block.isPlanPublish()) return@forEach
       val blockSubagent = when (block) {
         is ActionBlock -> block.delegation?.role
         else -> null

@@ -201,9 +201,10 @@ class DirectoryTreeTool : AgentTool {
 class TaskPlanTool : AgentTool {
   override val name = "task_plan"
   override val description =
-    "Publish or update the step-by-step plan for the current task. Show it once before starting multi-step work and update it as steps finish, so the user can follow progress. Each step is a short string, or an object {\"content\": \"…\", \"status\": \"pending|in_progress|done\"}."
+    "Publish or update the step-by-step plan for the current task. Show it once before starting multi-step work and re-publish it with new statuses as steps progress, so the user can follow along. The plan is shown as its own persistent card, so an update replaces it rather than adding another. Each step is a short string, or an object {\"content\": \"…\", \"status\": \"pending|in_progress|done|failed|skipped\", \"detail\": \"short progress note\"}."
   override val params = listOf(
-    ToolParam("steps", "JSON array of step strings or {content, status} objects, e.g. [\"inspect config\", {\"content\": \"apply fix\", \"status\": \"done\"}].", type = "array"),
+    ToolParam("title", "Optional one-line name of what is being planned.", required = false, allowBlank = true),
+    ToolParam("steps", "JSON array of step strings or {content, status, detail} objects, e.g. [\"inspect config\", {\"content\": \"apply fix\", \"status\": \"done\", \"detail\": \"2 files\"}].", type = "array"),
     ToolParam("note", "Optional status note, e.g. \"step 2 of 4\".", required = false, allowBlank = true)
   )
 
@@ -211,29 +212,35 @@ class TaskPlanTool : AgentTool {
     val arr: JSONArray = args.optJSONArray("steps")
       ?: return ToolResult(false, error = "steps must be a JSON array of strings or {content, status} objects.")
     if (arr.length() == 0) return ToolResult(false, error = "steps is empty; a plan needs at least one step.")
+    val title = args.str("title")
     val note = args.str("note")
     var done = 0
     val sb = StringBuilder()
+    if (title.isNotBlank()) sb.appendLine(title)
     for (i in 0 until arr.length()) {
       val raw = arr.opt(i)
       val content: String
       val status: String
+      val detail: String
       if (raw is JSONObject) {
         content = raw.optString("content").ifBlank { raw.optString("description") }
         status = raw.optString("status", "pending").trim().lowercase()
+        detail = raw.optString("detail")
       } else {
         content = raw?.toString().orEmpty()
         status = "pending"
+        detail = ""
       }
       if (content.isBlank()) continue
       if (status == "done" || status == "completed") done++
       val marker = when (status) {
         "done", "completed" -> "[x]"
         "in_progress", "active" -> "[>]"
+        "failed", "error" -> "[!]"
         "cancelled", "skipped" -> "[-]"
         else -> "[ ]"
       }
-      sb.appendLine("${i + 1}. $marker $content")
+      sb.appendLine("${i + 1}. $marker $content" + if (detail.isBlank()) "" else " — $detail")
     }
     if (sb.isEmpty()) return ToolResult(false, error = "steps contains no usable step text.")
     if (note.isNotBlank()) sb.appendLine(note)

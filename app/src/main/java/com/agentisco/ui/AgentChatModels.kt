@@ -62,7 +62,9 @@ data class ActionBlock(
    */
   val children: List<TurnBlock> = emptyList(),
   /** The brief the orchestrator handed that agent, for `delegate` calls only. */
-  val delegation: DelegationBrief? = null
+  val delegation: DelegationBrief? = null,
+  /** When the call started — lets the plan time the steps between two publishes. */
+  val createdAt: Long = 0L
 ) : TurnBlock()
 
 /**
@@ -246,7 +248,8 @@ fun AgentBlockEntity.toTurnBlock(): TurnBlock? = when (kind) {
     exitCode = exitCode,
     callId = callId.orEmpty(),
     cancelled = status == "cancelled",
-    delegation = if (name == "delegate") argsJson.toDelegationBrief() else null
+    delegation = if (name == "delegate") argsJson.toDelegationBrief() else null,
+    createdAt = createdAt
   )
   "error" -> ErrorBlock(uuid, summary)
   // Compaction only changes what is sent to the provider; the chat above

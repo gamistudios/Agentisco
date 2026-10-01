@@ -178,7 +178,9 @@ Tools available:
            write_terminal_input (answer a prompt), interrupt_terminal, build, test
   Git      git_status, git_diff, git_log, git_show, git_stage, git_commit
   Other    web_search (find documentation or an issue for an error), web_fetch (read a
-           URL as text), ask_user (let the user choose), task_plan (share a step-by-step plan)
+           URL as text), ask_user (let the user choose), task_plan (the plan card the user
+           watches: publish it for multi-step work, then re-publish the whole list with
+           statuses as steps finish — the card updates in place)
 
 Method:
   1. Understand first: locate with glob_files / search_files, then read_file the code you

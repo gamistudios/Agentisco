@@ -236,6 +236,27 @@ class WorkspaceSearchToolTest {
     assertTrue(empty.error!!.contains("at least one step"))
   }
 
+  @Test
+  fun `task_plan carries a title and per-step progress into its output`() {
+    val result = runBlocking {
+      TaskPlanTool().execute(
+        args(
+          """{"title":"Needle Retrieval Benchmark","note":"step 2 of 3","steps": [""" +
+            """{"content":"Download corpus","status":"done","detail":"1.2 GB"},""" +
+            """{"content":"Verify passages","status":"in_progress","detail":"24 / 86"},""" +
+            """{"content":"Report findings","status":"failed"}]}"""
+        ),
+        contextFor(ws())
+      )
+    }
+    assertTrue(result.success)
+    assertTrue(result.output.startsWith("Needle Retrieval Benchmark"))
+    assertTrue(result.output.contains("1. [x] Download corpus — 1.2 GB"))
+    assertTrue(result.output.contains("2. [>] Verify passages — 24 / 86"))
+    assertTrue(result.output.contains("3. [!] Report findings"))
+    assertEquals("1", result.metadata["done"])
+  }
+
   // ---- Registry contract ----
 
   private fun registryFor(ws: TestWorkspace): AgentToolRegistry {
