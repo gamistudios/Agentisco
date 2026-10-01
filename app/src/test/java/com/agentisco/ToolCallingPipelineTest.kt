@@ -784,6 +784,85 @@ class ToolCallingPipelineTest {
     assertFalse(bodyOf(request).getBoolean("stream"))
   }
 
+  /**
+   * `max_tokens` is mandatory on this protocol, so every request has to send a
+   * real budget. A fixed number for all models both wastes capable models and —
+   * worse — asks a smaller model for more than it may write, which the API
+   * answers with a 400 the user cannot explain.
+   */
+  @Test
+  fun `Anthropic output budget follows the model instead of one hard-coded number`() {
+    val client = AnthropicMessagesClient(OkHttpClient())
+
+    fun tokensFor(model: AIModel, ask: Int? = null) = bodyOf(
+      client.buildRequest(
+        anthropicProvider, model, "k",
+        LlmRequest(messages = listOf(LlmMessage(LlmRole.USER, "hi")), maxOutputTokens = ask),
+        stream = false
+      )
+    ).getInt("max_tokens")
+
+    // claude-sonnet-4-5 may write 64k; the 4096 that used to be sent here is why
+    // long agent answers looked like the model stopped on its own.
+    assertEquals(64_000, tokensFor(anthropicModel()))
+    assertEquals(32_000, tokensFor(anthropicModel().copy(modelId = "claude-opus-4-1")))
+    // A model the app has never heard of still gets a working floor, never 0.
+    assertEquals(8_192, tokensFor(anthropicModel().copy(modelId = "internal-acme-7")))
+    // The user's own record outranks the table, however small it looks.
+    assertEquals(4_096, tokensFor(anthropicModel(maxOutputTokens = 4096)))
+    // And a per-turn ask is never clamped upward or downward.
+    assertEquals(1_024, tokensFor(anthropicModel(), ask = 1024))
+    assertEquals(150_000, tokensFor(anthropicModel(maxOutputTokens = 8000), ask = 150_000))
+  }
+
+  @Test
+  fun `Anthropic marks a failed tool result as an error block`() {
+    val client = AnthropicMessagesClient(OkHttpClient())
+    val request = client.buildRequest(
+      anthropicProvider, anthropicModel(), "k",
+      LlmRequest(
+        messages = listOf(
+          LlmMessage(LlmRole.USER, "Read src/App.tsx"),
+          LlmMessage(LlmRole.ASSISTANT, "", toolCalls = listOf(LlmToolCall("toolu_09", "read_file", "{}"))),
+          LlmMessage(LlmRole.TOOL, "ENOENT: no such file", toolCallId = "toolu_09", toolName = "read_file", isError = true),
+          LlmMessage(LlmRole.TOOL, "export default App", toolCallId = "toolu_10", toolName = "read_file")
+        )
+      ),
+      stream = false
+    )
+
+    val messages = bodyOf(request).getJSONArray("messages")
+    // Without is_error the only clue that a call failed is prose the model has
+    // to interpret, and it routinely reads its own tool output as a real result.
+    val failed = messages.getJSONObject(2).getJSONArray("content").getJSONObject(0)
+    assertEquals("toolu_09", failed.getString("tool_use_id"))
+    assertTrue(failed.getBoolean("is_error"))
+    // A successful result must not carry the flag, or the model distrusts it.
+    assertFalse(messages.getJSONObject(3).getJSONArray("content").getJSONObject(0).has("is_error"))
+  }
+
+  @Test
+  fun `Anthropic listing endpoint keeps one version segment for every base url`() {
+    val client = AnthropicMessagesClient(OkHttpClient())
+    assertEquals(
+      "https://api.anthropic.com/v1/models",
+      client.versionedEndpoint("https://api.anthropic.com", "v1", "models")
+    )
+    assertEquals(
+      "https://api.anthropic.com/v1/models",
+      client.versionedEndpoint("https://api.anthropic.com/v1/", "v1", "models")
+    )
+    // Gemini's listing lives one version below the one its users paste.
+    assertEquals(
+      "https://generativelanguage.googleapis.com/v1beta/models",
+      client.versionedEndpoint("https://generativelanguage.googleapis.com/v1beta", "v1beta", "models")
+    )
+    assertEquals(
+      "https://generativelanguage.googleapis.com/v1beta/models",
+      client.versionedEndpoint("https://generativelanguage.googleapis.com", "v1beta", "models")
+    )
+  }
+
   @Test
   fun `Anthropic stream normalizes text tool fragments stop reason and usage`() {
     val client = AnthropicMessagesClient(OkHttpClient())
@@ -846,9 +925,48 @@ class ToolCallingPipelineTest {
 
     assertEquals(LlmFinishReason.LENGTH, state.finishReason)
     assertEquals(4096, state.usage?.outputTokens)
-    // Anthropic reports no total and never sent a prompt count here.
+    // Anthropic never sent a prompt count here, so the input stays unknown; the
+    // total is the sum of what was reported, not a fabricated estimate.
     assertNull(state.usage?.inputTokens)
-    assertNull(state.usage?.totalTokens)
+    assertEquals(4096, state.usage?.totalTokens)
+  }
+
+  @Test
+  fun `Anthropic pause_turn keeps the turn open instead of ending it`() {
+    val client = AnthropicMessagesClient(OkHttpClient())
+    val state = newState()
+
+    // A long-running tool call pauses the model server-side; the same
+    // conversation sent back is what resumes it. Reading this as STOP silently
+    // drops the second half of the answer.
+    client.handleData("""{"type":"message_delta","delta":{"stop_reason":"pause_turn","stop_sequence":null},"usage":{"output_tokens":300}}""", state) { }
+
+    assertEquals(LlmFinishReason.LENGTH, state.finishReason)
+  }
+
+  @Test
+  fun `Anthropic usage totals every token that occupies the context window`() {
+    val client = AnthropicMessagesClient(OkHttpClient())
+    val state = newState()
+
+    client.handleData(
+      """{"type":"message_start","message":{"role":"assistant","usage":{"input_tokens":1000,"cache_creation_input_tokens":9000,"output_tokens":10}}}""",
+      state
+    ) { }
+    client.handleData(
+      """{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":250,"cache_read_input_tokens":40000}}""",
+      state
+    ) { }
+
+    val usage = state.usage!!
+    assertEquals(1000, usage.inputTokens)
+    assertEquals(9000, usage.cacheCreationInputTokens)
+    assertEquals(40000, usage.cachedInputTokens)
+    // The delta repeated no prompt counters: earlier values survive it.
+    assertEquals(250, usage.outputTokens)
+    // Cached and freshly written prompt tokens sit in the window like any input.
+    // Leaving them out is what makes auto-compaction fire far too late.
+    assertEquals(50250, usage.totalTokens)
   }
 
   @Test

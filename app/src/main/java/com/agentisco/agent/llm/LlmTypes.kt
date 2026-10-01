@@ -15,6 +15,8 @@ data class LlmUsage(
   val inputTokens: Int? = null,
   val outputTokens: Int? = null,
   val cachedInputTokens: Int? = null,
+  /** Tokens written to the prompt cache. They occupy the window like any input. */
+  val cacheCreationInputTokens: Int? = null,
   val reasoningTokens: Int? = null,
   val totalTokens: Int? = null
 )

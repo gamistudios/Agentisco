@@ -76,6 +76,21 @@ open class LlmService(
   }
 
   /**
+   * The provider's own model catalog: real ids, plus the context/output limits
+   * either the provider publishes or the app knows for that family. Costs no
+   * tokens, which is why [testConnection] starts here.
+   */
+  open suspend fun listModels(provider: AIProvider, apiKey: String): ModelListing =
+    clientFor(provider).listModels(provider, apiKey)
+
+  private fun clientFor(provider: AIProvider): BaseLlmClient = when (provider.protocol) {
+    LLMProtocol.OPENAI_CHAT_COMPLETIONS -> OpenAIChatCompletionsClient(http)
+    LLMProtocol.OPENAI_RESPONSES -> OpenAIResponsesClient(http)
+    LLMProtocol.ANTHROPIC_MESSAGES -> AnthropicMessagesClient(http)
+    LLMProtocol.GOOGLE_GEMINI -> GeminiInteractionsClient(http, chainStore)
+  }
+
+  /**
    * Real connection verification: first a free model-listing probe, then — only
    * if that fails — a minimal chat request through the same protocol
    * implementation the agent runtime uses. Never exposes the API key.
@@ -84,15 +99,10 @@ open class LlmService(
     if (apiKey.isBlank()) return false to "No API key configured for \"${provider.name}\"."
     if (provider.baseUrl.isBlank()) return false to "No base URL configured for \"${provider.name}\"."
 
-    val client = when (provider.protocol) {
-      LLMProtocol.OPENAI_CHAT_COMPLETIONS -> OpenAIChatCompletionsClient(http)
-      LLMProtocol.OPENAI_RESPONSES -> OpenAIResponsesClient(http)
-      LLMProtocol.ANTHROPIC_MESSAGES -> AnthropicMessagesClient(http)
-      LLMProtocol.GOOGLE_GEMINI -> GeminiInteractionsClient(http, chainStore)
-    }
+    val client = clientFor(provider)
 
     // Stage 1: free credential/endpoint probe via the provider's model listing.
-    val (probeOk, probeMessage) = client.probeModels(provider, apiKey)
+    val (probeOk, probeMessage) = client.listModels(provider, apiKey).let { it.ok to it.message }
     if (probeOk) {
       return true to (model?.let { "Connected · ${it.displayName}" } ?: "Connected")
     }
@@ -141,8 +151,11 @@ internal abstract class BaseLlmClient(protected val http: OkHttpClient) {
   /** Parses one SSE data payload; returns true when the stream is complete. */
   internal abstract fun handleData(data: String, state: StreamState, onEvent: (LlmStreamEvent) -> Unit): Boolean
 
-  /** Free credential/endpoint probe via the provider's model listing (no tokens billed). */
-  internal abstract suspend fun probeModels(provider: AIProvider, apiKey: String): Pair<Boolean, String>
+  /**
+   * The provider's own model listing. Free — no tokens are billed — so it doubles
+   * as the credential and endpoint check in [LlmService.testConnection].
+   */
+  internal abstract suspend fun listModels(provider: AIProvider, apiKey: String): ModelListing
 
   /** Overridden by protocols that need per-stream state beyond the shared fields. */
   protected open fun newState(): StreamState = StreamState()
@@ -258,26 +271,43 @@ internal abstract class BaseLlmClient(protected val http: OkHttpClient) {
   }
 
   /**
-   * Free credential/endpoint probe against the provider's model listing. The
-   * protocols differ only in the URL they list and the headers they auth with.
+   * Rebuilds `<base>/<version>/<path>` from a base URL that may or may not
+   * already carry the version segment. Users paste both
+   * `https://api.anthropic.com` and `https://api.anthropic.com/v1`, and a
+   * listing must reach the right path either way.
    */
-  protected suspend fun modelsProbe(url: String, vararg headers: Pair<String, String>): Pair<Boolean, String> =
-    try {
-      val request = Request.Builder().url(url).apply {
-        headers.forEach { (name, value) -> header(name, value) }
-      }.get().build()
-      withContext(Dispatchers.IO) {
-        http.newCall(request).execute().use { response ->
-          if (response.isSuccessful) true to "Connected"
-          else {
-            val body = response.body?.string().orEmpty().take(2000)
-            false to (httpError(response.code, body).message ?: "Connection failed")
-          }
+  internal fun versionedEndpoint(base: String, version: String, path: String): String {
+    val trimmed = base.trimEnd('/')
+    val root = if (trimmed.endsWith("/$version")) trimmed.removeSuffix("/$version") else trimmed
+    return "$root/$version/$path"
+  }
+
+  /**
+   * Fetches a model listing and hands the body to the protocol's own parser.
+   * Every protocol authenticates with the API key; they differ only in the URL
+   * they list and the header that key travels in.
+   */
+  protected suspend fun modelsList(
+    url: String,
+    headers: List<Pair<String, String>>,
+    parse: (String) -> List<CatalogModel>
+  ): ModelListing = try {
+    val request = Request.Builder().url(url).apply {
+      headers.forEach { (name, value) -> header(name, value) }
+    }.get().build()
+    withContext(Dispatchers.IO) {
+      http.newCall(request).execute().use { response ->
+        val body = response.body?.string().orEmpty()
+        if (!response.isSuccessful) {
+          ModelListing(false, httpError(response.code, body).message ?: "Connection failed")
+        } else {
+          ModelListing(true, "Connected", parse(body))
         }
       }
-    } catch (e: IOException) {
-      false to "Network error: ${e.message ?: "connection failed"}"
     }
+  } catch (e: IOException) {
+    ModelListing(false, "Network error: ${e.message ?: "connection failed"}")
+  }
 
   protected fun httpError(code: Int, body: String): LlmException {
     val providerMessage = runCatching {
@@ -437,11 +467,11 @@ internal class OpenAIChatCompletionsClient(http: OkHttpClient) : BaseLlmClient(h
     else -> LlmFinishReason.OTHER
   }
 
-  override suspend fun probeModels(provider: AIProvider, apiKey: String): Pair<Boolean, String> =
-    modelsProbe(
-      provider.baseUrl.trimEnd('/') + "/models",
-      "Authorization" to "Bearer $apiKey"
-    )
+  override suspend fun listModels(provider: AIProvider, apiKey: String): ModelListing =
+    modelsList(
+      versionedEndpoint(provider.baseUrl, "v1", "models"),
+      listOf("Authorization" to "Bearer $apiKey")
+    ) { ModelCatalog.openAiCompatible(it) }
 }
 
 /**
@@ -693,11 +723,11 @@ internal class OpenAIResponsesClient(http: OkHttpClient) : BaseLlmClient(http) {
     reasoningTokens = optJSONObject("output_tokens_details")?.optIntOrNull("reasoning_tokens")
   )
 
-  override suspend fun probeModels(provider: AIProvider, apiKey: String): Pair<Boolean, String> =
-    modelsProbe(
-      provider.baseUrl.trimEnd('/') + "/models",
-      "Authorization" to "Bearer $apiKey"
-    )
+  override suspend fun listModels(provider: AIProvider, apiKey: String): ModelListing =
+    modelsList(
+      versionedEndpoint(provider.baseUrl, "v1", "models"),
+      listOf("Authorization" to "Bearer $apiKey")
+    ) { ModelCatalog.openAiCompatible(it) }
 }
 
 /**
@@ -709,18 +739,26 @@ internal class OpenAIResponsesClient(http: OkHttpClient) : BaseLlmClient(http) {
  */
 internal class AnthropicMessagesClient(http: OkHttpClient) : BaseLlmClient(http) {
 
-  /** The settings hint omits the version segment, but users routinely paste a base ending in `/v1`. */
-  private fun endpoint(provider: AIProvider, path: String): String {
-    val base = provider.baseUrl.trimEnd('/')
-    val root = if (base.endsWith("/v1")) base.removeSuffix("/v1") else base
-    return "$root/v1/$path"
+  private companion object {
+    const val ANTHROPIC_VERSION = "2023-06-01"
+
+    /**
+     * Floor for a model the app knows nothing about. Anthropic requires
+     * `max_tokens` on every request, and the 4096 that used to be hard-coded
+     * here is what made long agent answers look truncated.
+     */
+    const val MIN_OUTPUT_TOKENS = 8_192
   }
+
+  /** The settings hint omits the version segment, but users routinely paste a base ending in `/v1`. */
+  private fun endpoint(provider: AIProvider, path: String) =
+    versionedEndpoint(provider.baseUrl, "v1", path)
 
   override internal fun buildRequest(provider: AIProvider, model: AIModel, apiKey: String, request: LlmRequest, stream: Boolean): Request {
     val body = JSONObject().apply {
       put("model", model.modelId)
       put("stream", stream)
-      put("max_tokens", request.maxOutputTokens ?: model.maxOutputTokens ?: 4096)
+      put("max_tokens", outputTokensFor(model, request))
       val systemText = request.messages.filter { it.role == LlmRole.SYSTEM }.joinToString("\n") { it.content }
       if (systemText.isNotBlank()) put("system", systemText)
       val msgs = JSONArray()
@@ -733,6 +771,10 @@ internal class AnthropicMessagesClient(http: OkHttpClient) : BaseLlmClient(http)
                 put("type", "tool_result")
                 put("tool_use_id", m.toolCallId ?: "")
                 put("content", m.content)
+                // The only way this protocol tells a failed call apart from a
+                // result that merely reads badly; without it the model has to
+                // guess from the text.
+                if (m.isError) put("is_error", true)
               })
             })
           })
@@ -774,10 +816,23 @@ internal class AnthropicMessagesClient(http: OkHttpClient) : BaseLlmClient(http)
     return Request.Builder()
       .url(endpoint(provider, "messages"))
       .header("x-api-key", apiKey)
-      .header("anthropic-version", "2023-06-01")
+      .header("anthropic-version", ANTHROPIC_VERSION)
       .post(jsonBody(body))
       .build()
   }
+
+  /**
+   * The output budget for one request. `max_tokens` is mandatory on this
+   * protocol, so a model record that declares none still needs a real number:
+   * it comes from the family table, and an explicit value from the runtime or
+   * the user is never second-guessed — that budget is what the continuation
+   * loop resumes when a reply hits it.
+   */
+  private fun outputTokensFor(model: AIModel, request: LlmRequest): Int =
+    request.maxOutputTokens
+      ?: model.maxOutputTokens
+      ?: ModelFacts.lookup(model.modelId)?.maxOutputTokens
+      ?: MIN_OUTPUT_TOKENS
 
   override internal fun handleData(data: String, state: StreamState, onEvent: (LlmStreamEvent) -> Unit): Boolean {
     val obj = runCatching { JSONObject(data) }.getOrElse {
@@ -867,33 +922,55 @@ internal class AnthropicMessagesClient(http: OkHttpClient) : BaseLlmClient(http)
     return false
   }
 
-  /** Anthropic reports no total, and `input_tokens` excludes cache reads — so nothing is synthesized. */
+  /**
+   * Anthropic reports no total, and `input_tokens` covers only the uncached part
+   * of the prompt — cache reads and cache writes are counted separately. All
+   * four occupy the context window, so the total is their sum; leaving the cache
+   * counters out makes a cached conversation look smaller than it is and the
+   * auto-compaction fires late.
+   */
   private fun absorbUsage(state: StreamState, usage: JSONObject?) {
     usage ?: return
     val prior = state.usage
     val input = usage.optIntOrNull("input_tokens") ?: prior?.inputTokens
     val output = usage.optIntOrNull("output_tokens") ?: prior?.outputTokens
-    val cached = usage.optIntOrNull("cache_read_input_tokens") ?: prior?.cachedInputTokens
-    if (input == null && output == null && cached == null) return
-    state.usage = LlmUsage(inputTokens = input, outputTokens = output, cachedInputTokens = cached)
+    val cacheRead = usage.optIntOrNull("cache_read_input_tokens") ?: prior?.cachedInputTokens
+    val cacheWrite = usage.optIntOrNull("cache_creation_input_tokens") ?: prior?.cacheCreationInputTokens
+    if (input == null && output == null && cacheRead == null && cacheWrite == null) return
+    val parts = listOfNotNull(input, output, cacheRead, cacheWrite)
+    state.usage = LlmUsage(
+      inputTokens = input,
+      outputTokens = output,
+      cachedInputTokens = cacheRead,
+      cacheCreationInputTokens = cacheWrite,
+      totalTokens = parts.sum().takeIf { parts.isNotEmpty() }
+    )
   }
 
   private fun finishFor(stopReason: String): LlmFinishReason? = when (stopReason) {
     "" -> null
     "tool_use" -> LlmFinishReason.TOOL_CALLS
     "max_tokens" -> LlmFinishReason.LENGTH
+    // The model stopped mid-turn to keep working server-side and expects the
+    // same conversation back; LENGTH is the app's "the answer is not finished"
+    // signal, which is exactly what a resumed turn asks for.
+    "pause_turn" -> LlmFinishReason.LENGTH
     "end_turn", "stop_sequence" -> LlmFinishReason.STOP
     "refusal", "model_failure" -> LlmFinishReason.ERROR
-    // pause_turn and any future value: the agent has no special handling for them.
+    // Any future value: the agent has no special handling for it.
     else -> LlmFinishReason.OTHER
   }
 
-  override suspend fun probeModels(provider: AIProvider, apiKey: String): Pair<Boolean, String> =
-    modelsProbe(
-      endpoint(provider, "models"),
-      "x-api-key" to apiKey,
-      "anthropic-version" to "2023-06-01"
-    )
+  /**
+   * Anthropic lists with a cursor, so ask for the whole catalog in one page.
+   * `x-api-key` is the only auth header this protocol accepts — the API rejects
+   * a request that also carries an `Authorization` header.
+   */
+  override suspend fun listModels(provider: AIProvider, apiKey: String): ModelListing =
+    modelsList(
+      endpoint(provider, "models") + "?limit=1000",
+      listOf("x-api-key" to apiKey, "anthropic-version" to ANTHROPIC_VERSION)
+    ) { ModelCatalog.anthropic(it) }
 }
 
 /**
@@ -1272,11 +1349,11 @@ internal class GeminiInteractionsClient(
     totalTokens = optIntOrNull("total_tokens")
   )
 
-  override suspend fun probeModels(provider: AIProvider, apiKey: String): Pair<Boolean, String> =
-    modelsProbe(
-      provider.baseUrl.trimEnd('/') + "/models",
-      "x-goog-api-key" to apiKey
-    )
+  override suspend fun listModels(provider: AIProvider, apiKey: String): ModelListing =
+    modelsList(
+      versionedEndpoint(provider.baseUrl, "v1beta", "models") + "?pageSize=1000",
+      listOf("x-goog-api-key" to apiKey)
+    ) { ModelCatalog.gemini(it) }
 }
 
 /** Shared holder for the in-flight streaming call so Stop can abort blocked socket reads. */
