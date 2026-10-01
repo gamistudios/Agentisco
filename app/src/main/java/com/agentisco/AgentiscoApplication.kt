@@ -5,6 +5,7 @@ import android.os.Build
 import com.agentisco.data.local.ProviderConfigStore
 import com.agentisco.data.repository.UpdateRepository
 import com.agentisco.settings.store.UserPreferencesStore
+import kotlinx.coroutines.launch
 import java.io.File
 import java.io.PrintWriter
 import java.io.StringWriter
@@ -43,10 +44,39 @@ class AgentiscoApplication : Application() {
     )
   }
 
+  private val localAiDelegate = lazy {
+    com.agentisco.local.LocalAiRuntime(com.agentisco.data.repository.LocalModelRepository(this))
+  }
+
+  /**
+   * The models installed on this device, behind the loopback OpenAI endpoint they are
+   * served through. Created lazily: a phone with no installed model never opens a port,
+   * and a build without the native engine never looks like it can answer.
+   */
+  val localAi: com.agentisco.local.LocalAiRuntime by localAiDelegate
+
+  private val memoryScope = kotlinx.coroutines.CoroutineScope(
+    kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.Default
+  )
+
   override fun onCreate() {
     super.onCreate()
     installCrashCapture()
     backgroundExecution.start()
+  }
+
+  /**
+   * Weights and the KV cache are by far the largest thing this process holds, so when the
+   * system says memory is critically low they go back — the next request pays one reload,
+   * which beats the whole app being killed mid-conversation. Releasing is serialized
+   * against the decode, so a turn in flight finishes before the model leaves.
+   */
+  override fun onTrimMemory(level: Int) {
+    super.onTrimMemory(level)
+    if (!localAiDelegate.isInitialized()) return
+    if (level == TRIM_MEMORY_RUNNING_CRITICAL || level == TRIM_MEMORY_COMPLETE) {
+      memoryScope.launch { runCatching { localAi.releaseModel() } }
+    }
   }
 
   /** Returns the previous run's captured crash log, or null if there was none. */

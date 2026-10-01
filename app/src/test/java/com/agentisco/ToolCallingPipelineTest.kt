@@ -375,6 +375,22 @@ class ToolCallingPipelineTest {
   }
 
   @Test
+  fun `OpenAI streamed reasoning_content surfaces as thinking without polluting the answer`() {
+    val client = OpenAIChatCompletionsClient(OkHttpClient())
+    val state = newState()
+    val events = mutableListOf<LlmStreamEvent>()
+
+    client.handleData("""{"choices":[{"index":0,"delta":{"reasoning_content":"Counting the steps"},"finish_reason":null}]}""", state, events::add)
+    client.handleData("""{"choices":[{"index":0,"delta":{"reasoning_content":" twice","content":"4"},"finish_reason":null}]}""", state, events::add)
+    client.handleData("""{"choices":[{"index":0,"delta":{"content":"2"},"finish_reason":"stop"}]}""", state, events::add)
+
+    assertEquals(listOf("Counting the steps", " twice"), events.filterIsInstance<LlmStreamEvent.ReasoningToken>().map { it.text })
+    assertEquals(listOf("4", "2"), events.filterIsInstance<LlmStreamEvent.Token>().map { it.text })
+    assertEquals("42", state.content.toString())
+    assertEquals(LlmFinishReason.STOP, state.finishReason)
+  }
+
+  @Test
   fun `OpenAI non streamed completion yields finish reason and usage`() {
     val client = OpenAIChatCompletionsClient(OkHttpClient())
     val state = newState()

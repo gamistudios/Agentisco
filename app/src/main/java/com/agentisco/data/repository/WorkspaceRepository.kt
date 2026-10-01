@@ -64,7 +64,13 @@ class WorkspaceRepository(
   private val llmService: com.agentisco.agent.llm.LlmService =
     com.agentisco.agent.llm.LlmService(
       chainStore = com.agentisco.agent.llm.GeminiChainStoreImpl(context?.applicationContext)
-    )
+    ),
+  /**
+   * The models installed on this device, published as one more OpenAI-compatible provider.
+   * Absent in tests and previews that own no application, where the selectable list is
+   * exactly what the durable store holds.
+   */
+  private val localAi: com.agentisco.local.LocalAiRuntime? = null
 ) {
 
   private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -943,6 +949,10 @@ class WorkspaceRepository(
   private val _aiModels = MutableStateFlow<List<AIModel>>(emptyList())
   val aiModels: StateFlow<List<AIModel>> = _aiModels.asStateFlow()
 
+  /** The store's own records, before the on-device ones are added to the selection list. */
+  private var storedProviders: List<AIProvider> = emptyList()
+  private var storedModels: List<AIModel> = emptyList()
+
   private val _selectedModel = MutableStateFlow<AIModel?>(null)
   val selectedModel: StateFlow<AIModel?> = _selectedModel.asStateFlow()
 
@@ -1029,6 +1039,11 @@ class WorkspaceRepository(
       loadActiveProjectState(activeProjectToLoad)
     }
     loadProviderConfiguration()
+    // An install, a delete or a server that came up changes the selectable list on its own.
+    localAi?.let { local ->
+      repositoryScope.launch { local.models.collect { publishProviderRecords() } }
+      repositoryScope.launch { local.provider.collect { publishProviderRecords() } }
+    }
     // Keep the Run & Build Center bound to whichever project is active.
     repositoryScope.launch {
       _activeProject.collect { project ->
@@ -1042,17 +1057,47 @@ class WorkspaceRepository(
   private fun loadProviderConfiguration() {
     val store = providerStore
     if (store != null) {
-      store.reconcileSelection(autoSelectFallback = true)
-      _providers.value = store.getProviders()
-      _aiModels.value = store.getModels()
-      _selectedModel.value = store.getSelectedModelId()?.let { id -> _aiModels.value.firstOrNull { it.id == id } }
-      _defaultTaskModelId.value = ensureDefaultTaskModel()
+      // A local model is selectable but not stored: its record exists only while the
+      // on-device server is up, so the store needs telling before it discards a selection.
+      store.reconcileSelection(
+        autoSelectFallback = true,
+        isKnownModel = { id -> store.ownsRecord(id) || localModelRecords.any { it.id == id } }
+      )
+      storedProviders = store.getProviders()
+      storedModels = store.getModels()
     } else {
       // No durable store (tests/previews): operate in-memory.
-      _providers.value = emptyList()
-      _aiModels.value = emptyList()
-      _selectedModel.value = null
+      storedProviders = emptyList()
+      storedModels = emptyList()
     }
+    publishProviderRecords()
+    _defaultTaskModelId.value = ensureDefaultTaskModel()
+  }
+
+  /**
+   * The selectable list: what the durable store holds plus what this device serves.
+   *
+   * On-device records are derived on every publish rather than saved, because the address
+   * and token that reach them belong to this run only. Everything downstream — the picker,
+   * the connection test, the agent loop — reads one flat list and asks nothing about which
+   * kind of model a record is.
+   */
+  private fun publishProviderRecords() {
+    _providers.value = storedProviders + listOfNotNull(localAi?.provider?.value)
+    _aiModels.value = storedModels + localModelRecords
+    reconcileSelectedModel()
+  }
+
+  private val localModelRecords: List<AIModel> get() = localAi?.models?.value ?: emptyList()
+
+  /** Keeps the selection when it still exists; otherwise falls back to the remembered or first model. */
+  private fun reconcileSelectedModel() {
+    val current = _selectedModel.value
+    if (current != null && _aiModels.value.any { it.id == current.id }) return
+    val next = providerStore?.getSelectedModelId()?.let { id -> _aiModels.value.firstOrNull { it.id == id } }
+      ?: _aiModels.value.firstOrNull()
+    _selectedModel.value = next
+    if (next != null) providerStore?.selectModel(next.id) { id -> _aiModels.value.any { it.id == id } }
   }
 
   /**
@@ -1077,7 +1122,8 @@ class WorkspaceRepository(
       hasApiKey = if (keyChanged) apiKey?.isNotBlank() == true else (existing?.hasApiKey ?: false)
     )
     providerStore?.upsertProvider(provider, apiKey)
-    _providers.value = providerStore?.getProviders() ?: (_providers.value.filterNot { it.id == id } + provider)
+    storedProviders = providerStore?.getProviders() ?: (storedProviders.filterNot { it.id == id } + provider)
+    publishProviderRecords()
     // A new URL or key makes both the last test and the last catalog stale.
     _connectionTests.update { it - id }
     _modelCatalogs.update { it - id }
@@ -1094,13 +1140,13 @@ class WorkspaceRepository(
    * available model is selected (or the selection becomes empty).
    */
   fun deleteProvider(providerId: String) {
+    // The on-device provider is not a record: it exists while models are installed, and
+    // taking those away is what the Local AI screen does.
+    if (providerId == com.agentisco.local.LocalAiRuntime.PROVIDER_ID) return
     providerStore?.deleteProvider(providerId)
-    _providers.value = providerStore?.getProviders() ?: _providers.value.filterNot { it.id == providerId }
-    _aiModels.value = providerStore?.getModels() ?: _aiModels.value.filterNot { it.providerId == providerId }
-    if (_selectedModel.value?.providerId == providerId) {
-      _selectedModel.value = _aiModels.value.firstOrNull()
-      _selectedModel.value?.let { providerStore?.selectModel(it.id) }
-    }
+    storedProviders = providerStore?.getProviders() ?: storedProviders.filterNot { it.id == providerId }
+    storedModels = providerStore?.getModels() ?: storedModels.filterNot { it.providerId == providerId }
+    publishProviderRecords()
     _connectionTests.update { it - providerId }
     _modelCatalogs.update { it - providerId }
   }
@@ -1116,6 +1162,9 @@ class WorkspaceRepository(
     recordId: String? = null
   ): AIModel? {
     if (modelId.isBlank() || displayName.isBlank()) return null
+    // An on-device model is configured from the Local AI screen, from the file it
+    // installed from; a stored record pointing at a loopback port would outlive it.
+    if (providerId == com.agentisco.local.LocalAiRuntime.PROVIDER_ID) return null
     if (_providers.value.none { it.id == providerId }) return null
     val model = AIModel(
       id = recordId ?: nextConfigRecordId("model"),
@@ -1128,31 +1177,35 @@ class WorkspaceRepository(
       reasoning = reasoning
     )
     providerStore?.upsertModel(model)
-    _aiModels.value = providerStore?.getModels() ?: (_aiModels.value.filterNot { it.id == model.id } + model)
+    storedModels = providerStore?.getModels() ?: (storedModels.filterNot { it.id == model.id } + model)
+    publishProviderRecords()
     if (_selectedModel.value == null) selectModel(model.id)
     return model
   }
 
   fun deleteModel(recordId: String) {
-    val wasSelected = _selectedModel.value?.id == recordId
+    if (com.agentisco.local.LocalAiRuntime.isLocalRecord(recordId)) return
     providerStore?.deleteModel(recordId)
-    _aiModels.value = providerStore?.getModels() ?: _aiModels.value.filterNot { it.id == recordId }
-    if (wasSelected) {
-      _selectedModel.value = _aiModels.value.firstOrNull()
-      _selectedModel.value?.let { providerStore?.selectModel(it.id) }
-    }
+    storedModels = providerStore?.getModels() ?: storedModels.filterNot { it.id == recordId }
+    publishProviderRecords()
   }
 
   /** Selects by unique model record id — never by model name. */
   fun selectModel(recordId: String) {
     val model = _aiModels.value.firstOrNull { it.id == recordId } ?: return
-    providerStore?.selectModel(recordId)
+    providerStore?.selectModel(recordId) { id -> _aiModels.value.any { it.id == id } }
     _selectedModel.value = model
     _isModelSheetOpen.value = false
   }
 
   /** Real connection test: probe the endpoint first, then fall back to an actual model request. */
   fun getApiKey(providerId: String): String? {
+    val local = localAi ?: return apiKeyOf(providerId)
+    if (providerId == local.provider.value?.id) return local.endpoint.value?.apiKey
+    return apiKeyOf(providerId)
+  }
+
+  private fun apiKeyOf(providerId: String): String? {
     val existing = _providers.value.firstOrNull { it.id == providerId } ?: return null
     if (!existing.hasApiKey) return null
     return providerStore?.getApiKey(providerId)
@@ -1160,7 +1213,7 @@ class WorkspaceRepository(
 
   fun testProviderConnection(providerId: String) {
     val provider = _providers.value.firstOrNull { it.id == providerId } ?: return
-    val apiKey = providerStore?.getApiKey(providerId)
+    val apiKey = getApiKey(providerId)
     // Test with the selected model when it belongs to this provider, otherwise
     // the provider's first configured model (the one the agent would use).
     val testModel = sequenceOf(_selectedModel.value, _aiModels.value.firstOrNull { it.providerId == providerId })
@@ -1195,7 +1248,7 @@ class WorkspaceRepository(
       is ModelCatalogState.Available -> if (!force) return
       else -> Unit
     }
-    val apiKey = providerStore?.getApiKey(providerId).orEmpty()
+    val apiKey = getApiKey(providerId).orEmpty()
     if (apiKey.isBlank()) {
       // The key is saved with the provider; a brand-new one may not have one yet.
       _modelCatalogs.update { it + (providerId to ModelCatalogState.Failed("Save an API key for this provider to list its models.")) }
@@ -1215,6 +1268,9 @@ class WorkspaceRepository(
   }
 
   private fun resolveProviderForModel(model: AIModel): Pair<AIProvider, String>? {
+    // An on-device model is a provider too: the answer is the loopback address and the
+    // token that guard it, which is all the protocol client ever asks for.
+    localAi?.connectionFor(model)?.let { return it }
     val provider = _providers.value.firstOrNull { it.id == model.providerId } ?: return null
     val apiKey = providerStore?.getApiKey(provider.id) ?: return null
     if (apiKey.isBlank()) return null
@@ -2944,7 +3000,11 @@ class WorkspaceRepository(
     }
     val connection = resolveProviderForModel(model)
     if (connection == null) {
-      _agentStatusText.value = "Provider \"${_providers.value.firstOrNull { it.id == model.providerId }?.name ?: model.providerId}\" is not configured with a valid API key."
+      _agentStatusText.value = if (model.providerId == com.agentisco.local.LocalAiRuntime.PROVIDER_ID) {
+        localAi?.unavailableReason ?: "The on-device model is not answering right now."
+      } else {
+        "Provider \"${_providers.value.firstOrNull { it.id == model.providerId }?.name ?: model.providerId}\" is not configured with a valid API key."
+      }
       _isModelSheetOpen.value = true
       return null
     }

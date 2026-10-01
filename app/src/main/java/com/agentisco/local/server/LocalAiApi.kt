@@ -134,7 +134,17 @@ class LocalAiApi(
       return Reply.Body(503, errorJson(e.message ?: "The model could not start", "server_error"))
     }
     return try {
-      runCompletion(model, parsed, turn, emit)
+      // Rendering the request is what made the template's capabilities known. A model whose
+      // template has nowhere to put tool definitions would answer as though no tools had
+      // been offered at all — a quietly wrong answer, so it is refused instead.
+      if (parsed.chatInputs.tools.isNotEmpty() && engine.loadedCapabilities()?.supportsTools == false) {
+        Reply.Body(
+          400,
+          errorJson("The model '$modelId' has no tool-calling template, so it cannot be given tools.", "invalid_request_error")
+        )
+      } else {
+        runCompletion(model, parsed, turn, emit)
+      }
     } finally {
       turn.close()
     }

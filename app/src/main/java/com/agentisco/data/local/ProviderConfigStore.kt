@@ -141,8 +141,11 @@ class ProviderConfigStore(private val context: Context? = null) {
     persistConfig()
   }
 
-  fun selectModel(modelId: String) {
-    if (modelsCache.any { it.id == modelId }) {
+  /** Whether [modelId] names a record this store persists, as opposed to one derived at runtime. */
+  fun ownsRecord(modelId: String): Boolean = modelsCache.any { it.id == modelId }
+
+  fun selectModel(modelId: String, isKnownModel: (String) -> Boolean = ::ownsRecord) {
+    if (isKnownModel(modelId)) {
       selectedIdCache = modelId
       persistConfig()
     }
@@ -158,9 +161,14 @@ class ProviderConfigStore(private val context: Context? = null) {
     persistConfig()
   }
 
-  /** Drops a stale selected model; picks the first available one when [autoSelectFallback] is set. */
-  fun reconcileSelection(autoSelectFallback: Boolean) {
-    if (selectedIdCache != null && selectedIdCache !in modelsCache.map { it.id }) selectedIdCache = null
+  /**
+   * Drops a stale selected model; picks the first available one when [autoSelectFallback]
+   * is set. [isKnownModel] widens what counts as still valid, so a selection pointing at an
+   * on-device model — which is never stored here — survives a restart.
+   */
+  fun reconcileSelection(autoSelectFallback: Boolean, isKnownModel: (String) -> Boolean = ::ownsRecord) {
+    val selected = selectedIdCache
+    if (selected != null && !isKnownModel(selected)) selectedIdCache = null
     if (selectedIdCache == null && autoSelectFallback) selectedIdCache = modelsCache.firstOrNull()?.id
     persistConfig()
   }

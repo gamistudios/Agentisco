@@ -76,7 +76,13 @@ fun AgentIDEApp(
     viewModel(
       factory = viewModelFactory {
         initializer {
-          WorkspaceViewModel(WorkspaceRepository(context = app, providerStore = app.providerStore))
+          WorkspaceViewModel(
+            WorkspaceRepository(
+              context = app,
+              providerStore = app.providerStore,
+              localAi = app.localAi
+            )
+          )
         }
       }
     )

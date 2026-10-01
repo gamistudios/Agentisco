@@ -223,6 +223,45 @@ class LocalAiApiTest {
         assertEquals("auto", inputs.toolChoice)
     }
 
+    /** A normal agent-loop request: one question, one function on offer. */
+    private fun toolsRequest(model: String = "alpha") = JSONObject()
+        .put("model", model)
+        .put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", "read a.txt")))
+        .put(
+            "tools",
+            JSONArray().put(
+                JSONObject().put("type", "function").put(
+                    "function",
+                    JSONObject().put("name", "read_file").put("description", "Read a file")
+                        .put("parameters", JSONObject().put("type", "object"))
+                )
+            )
+        )
+        .toString()
+
+    @Test
+    fun `tools offered to a template that cannot answer in them are refused, not dropped`() = runTest {
+        val (api, fake) = apiFor("alpha")
+        fake.capabilities = LocalTemplateCapabilities(
+          available = true,
+          usesOwnTemplate = true,
+          supportsTools = false,
+          supportsParallelToolCalls = false,
+          supportsThinking = false,
+          supportsSystemMessage = true,
+          supportsTypedContent = false
+        )
+
+        val reply = complete(api, toolsRequest())
+
+        // Silence here is the dangerous case: a model that was never told about the tools
+        // answers as if it had, and the user sees a confident reply with no call in it.
+        assertEquals(400, reply.status)
+        assertTrue(bodyOf(reply).getJSONObject("error").getString("message").contains("tool-calling template"))
+        // Nothing was decoded.
+        assertEquals(0, fake.sessions.single().consumed)
+    }
+
     // ---- streaming ----
 
     @Test

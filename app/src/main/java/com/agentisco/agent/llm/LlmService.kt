@@ -426,6 +426,11 @@ internal class OpenAIChatCompletionsClient(http: OkHttpClient) : BaseLlmClient(h
     finishFor(cleanWireString(choice.optString("finish_reason")))?.let { state.finishReason = it }
     // Streaming responses carry incremental "delta"; non-streaming carry the full "message".
     val delta = choice.optJSONObject("delta") ?: choice.optJSONObject("message") ?: return false
+    // DeepSeek-R1-style routers and on-device models publish thinking beside the
+    // answer; dropping it would silently turn a thinking model into a quiet one.
+    delta.optString("reasoning_content", "").takeIf { it.isNotEmpty() }?.let {
+      onEvent(LlmStreamEvent.ReasoningToken(it))
+    }
     delta.optString("content", "").takeIf { it.isNotEmpty() }?.let {
       state.content.append(it)
       onEvent(LlmStreamEvent.Token(it))
