@@ -92,6 +92,16 @@ class WorkspaceRepository(
   val backgroundExecution: com.agentisco.background.BackgroundExecution? =
     (context?.applicationContext as? com.agentisco.AgentiscoApplication)?.backgroundExecution
 
+  /**
+   * The models installed on this device, for the screen that manages them — download,
+   * cancel, verify, edit. Null where no application owns a filesystem, so a test or
+   * preview simply has no local models to manage.
+   */
+  val localModelStore: com.agentisco.data.repository.LocalModelRepository? = localAi?.repository
+
+  /** Why the on-device models cannot answer right now, or null when they can. */
+  val localAiNote: String? get() = localAi?.unavailableReason
+
   /** The registry record for the turn currently running, if any. */
   private var agentTurnWorkId: String? = null
 

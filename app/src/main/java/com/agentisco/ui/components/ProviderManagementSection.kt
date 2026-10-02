@@ -110,6 +110,9 @@ fun AIProvidersSection(viewModel: WorkspaceViewModel, modifier: Modifier = Modif
     providers.forEach { provider ->
       val testState = connectionTests[provider.id]
       val modelCount = models.count { it.providerId == provider.id }
+      // The on-device provider is derived from the files this device holds: its address
+      // and token belong to this run, so there is nothing here to edit or delete.
+      val derived = provider.id == com.agentisco.local.LocalAiRuntime.PROVIDER_ID
       Column(
         modifier = Modifier
           .fillMaxWidth()
@@ -147,7 +150,11 @@ fun AIProvidersSection(viewModel: WorkspaceViewModel, modifier: Modifier = Modif
               is WorkspaceRepository.ConnectionTestState.Testing -> "Testing…"
               is WorkspaceRepository.ConnectionTestState.Connected -> testState.note
               is WorkspaceRepository.ConnectionTestState.Failed -> "Connection failed"
-              null -> if (provider.hasApiKey) "Key set" else "No API key"
+              null -> when {
+                derived -> if (modelCount > 0) "On this device" else "Nothing installed"
+                provider.hasApiKey -> "Key set"
+                else -> "No API key"
+              }
             },
             color = when (testState) {
               is WorkspaceRepository.ConnectionTestState.Connected -> TerminalGreen
@@ -178,8 +185,10 @@ fun AIProvidersSection(viewModel: WorkspaceViewModel, modifier: Modifier = Modif
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
           MiniAction("Open") { detailProvider = provider }
           MiniAction("Test") { viewModel.testProviderConnection(provider.id) }
-          MiniAction("Edit") { editProvider = provider }
-          MiniAction("Delete", DangerRed) { confirmDeleteProvider = provider }
+          if (!derived) {
+            MiniAction("Edit") { editProvider = provider }
+            MiniAction("Delete", DangerRed) { confirmDeleteProvider = provider }
+          }
         }
 
         testState?.let { state ->
@@ -228,6 +237,7 @@ fun AIProvidersSection(viewModel: WorkspaceViewModel, modifier: Modifier = Modif
       viewModel = viewModel,
       provider = provider,
       models = models.filter { it.providerId == provider.id },
+      readOnly = provider.id == com.agentisco.local.LocalAiRuntime.PROVIDER_ID,
       onDismiss = { detailProvider = null },
       onAddModel = { addModelFor = provider },
       onEditModel = { editModel = it }
@@ -291,7 +301,7 @@ fun AIProvidersSection(viewModel: WorkspaceViewModel, modifier: Modifier = Modif
 }
 
 @Composable
-private fun MiniAction(label: String, tint: Color = TextSecondary, modifier: Modifier = Modifier, onClick: () -> Unit) {
+internal fun MiniAction(label: String, tint: Color = TextSecondary, modifier: Modifier = Modifier, onClick: () -> Unit) {
   Box(
     modifier = modifier
       .clip(RoundedCornerShape(6.dp))
@@ -421,6 +431,7 @@ private fun ProviderDetailDialog(
   viewModel: WorkspaceViewModel,
   provider: AIProvider,
   models: List<AIModel>,
+  readOnly: Boolean,
   onDismiss: () -> Unit,
   onAddModel: () -> Unit,
   onEditModel: (AIModel) -> Unit
@@ -445,7 +456,7 @@ private fun ProviderDetailDialog(
         verticalArrangement = Arrangement.spacedBy(8.dp)
       ) {
         DetailField("Base URL", provider.baseUrl)
-        ApiKeyField(viewModel = viewModel, provider = provider)
+        if (!readOnly) ApiKeyField(viewModel = viewModel, provider = provider)
         if (testState != null) {
           when (testState) {
             is WorkspaceRepository.ConnectionTestState.Testing -> StatusLine("Testing connection…", WarningAmber)
@@ -462,7 +473,15 @@ private fun ProviderDetailDialog(
           lineHeight = 12.sp
         )
         if (models.isEmpty()) {
-          Text("No models yet — the agent cannot use this provider until a model is added.", color = TextMuted, fontSize = 11.sp)
+          Text(
+            if (readOnly) {
+              "No model is installed on this device yet."
+            } else {
+              "No models yet — the agent cannot use this provider until a model is added."
+            },
+            color = TextMuted,
+            fontSize = 11.sp
+          )
         }
         models.forEach { model ->
           Row(
@@ -493,22 +512,24 @@ private fun ProviderDetailDialog(
                   .testTag("btn_default_model_${model.modelId}")
               )
               Spacer(modifier = Modifier.width(10.dp))
-              Icon(
-                Icons.Default.Edit, contentDescription = "Edit model",
-                tint = ElectricBlueGlow,
-                modifier = Modifier
-                  .size(16.dp)
-                  .clickable { onEditModel(model) }
-                  .testTag("btn_edit_model_${model.modelId}")
-              )
-              Spacer(modifier = Modifier.width(10.dp))
-              Icon(
-                Icons.Default.Delete, contentDescription = "Delete model",
-                tint = DangerRed,
-                modifier = Modifier
-                  .size(16.dp)
-                  .clickable { viewModel.deleteModel(model.id) }
-              )
+              if (!readOnly) {
+                Icon(
+                  Icons.Default.Edit, contentDescription = "Edit model",
+                  tint = ElectricBlueGlow,
+                  modifier = Modifier
+                    .size(16.dp)
+                    .clickable { onEditModel(model) }
+                    .testTag("btn_edit_model_${model.modelId}")
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Icon(
+                  Icons.Default.Delete, contentDescription = "Delete model",
+                  tint = DangerRed,
+                  modifier = Modifier
+                    .size(16.dp)
+                    .clickable { viewModel.deleteModel(model.id) }
+                )
+              }
             }
           }
         }
@@ -525,31 +546,35 @@ private fun ProviderDetailDialog(
           null -> Unit
         }
 
-        Surface(
-          onClick = onAddModel,
-          shape = RoundedCornerShape(8.dp),
-          color = ElectricBlue.copy(alpha = 0.12f),
-          border = androidx.compose.foundation.BorderStroke(1.dp, ElectricBlue),
-          modifier = Modifier.fillMaxWidth().testTag("btn_add_model")
-        ) {
-          Row(
-            modifier = Modifier.padding(vertical = 8.dp),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically
+        if (!readOnly) {
+          Surface(
+            onClick = onAddModel,
+            shape = RoundedCornerShape(8.dp),
+            color = ElectricBlue.copy(alpha = 0.12f),
+            border = androidx.compose.foundation.BorderStroke(1.dp, ElectricBlue),
+            modifier = Modifier.fillMaxWidth().testTag("btn_add_model")
           ) {
-            Icon(Icons.Default.Add, contentDescription = null, tint = ElectricBlueGlow, modifier = Modifier.size(14.dp))
-            Spacer(modifier = Modifier.width(4.dp))
-            Text("Add Model", color = ElectricBlueGlow, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+            Row(
+              modifier = Modifier.padding(vertical = 8.dp),
+              horizontalArrangement = Arrangement.Center,
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              Icon(Icons.Default.Add, contentDescription = null, tint = ElectricBlueGlow, modifier = Modifier.size(14.dp))
+              Spacer(modifier = Modifier.width(4.dp))
+              Text("Add Model", color = ElectricBlueGlow, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+            }
           }
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
           MiniAction("Test Connection") { viewModel.testProviderConnection(provider.id) }
-          MiniAction(
-            "Fetch Models",
-            modifier = Modifier.testTag("btn_fetch_models"),
-            onClick = { viewModel.loadModelCatalog(provider.id, force = true) }
-          )
+          if (!readOnly) {
+            MiniAction(
+              "Fetch Models",
+              modifier = Modifier.testTag("btn_fetch_models"),
+              onClick = { viewModel.loadModelCatalog(provider.id, force = true) }
+            )
+          }
           MiniAction("Close") { onDismiss() }
         }
       }

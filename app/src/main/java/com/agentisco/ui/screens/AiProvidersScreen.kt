@@ -34,6 +34,7 @@ import androidx.compose.ui.unit.sp
 import com.agentisco.core.model.AppDestination
 import com.agentisco.ui.WorkspaceViewModel
 import com.agentisco.ui.components.AIProvidersSection
+import com.agentisco.ui.components.LocalModelsSection
 import com.agentisco.ui.theme.*
 
 /**
@@ -96,6 +97,18 @@ fun AiProvidersScreen(
         // The section itself is not scrollable; this LazyColumn provides the
         // scrolling for it (nesting a verticalScroll Column here would crash).
         AIProvidersSection(viewModel = viewModel, modifier = Modifier.padding(14.dp))
+      }
+    }
+
+    item {
+      Card(
+        modifier = Modifier
+          .fillMaxWidth()
+          .clip(RoundedCornerShape(12.dp))
+          .border(1.dp, DarkBorder, RoundedCornerShape(12.dp)),
+        colors = CardDefaults.cardColors(containerColor = DarkSurface)
+      ) {
+        LocalModelsSection(viewModel = viewModel, modifier = Modifier.padding(14.dp))
       }
     }
 

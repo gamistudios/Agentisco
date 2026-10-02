@@ -126,7 +126,13 @@ fun ModelSelectorSheet(
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                  text = if (provider.hasApiKey) "Key set" else "No API key",
+                  text = when {
+                    // An on-device model has no key and no network to reach: the fact
+                    // that matters here is that it runs on this phone.
+                    provider.id == com.agentisco.local.LocalAiRuntime.PROVIDER_ID -> "Runs on this device"
+                    provider.hasApiKey -> "Key set"
+                    else -> "No API key"
+                  },
                   color = TextMuted,
                   fontSize = 10.sp
                 )
@@ -219,6 +225,7 @@ private fun ModelRow(
         horizontalArrangement = Arrangement.spacedBy(4.dp),
         verticalAlignment = Alignment.CenterVertically
       ) {
+        if (model.providerId == com.agentisco.local.LocalAiRuntime.PROVIDER_ID) CapabilityPill("Offline")
         model.contextWindow?.let { CapabilityPill("Ctx ${it / 1000}k") }
         if (model.capabilities.tools) CapabilityPill("Tools") else CapabilityPill("No tools")
         if (model.capabilities.streaming) CapabilityPill("Stream")

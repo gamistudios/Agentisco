@@ -1337,6 +1337,101 @@ class WorkspaceViewModel(
    */
   fun getApiKey(providerId: String): String? = repository.getApiKey(providerId)
 
+  // ---- On-device models ----
+
+  /** Built-in and user-added models, with installation recomputed from the files. */
+  val localModels: StateFlow<List<com.agentisco.local.model.LocalModel>> =
+    repository.localModelStore?.models ?: MutableStateFlow(emptyList())
+
+  /** Live download/install state per model id; empty when nothing is running. */
+  val localInstallStates: StateFlow<Map<String, com.agentisco.data.repository.LocalModelInstallState>> =
+    repository.localModelStore?.installStates ?: MutableStateFlow(emptyMap())
+
+  /** Why the on-device models cannot answer, or null when the agent can use them. */
+  val localAiNote: String? get() = repository.localAiNote
+
+  private val localStore: com.agentisco.data.repository.LocalModelRepository?
+    get() = repository.localModelStore
+
+  fun installLocalModel(modelId: String) {
+    val store = localStore ?: return
+    val model = store.model(modelId) ?: return
+    viewModelScope.launch { store.install(model) }
+  }
+
+  fun cancelLocalInstall(modelId: String) {
+    localStore?.cancel(modelId)
+  }
+
+  fun uninstallLocalModel(modelId: String) {
+    val store = localStore ?: return
+    val model = store.model(modelId) ?: return
+    viewModelScope.launch { store.uninstall(model) }
+  }
+
+  /** Removes a user-added model entirely; a built-in one can only be uninstalled. */
+  fun forgetLocalModel(modelId: String) {
+    viewModelScope.launch { localStore?.remove(modelId) }
+  }
+
+  /**
+   * Replaces the bytes a model is running from. An install that is already current
+   * answers without touching the network, so the file has to go first for the fetch
+   * to actually happen.
+   */
+  fun redownloadLocalModel(modelId: String) {
+    val store = localStore ?: return
+    val model = store.model(modelId) ?: return
+    viewModelScope.launch {
+      store.uninstall(model)
+      store.install(model)
+    }
+  }
+
+  /**
+   * Adds a model from a URL the user typed. The result comes back to the form, because
+   * a rejected URL is the form's problem to explain, not the list's.
+   */
+  fun addLocalModel(
+    name: String,
+    downloadUrl: String,
+    description: String,
+    quantization: String,
+    onResult: (Result<com.agentisco.local.model.LocalModel>) -> Unit
+  ) {
+    val store = localStore ?: return
+    viewModelScope.launch { onResult(store.addCustom(name, downloadUrl, description, quantization)) }
+  }
+
+  /** Proves the bytes on disk still match what the install recorded. */
+  fun verifyLocalModel(modelId: String) {
+    viewModelScope.launch { localStore?.verifyInstalled(modelId) }
+  }
+
+  fun refreshLocalModels() {
+    viewModelScope.launch { localStore?.refreshRemoteInfo() }
+  }
+
+  fun updateLocalConfiguration(
+    modelId: String,
+    configuration: com.agentisco.local.model.LocalModelConfiguration
+  ) {
+    localStore?.updateConfiguration(modelId, configuration)
+  }
+
+  fun resetLocalConfiguration(modelId: String) {
+    localStore?.resetConfiguration(modelId)
+  }
+
+  /** What the model file itself says — architecture, quantization, tensor count. */
+  fun localModelMetadata(modelId: String): com.agentisco.local.model.GgufMetadata? {
+    val store = localStore ?: return null
+    return store.model(modelId)?.let(store::metadataOf)
+  }
+
+  fun localModelSelectable(modelId: String): AIModel? =
+    repository.aiModels.value.firstOrNull { it.id == com.agentisco.local.LocalAiRuntime.recordId(modelId) }
+
   fun updateSearchQuery(query: String) {
     repository.updateSearchQuery(query)
   }
