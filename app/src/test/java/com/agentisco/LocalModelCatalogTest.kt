@@ -10,6 +10,7 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
 
 /**
  * Unit tests for what the app believes about a model it has not downloaded yet:
@@ -137,5 +138,51 @@ class LocalModelCatalogTest {
         val defaults = LocalRuntimeSettings.Defaults
         assertEquals(2048, defaults.contextSize)
         assertEquals(0, defaults.threadCount)
+    }
+
+    // ——— what may never ship in the package ———
+
+    /**
+     * A model is something the device downloads, proves and stores — never something
+     * the APK carries. The directories below are copied into the package as they are,
+     * so a weight file appearing in either one is the rule being broken, and an
+     * install-size surprise on every device that receives it.
+     */
+    @Test
+    fun `no model bytes ship inside the app`() {
+        // Gradle may run a unit test from anywhere under the module, so look for the
+        // source set relative to the working directory and then above it.
+        val candidates = generateSequence(File("").absoluteFile) { it.parentFile }
+            .flatMap { dir -> sequenceOf(File(dir, "src/main"), File(dir, "app/src/main")) }
+            .firstOrNull { it.isDirectory }
+            ?: error("No src/main below ${File("").absolutePath} — the scan looked in the wrong place")
+
+        val shippedVerbatim = listOf(
+            File(candidates, "assets"),
+            File(candidates, "res/raw")
+        )
+        val packaged = candidates.walk()
+            .filter { it.isFile }
+            .filter { file ->
+                file.extension.lowercase() in MODEL_EXTENSIONS ||
+                  (shippedVerbatim.any { it.isDirectory && file.path.startsWith(it.path) } &&
+                    file.length() > MAX_PACKAGED_BYTES)
+            }
+            .map { "${it.path} (${it.length()} bytes)" }
+            .toList()
+
+        assertTrue(
+            "Model weights must be downloaded at runtime, never packaged: $packaged",
+            packaged.isEmpty()
+        )
+    }
+
+    private companion object {
+        val MODEL_EXTENSIONS = setOf(
+            "gguf", "ggml", "safetensors", "bin", "ckpt", "onnx", "pt", "pth", "tflite", "pb"
+        )
+
+        /** Nothing that legitimately lives in `src/main` is this big. */
+        const val MAX_PACKAGED_BYTES = 20_000_000L
     }
 }
