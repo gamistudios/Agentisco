@@ -1940,9 +1940,12 @@ class WorkspaceRepository(
           _commitGenState.value = CommitGenState.Failed("Nothing staged — stage changes first, then generate.")
           return@launch
         }
-        val model = _selectedModel.value
+        val model = resolveTaskModel()
         if (model == null) {
-          _commitGenState.value = CommitGenState.Failed("No model configured — add a provider/model in Settings first.")
+          _commitGenState.value = CommitGenState.Failed(
+            if (_selectedModel.value == null) "No model configured — add a provider/model in Settings first."
+            else "The selected model runs on this device — commit generation writes a multi-hundred-token message and needs a cloud model. Pick one as the task model in Settings."
+          )
           return@launch
         }
         val generated = requestLlmText(
@@ -2027,13 +2030,14 @@ class WorkspaceRepository(
   /**
    * Guarantees a usable default task model: the stored one if still valid,
    * otherwise the first model in the catalog (persisted so there is always
-   * exactly one default).
+   * exactly one default). An on-device model is never a default: see
+   * [resolveTaskModel].
    */
   private fun ensureDefaultTaskModel(): String? {
     val models = _aiModels.value
     val current = _defaultTaskModelId.value
-    if (current != null && models.any { it.id == current }) return current
-    val fallback = models.firstOrNull()?.id
+    if (current != null && models.any { it.id == current && !onDeviceModel(it) }) return current
+    val fallback = models.firstOrNull { !onDeviceModel(it) }?.id
     if (fallback != null && fallback != current) {
       providerStore?.setDefaultTaskModelId(fallback)
       _defaultTaskModelId.value = fallback
@@ -2052,26 +2056,47 @@ class WorkspaceRepository(
     _defaultTaskModelId.value = modelId
   }
 
+  /**
+   * A model that runs on this device is not a background worker. A diff explanation
+   * sends 12k characters and asks for 800 tokens back, which on a phone CPU is minutes of
+   * work on the one resident engine the user is waiting for an answer from.
+   *
+   * A chore therefore looks for the task model, then any other model whose provider is
+   * configured with a key, and is refused with a reason when there is none. It is never
+   * quietly handed to the phone.
+   */
+  private fun onDeviceModel(model: AIModel): Boolean =
+    model.providerId == com.agentisco.local.LocalAiRuntime.PROVIDER_ID
+
   private fun resolveTaskModel(): AIModel? {
     // The default task model is only usable when its provider is actually
     // configured with a key — otherwise background generation (session titles,
     // commit messages) would fail silently while the selected model works.
     _defaultTaskModelId.value?.let { id ->
       _aiModels.value.firstOrNull { it.id == id }?.let { model ->
-        if (resolveProviderForModel(model) != null) return model
+        if (!onDeviceModel(model) && resolveProviderForModel(model) != null) return model
       }
     }
-    return _selectedModel.value
+    // Never fall back to the on-device engine the chat is using, and never to a cloud
+    // model whose provider has no key: another configured model answers instead.
+    val selected = _selectedModel.value?.takeUnless { onDeviceModel(it) || resolveProviderForModel(it) == null }
+    return selected
+      ?: _aiModels.value.firstOrNull { !onDeviceModel(it) && resolveProviderForModel(it) != null }
   }
 
   /**
-   * One-shot LLM text generation. Returns null only when no model is
-   * configured; otherwise throws the real provider/network error so callers
-   * can surface exactly what went wrong.
+   * One-shot LLM text generation on the background task model; null means the
+   * model answered with nothing usable. Throws when there is no model to run the
+   * chore on—including when the only model the user has is the on-device
+   * engine—so a caller never shows an empty panel without a reason, and otherwise
+   * throws the real provider/network error.
    */
   private suspend fun requestLlmText(system: String, user: String, maxTokens: Int, disableReasoning: Boolean = false): String? {
     ensureDefaultTaskModel()
-    val model = resolveTaskModel() ?: return null
+    val model = resolveTaskModel() ?: throw IllegalStateException(
+      if (_selectedModel.value == null) "No model is configured — add a provider and model in Settings."
+      else "Only the on-device model is configured. Background generation needs a cloud model: it would occupy the engine you are waiting on."
+    )
     val connection = resolveProviderForModel(model)
       ?: throw IllegalStateException("Provider for model \"${model.displayName}\" has no API key configured.")
     val (provider, apiKey) = connection
