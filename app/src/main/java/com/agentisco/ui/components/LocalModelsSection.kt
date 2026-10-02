@@ -142,7 +142,11 @@ fun LocalModelsSection(
     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
       MiniAction("Check for updates") { viewModel.refreshLocalModels() }
       Text(
-        viewModel.localAiNote ?: "$installedCount installed model${if (installedCount == 1) "" else "s"} in use over loopback",
+        viewModel.localAiNote ?: when (installedCount) {
+          0 -> "Nothing installed to run"
+          1 -> "1 model ready to run on this device"
+          else -> "$installedCount models ready to run on this device"
+        },
         color = TextMuted,
         fontSize = 10.sp,
         maxLines = 2,
