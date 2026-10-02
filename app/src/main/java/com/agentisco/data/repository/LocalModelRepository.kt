@@ -13,6 +13,7 @@ import com.agentisco.local.model.LocalModel
 import com.agentisco.local.model.LocalModelConfiguration
 import com.agentisco.local.model.LocalModelInstallStatus
 import com.agentisco.local.model.LocalModelProgress
+import com.agentisco.local.model.LocalRuntimeSettings
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -405,7 +406,11 @@ class LocalModelRepository(
     val recorded = model.copy(
       sizeBytes = outcome.bytesOnDisk,
       checksum = digest ?: model.checksum,
-      quantization = model.quantization.ifBlank { GgufMetadata.fileTypeLabel(metadata.fileType).orEmpty() }
+      quantization = model.quantization.ifBlank { GgufMetadata.fileTypeLabel(metadata.fileType).orEmpty() },
+      // Same rule as the quantization: the verified file is the evidence. A model that
+      // cannot hold the default window is given its own, so the first request has a
+      // chance of fitting without the user having to know the number exists.
+      configuration = configurationAfterInstall(model.configuration, metadata)
     )
     store.upsert(recorded)
     store.markInstalled(
@@ -420,6 +425,22 @@ class LocalModelRepository(
     publish(recomputeRecords())
     setState(recorded.id, LocalModelInstallState(LocalModelInstallStatus.INSTALLED))
     return true
+  }
+
+  /**
+   * The settings to record for a model whose bytes just passed verification.
+   *
+   * Only untouched defaults are recomputed: whoever set a context size chose it, and
+   * re-installing or updating the file underneath them is not a licence to undo that.
+   */
+  private fun configurationAfterInstall(
+    configuration: LocalModelConfiguration,
+    metadata: GgufMetadata
+  ): LocalModelConfiguration {
+    if (configuration.runtime != LocalRuntimeSettings.Defaults) return configuration
+    val contextSize = LocalRuntimeSettings.contextSizeFor(metadata.contextLength)
+    return if (contextSize == configuration.runtime.contextSize) configuration
+    else configuration.copy(runtime = configuration.runtime.copy(contextSize = contextSize))
   }
 
   /**

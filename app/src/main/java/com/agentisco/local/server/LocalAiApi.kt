@@ -12,6 +12,7 @@ import com.agentisco.local.runtime.LocalFinishReason
 import com.agentisco.local.runtime.LocalInferenceEngine
 import com.agentisco.local.runtime.LocalParseDelta
 import com.agentisco.local.runtime.LocalParsedMessage
+import com.agentisco.local.runtime.LocalPromptTooLongException
 import com.agentisco.local.runtime.LocalToolCall
 import org.json.JSONArray
 import org.json.JSONObject
@@ -174,6 +175,12 @@ class LocalAiApi(
     var clientGone = false
     var headSent = false
 
+    /** The frame that tells a client an answer is coming. */
+    fun emitHead(): Boolean {
+      headSent = true
+      return emit(chunk(id, created, request.model, JSONObject().put("role", "assistant"), null))
+    }
+
     /** Re-reads everything shown so far and pushes whatever is new. */
     fun publish(): Boolean {
       // Only a client that went away is a reason to stop the decode; a caller that asked
@@ -182,18 +189,20 @@ class LocalAiApi(
       if (!stream || visible.isEmpty()) return true
       for (delta in turn.parse(visible.toString(), partial = true).deltas) {
         val node = deltaNode(delta) ?: continue
-        headSent = true
+        // The opening frame goes out with the first real delta rather than before the
+        // decode starts. Once it is written the client is told a completion is on its
+        // way and the only remaining answer is a truncated one; before it, a failure can
+        // still be returned as the plain 4xx request error that it is.
+        if (!headSent && !emitHead()) {
+          clientGone = true
+          return false
+        }
         if (!emit(chunk(id, created, request.model, node, null))) {
           clientGone = true
           return false
         }
       }
       return true
-    }
-
-    if (stream) {
-      headSent = emit(chunk(id, created, request.model, JSONObject().put("role", "assistant"), null))
-      if (!headSent) clientGone = true
     }
 
     var finish = LocalFinishReason.END_OF_SEQUENCE
@@ -219,14 +228,20 @@ class LocalAiApi(
       failure = e
     }
 
-    failure?.let {
-      val body = errorJson(it.message ?: "Generation failed", "server_error")
+    failure?.let { error ->
+      // A prompt that would not fit is the request being wrong, not this server failing.
+      // The distinction decides what happens next upstream: a 400 with
+      // `invalid_request_error` ends the run and tells the user which number to change,
+      // while a server error is retried — and retrying the same oversized prompt fails the
+      // same way, which is how a turn stalls into silence.
+      val tooLong = error is LocalPromptTooLongException
+      val body = errorJson(error.message ?: "Generation failed", if (tooLong) "invalid_request_error" else "server_error")
       return if (headSent) {
         emit(body)
         emit("[DONE]")
         Reply.Streamed(200)
       } else {
-        Reply.Body(500, body)
+        Reply.Body(if (tooLong) 400 else 500, body)
       }
     }
 
@@ -241,6 +256,9 @@ class LocalAiApi(
 
     if (!stream) return Reply.Body(200, completionJson(id, created, request.model, answer, finishReason))
 
+    // A turn that showed no text — an empty answer, or markup the parser consumed — still
+    // has to open its stream the way every other one does: role first, then the end.
+    if (!clientGone && !headSent) emitHead()
     emit(chunk(id, created, request.model, JSONObject(), finishReason))
     emit("[DONE]")
     return Reply.Streamed(200)

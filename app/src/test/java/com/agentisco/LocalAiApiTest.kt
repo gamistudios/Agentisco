@@ -10,6 +10,7 @@ import com.agentisco.local.repositoryWithInstalled
 import com.agentisco.local.runtime.LocalEngineException
 import com.agentisco.local.runtime.LocalInferenceEngine
 import com.agentisco.local.runtime.LocalParseDelta
+import com.agentisco.local.runtime.LocalPromptTooLongException
 import com.agentisco.local.runtime.LocalTemplateCapabilities
 import com.agentisco.local.runtime.LocalToolCall
 import com.agentisco.local.server.LocalAiApi
@@ -417,7 +418,13 @@ class LocalAiApiTest {
     @Test
     fun `a failure mid-stream is reported inside the stream`() = runTest {
         val (api, fake) = apiFor("alpha")
-        fake.sessionScript = { session -> session.failure = LocalEngineException("Failed to evaluate generated token") }
+        fake.sessionScript = { session ->
+            session.reply = listOf("part of ", "an answer")
+            // Text already reached the client, so the stream is the only place left to
+            // say the rest is not coming.
+            session.failsAfter = 1
+            session.failure = LocalEngineException("Failed to evaluate generated token")
+        }
         val chunks = mutableListOf<String>()
         val reply = call(
             api, "POST", "/v1/chat/completions",
@@ -425,11 +432,11 @@ class LocalAiApiTest {
         )
 
         assertEquals(200, reply.status)
-        assertEquals(3, chunks.size)
-        assertEquals("assistant", JSONObject(chunks[0]).chunkText())
+        assertEquals(4, chunks.size)
+        assertEquals(listOf("assistant", "part of "), chunks.take(2).map { JSONObject(it).chunkText() })
         assertEquals(
             "Failed to evaluate generated token",
-            JSONObject(chunks[1]).getJSONObject("error").getString("message")
+            JSONObject(chunks[2]).getJSONObject("error").getString("message")
         )
         assertEquals("[DONE]", chunks.last())
     }
@@ -439,11 +446,62 @@ class LocalAiApiTest {
         val (api, fake) = apiFor("alpha")
         fake.sessionScript = { session -> session.failure = LocalEngineException("Failed to evaluate generated token") }
 
+        // Streamed or not: nothing had been promised to the client, so the answer is a
+        // status code rather than a half-finished event stream.
+        val chunks = mutableListOf<String>()
+        val streamed = call(
+            api, "POST", "/v1/chat/completions",
+            """{"model":"alpha","stream":true,"messages":[{"role":"user","content":"hi"}]}""", chunks
+        )
+        assertEquals(500, streamed.status)
+        assertTrue(chunks.isEmpty())
+
         val reply = complete(api, oneTurn)
 
         assertEquals(500, reply.status)
         assertEquals("server_error", bodyOf(reply).getJSONObject("error").getString("type"))
         assertEquals("Failed to evaluate generated token", bodyOf(reply).getJSONObject("error").getString("message"))
+    }
+
+    /**
+     * The stalled-turn case: an agent prompt — playbook, tool list, transcript — longer
+     * than the window the model was opened with. It has to come back as a request error
+     * the loop will not retry, and the model that refused it has to stay loaded, because
+     * nothing about the engine is wrong.
+     */
+    @Test
+    fun `a prompt that does not fit the context is refused as a request error`() = runTest {
+        val (api, fake) = apiFor("alpha")
+        fake.sessionScript = { session ->
+            session.failure = LocalPromptTooLongException("This request needs 2900 tokens but the context for this model holds 2048.")
+        }
+        val chunks = mutableListOf<String>()
+
+        val reply = call(
+            api, "POST", "/v1/chat/completions",
+            """{"model":"alpha","stream":true,"messages":[{"role":"user","content":"hi"}]}""", chunks
+        )
+
+        assertEquals(400, reply.status)
+        val error = bodyOf(reply).getJSONObject("error")
+        assertEquals("invalid_request_error", error.getString("type"))
+        assertTrue(error.getString("message").contains("2900"))
+        assertTrue(chunks.isEmpty())
+        assertEquals(0, fake.sessions.single().closes)
+    }
+
+    @Test
+    fun `an answer with nothing in it still opens and closes its stream`() = runTest {
+        val (api, fake) = apiFor("alpha")
+        fake.sessionScript = { session -> session.reply = emptyList() }
+        val chunks = mutableListOf<String>()
+
+        call(
+            api, "POST", "/v1/chat/completions",
+            """{"model":"alpha","stream":true,"messages":[{"role":"user","content":"hi"}]}""", chunks
+        )
+
+        assertEquals(listOf("assistant", null, "[DONE]"), chunks.map { if (it == "[DONE]") it else JSONObject(it).chunkText() })
     }
 
     @Test

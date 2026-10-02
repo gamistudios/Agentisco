@@ -231,4 +231,15 @@ data class LocalGenerationRequest(
 )
 
 /** An engine failure worth showing the user, as opposed to a stack trace. */
-class LocalEngineException(message: String, cause: Throwable? = null) : Exception(message, cause)
+open class LocalEngineException(message: String, cause: Throwable? = null) : Exception(message, cause)
+
+/**
+ * The prompt is larger than the context configured for this model.
+ *
+ * Its own type because it is the one engine failure meaning nothing is wrong with the
+ * model, the engine or the device: the request needs a different setting or a shorter
+ * conversation, and retrying changes neither. The resident model stays resident — it
+ * never began decoding — and the loopback server answers 400, which the agent loop
+ * treats as terminal.
+ */
+class LocalPromptTooLongException(message: String) : LocalEngineException(message)

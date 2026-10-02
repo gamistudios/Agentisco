@@ -271,7 +271,7 @@ class LocalModelsUiTest {
     compose.onNodeWithText("Settings").assertExists()
     compose.onNodeWithText("Info").assertExists()
     compose.onNodeWithText("Delete").assertExists()
-    compose.onNodeWithText("142 MB · ctx 2048 · max 200 · built in").assertExists()
+    compose.onNodeWithText("142 MB · ctx ${LocalRuntimeSettings.DEFAULT_CONTEXT} · max 200 · built in").assertExists()
   }
 
   @Test
@@ -288,11 +288,11 @@ class LocalModelsUiTest {
       null,
       installed = true,
       configuration = LocalModelConfiguration(
-        runtime = LocalRuntimeSettings(contextSize = 4096),
+        runtime = LocalRuntimeSettings(contextSize = 8192),
         generation = LocalGenerationSettings(maxOutputTokens = 320)
       )
     )
-    compose.onNodeWithText("142 MB · ctx 4096 · max 320 · built in").assertExists()
+    compose.onNodeWithText("142 MB · ctx 8192 · max 320 · built in").assertExists()
   }
 
   @Test

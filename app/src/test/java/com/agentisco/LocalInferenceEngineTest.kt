@@ -24,6 +24,7 @@ import com.agentisco.local.runtime.LocalGenerationRequest
 import com.agentisco.local.runtime.LocalInferenceEngine
 import com.agentisco.local.runtime.LocalModelEngine
 import com.agentisco.local.runtime.LocalParsedMessage
+import com.agentisco.local.runtime.LocalPromptTooLongException
 import com.agentisco.local.runtime.LocalTemplateCapabilities
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.runTest
@@ -299,7 +300,7 @@ class LocalInferenceEngineTest {
 
         assertEquals(2, fake.sessions.size)
         assertEquals(1, fake.sessions.first().closes)
-        assertEquals(listOf(2048, 4096), fake.sessions.map { it.runtime.contextSize })
+        assertEquals(listOf(LocalRuntimeSettings.DEFAULT_CONTEXT, 4096), fake.sessions.map { it.runtime.contextSize })
         // "use all" was resolved at load, and the saved thread count is what a request runs with.
         assertEquals(listOf(8, 2), fake.sessions.map { it.runtime.threadCount })
     }
@@ -403,6 +404,30 @@ class LocalInferenceEngineTest {
         fake.sessions.single().failure = null
         assertEquals("hello", generateOnce(engine, installed))
         assertEquals(2, fake.sessions.size)
+    }
+
+    /**
+     * A prompt longer than the window is the request being wrong, not the model being
+     * broken. Dropping the resident model here would make every turn after it pay for a
+     * reload that cannot change the answer.
+     */
+    @Test
+    fun `a prompt too long for the context leaves the model loaded`() = runTest {
+        val payload = ggufBytes(4096)
+        val repository = repositoryFor(payload)
+        val installed = install(repository, "alpha", payload)
+        val fake = FakeEngine()
+        val engine = engineFor(repository, fake)
+        generateOnce(engine, installed)
+
+        fake.sessions.single().failure = LocalPromptTooLongException("needs 2900 tokens, holds 2048")
+        assertTrue(failureOf(engine, installed) is LocalPromptTooLongException)
+        fake.sessions.single().failure = null
+
+        assertEquals(0, fake.sessions.single().closes)
+        assertEquals("alpha", engine.loadedModelId)
+        assertEquals("hello", generateOnce(engine, installed))
+        assertEquals(1, fake.sessions.size)
     }
 
     @Test

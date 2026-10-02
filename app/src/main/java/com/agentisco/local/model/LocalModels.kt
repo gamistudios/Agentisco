@@ -64,8 +64,27 @@ data class LocalRuntimeSettings(
   val batchSize: Int = DEFAULT_BATCH
 ) {
   companion object {
-    const val DEFAULT_CONTEXT = 2048
+    /**
+     * The context a model gets when the user has not retuned it.
+     *
+     * An agent turn is not a chat bubble: the playbook and the list of tools the runtime
+     * offers are rendered into the prompt before the user's message is, which is a couple
+     * of thousand tokens on their own. A window smaller than that cannot be answered at
+     * all — the engine refuses the prompt — so the default has to leave room for the
+     * machinery as well as the conversation, while staying small enough for a phone to
+     * hold the KV cache of the models this catalog ships.
+     */
+    const val DEFAULT_CONTEXT = 4096
     const val DEFAULT_BATCH = 128
+
+    /**
+     * [DEFAULT_CONTEXT] capped by what the file says it was trained for. A window longer
+     * than the weights can hold yields confident nonsense rather than an error, so the
+     * smaller of the two wins; a file that declares nothing gets the default.
+     */
+    fun contextSizeFor(trainedContextLength: Long?): Int =
+      trainedContextLength?.takeIf { it > 0L }?.toInt()?.let { minOf(DEFAULT_CONTEXT, it) } ?: DEFAULT_CONTEXT
+
     val Defaults = LocalRuntimeSettings()
   }
 }

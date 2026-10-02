@@ -83,6 +83,9 @@ internal class FakeSession(
   var aborts = 0
   var closes = 0
 
+  /** How many pieces go out before [failure] is thrown — 0 fails before the decode starts. */
+  var failsAfter = 0
+
   /** How many pieces the decode handed out, so a test can prove a run was cut short. */
   var consumed = 0
 
@@ -108,12 +111,18 @@ internal class FakeSession(
 
   override fun generate(request: LocalGenerationRequest, onPiece: (String) -> Boolean): LocalFinishReason {
     requests += request
-    failure?.let { throw it }
+    failIfDue()
     for (piece in reply) {
       consumed++
       if (!onPiece(piece)) return LocalFinishReason.STOPPED
+      failIfDue()
     }
     return finish
+  }
+
+  private fun failIfDue() {
+    val error = failure ?: return
+    if (consumed >= failsAfter) throw error
   }
 
   override fun abort() {

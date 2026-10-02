@@ -91,8 +91,9 @@ class LocalInferenceEngine(
           resident.session.generate(LocalGenerationRequest(prompt, generation, grammar, seed), onPiece)
         } catch (e: LocalEngineException) {
           // A mid-run engine failure leaves the context in an unknown state; the next
-          // request should not inherit it.
-          unloadLocked()
+          // request should not inherit it. A prompt that was simply too long is the one
+          // case where nothing was decoded, so the model is worth keeping resident.
+          if (e !is LocalPromptTooLongException) unloadLocked()
           throw e
         }
       }

@@ -146,8 +146,13 @@ class LocalModelRepositoryTest {
     private fun stateOf(repo: LocalModelRepository, modelId: String): LocalModelInstallState =
         repo.installState(modelId)
 
-    /** A real, if tiny, GGUF file: header plus the two metadata keys the app reads. */
-    private fun ggufBytes(totalSize: Int, architecture: String = "lfm2", fileType: Long = 2): ByteArray {
+    /** A real, if tiny, GGUF file: header plus the metadata keys the app reads. */
+    private fun ggufBytes(
+        totalSize: Int,
+        architecture: String = "lfm2",
+        fileType: Long = 2,
+        contextLength: Long? = null
+    ): ByteArray {
         require(totalSize > 128) { "the fixture has to be bigger than its own header" }
         val out = java.io.ByteArrayOutputStream()
         fun le(value: Long, width: Int) {
@@ -165,9 +170,10 @@ class LocalModelRepositoryTest {
         out.write("GGUF".toByteArray(StandardCharsets.UTF_8))
         le(3, 4)
         le(1, 8)
-        le(2, 8)
+        le(if (contextLength == null) 2 else 3, 8)
         text("general.architecture"); le(8, 4); text(architecture)
         text("general.file_type"); le(4, 4); le(fileType, 4)
+        contextLength?.let { text("$architecture.context_length"); le(4, 4); le(it, 4) }
         while (out.size() < totalSize) out.write(0)
         return out.toByteArray()
     }
@@ -603,8 +609,49 @@ class LocalModelRepositoryTest {
         assertTrue(installedFile().isFile)
     }
 
-    // ---- listing ----
+    /**
+     * The context a fresh install opens with is the one thing that can make every later
+     * request fail: an agent turn carries the playbook and the list of tools before the
+     * user's message does. A model that cannot hold that window is given its own rather
+     * than a number it was never trained for.
+     */
+    @Test
+    fun `installing a model with a short training window gives it that window`() = runTest {
+        val payload = ggufBytes(4096, contextLength = 2048)
+        val repo = repository(ServingSource(payload))
+        val model = record(remoteSize = payload.size.toLong(), digest = sha256(payload))
+        assertTrue(repo.install(model))
 
+        assertEquals(2048, repo.configuration(model.id).runtime.contextSize)
+    }
+
+    @Test
+    fun `a model with room to spare keeps the default window`() = runTest {
+        val payload = ggufBytes(4096, contextLength = 32_768)
+        val repo = repository(ServingSource(payload))
+        val model = record(remoteSize = payload.size.toLong(), digest = sha256(payload))
+        assertTrue(repo.install(model))
+
+        assertEquals(LocalRuntimeSettings.DEFAULT_CONTEXT, repo.configuration(model.id).runtime.contextSize)
+    }
+
+    @Test
+    fun `a context the user chose is not undone by installing the model again`() = runTest {
+        val payload = ggufBytes(4096, contextLength = 2048)
+        val repo = repository(ServingSource(payload))
+        val model = record(remoteSize = payload.size.toLong(), digest = sha256(payload))
+        assertTrue(repo.install(model))
+        repo.updateConfiguration(
+            model.id,
+            LocalModelConfiguration.Defaults.copy(runtime = LocalRuntimeSettings(contextSize = 1024))
+        )
+
+        assertTrue(repo.install(repo.model(model.id)!!))
+
+        assertEquals(1024, repo.configuration(model.id).runtime.contextSize)
+    }
+
+    // ---- listing ----
     @Test
     fun `installed models sort ahead of the ones still to download`() = runTest {
         val payload = ggufBytes(4096)

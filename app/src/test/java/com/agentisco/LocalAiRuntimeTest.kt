@@ -18,6 +18,7 @@ import com.agentisco.local.ggufBytes
 import com.agentisco.local.modelRecord
 import com.agentisco.local.repositoryWithInstalled
 import com.agentisco.local.sha256Hex
+import com.agentisco.local.model.LocalRuntimeSettings
 import com.agentisco.local.runtime.LocalInferenceEngine
 import com.agentisco.settings.model.AIModel
 import com.agentisco.settings.model.LLMProtocol
@@ -104,7 +105,7 @@ class LocalAiRuntimeTest {
     assertEquals("lfm2", model.modelId)
     assertEquals(LocalAiRuntime.PROVIDER_ID, model.providerId)
     // The limits the engine will really allocate, from the model's saved configuration.
-    assertEquals(2048, model.contextWindow)
+    assertEquals(LocalRuntimeSettings.DEFAULT_CONTEXT, model.contextWindow)
     assertEquals(200, model.maxOutputTokens)
     assertTrue(model.capabilities.tools)
     assertTrue(model.capabilities.streaming)

@@ -9,6 +9,9 @@
 // Finish codes returned by nativeComplete:
 //   0 = end of sequence   1 = max tokens   2 = caller stopped   3 = aborted
 //   4 = context full      negative = engine error (see nativeLastError)
+//
+// Of the negatives, -8 is not an engine error: it means the prompt is longer than the
+// context the user configured, so the request should be changed rather than retried.
 
 #include "engine_shared.h"
 #include <android/log.h>
@@ -95,12 +98,20 @@ llama_sampler *build_sampler(const Session *s,
 extern "C" {
 
 JNIEXPORT void JNICALL Java_com_agentisco_local_runtime_LlamaNative_nativeBackendInit(JNIEnv *, jobject) {
+  // llama.cpp describes its computation graph node by node at debug and info level, which
+  // is tens of lines for every token. Each one is a logcat write on the thread that is
+  // trying to decode, so only what the caller has to hear about crosses here.
+  //
+  // GGML_LOG_LEVEL_CONT is deliberately left out: it continues whatever line came before,
+  // and in practice that is the '.' the loader ticks while it reads tensors. Recording one
+  // as the last error would replace the message that mattered with a dot.
   llama_log_set(
       [](ggml_log_level level, const char *text, void *) {
-        if (level == GGML_LOG_LEVEL_ERROR || level == GGML_LOG_LEVEL_CONT) {
-          set_error(text ? text : "engine error");
-        } else {
-          LOGI("%s", text ? text : "");
+        const std::string message(text ? text : "");
+        if (level == GGML_LOG_LEVEL_ERROR) {
+          set_error(message);
+        } else if (level == GGML_LOG_LEVEL_WARN) {
+          LOGI("%s", message.c_str());
         }
       },
       nullptr);
@@ -242,6 +253,18 @@ Java_com_agentisco_local_runtime_LlamaNative_nativeComplete(JNIEnv *env,
   const llama_token eos = llama_vocab_eos(s->vocab);
   const int32_t limit = max_tokens > 0 ? max_tokens : 512;
 
+  // A prompt that cannot fit is a caller error, not an engine fault. Letting decode
+  // try anyway costs tens of seconds of prefill and leaves the KV cache in a state
+  // the next request inherits, all to report "Failed to evaluate prompt" with no way
+  // for the client to say which number has to change.
+  if (tokens.size() + 1 > (size_t) n_ctx) {
+    llama_sampler_free(smpl);
+    set_error("This request needs " + std::to_string(tokens.size()) +
+              " tokens but the context for this model holds " + std::to_string(n_ctx) +
+              ". Raise the context size, or shorten the conversation.");
+    return -8;
+  }
+
   llama_batch batch = llama_batch_init(s->n_batch, 0, 1);
   std::string pending;
   int32_t n_past = 0;
@@ -260,7 +283,7 @@ Java_com_agentisco_local_runtime_LlamaNative_nativeComplete(JNIEnv *env,
   // Each completion is a whole sequence on its own: the context outlives this call,
   // so a KV cache left over from the previous prompt would be attended to by tokens
   // that are writing to the same positions.
-  llama_memory_seq_rm(llama_get_memory(s->ctx), -1, -1, -1);
+  llama_memory_clear(llama_get_memory(s->ctx), false);
 
   // Prefill: the whole prompt, in chunks the context batch can take.
   bool prefill_ok = !tokens.empty();

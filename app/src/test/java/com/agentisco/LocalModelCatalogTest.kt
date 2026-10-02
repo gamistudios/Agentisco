@@ -136,8 +136,21 @@ class LocalModelCatalogTest {
     @Test
     fun `runtime defaults leave the CPU thread count to the device`() {
         val defaults = LocalRuntimeSettings.Defaults
-        assertEquals(2048, defaults.contextSize)
+        assertEquals(4096, defaults.contextSize)
         assertEquals(0, defaults.threadCount)
+    }
+
+    /**
+     * The window has to hold the playbook and the tool list as well as the conversation,
+     * but a model cannot be given more than the weights were trained for.
+     */
+    @Test
+    fun `a model's own context length caps the window it is opened with`() {
+        assertEquals(4096, LocalRuntimeSettings.contextSizeFor(8192L))
+        assertEquals(4096, LocalRuntimeSettings.contextSizeFor(4096L))
+        assertEquals(2048, LocalRuntimeSettings.contextSizeFor(2048L))
+        assertEquals(4096, LocalRuntimeSettings.contextSizeFor(null))
+        assertEquals(4096, LocalRuntimeSettings.contextSizeFor(0L))
     }
 
     // ——— what may never ship in the package ———

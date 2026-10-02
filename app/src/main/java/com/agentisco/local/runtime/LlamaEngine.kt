@@ -176,6 +176,11 @@ class LlamaEngine : LocalModelEngine {
           grammar,
           sink
         )
+        // -8 is the engine declining to start rather than failing: the prompt needs more
+        // context than this model has. A different exception because a request that was
+        // too big says nothing is wrong with the resident model, and burning it would
+        // make the user's next turn pay for a reload that changes nothing.
+        if (code == -8) throw LocalPromptTooLongException(lastError())
         return LocalFinishReason.fromNativeCode(code)
           ?: throw LocalEngineException("Inference failed (engine code $code): " + lastError())
       } finally {
