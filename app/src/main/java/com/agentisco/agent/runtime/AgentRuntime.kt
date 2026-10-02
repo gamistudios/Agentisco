@@ -425,6 +425,7 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
     // prefill before its first word, so it gets exactly that set through a registry that
     // cannot reach past it - and the briefing that goes with it.
     val runRegistry = model.allowedToolNames?.let { toolRegistry.narrowedTo(it) } ?: toolRegistry
+    val onDevice = model.allowedToolNames != null
     val useTools = model.capabilities.tools && runRegistry.tools.isNotEmpty()
     if (!model.capabilities.tools) {
       onEvent(AgentStreamEvent.Status("Selected model does not support tool calling — running in text-only mode."))
@@ -472,7 +473,7 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
     // that does not fit its window, or spends minutes rereading it. Say what the
     // request costs and which part costs it before it goes out, so the number the
     // user is given is one they can act on in Settings.
-    if (model.allowedToolNames != null) {
+    if (onDevice) {
       val window = activePolicy.contextWindow
       val toolTokens = charsToTokens(
         toolSpecs.sumOf { spec -> spec.name.length + spec.description.length + spec.parametersJsonSchema.length }
@@ -483,6 +484,15 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
           AgentStreamEvent.Status(
             "This turn needs ~$promptTokens tokens of the $window this model holds (tools $toolTokens · the rest ${promptTokens - toolTokens}). " +
               "Offer this model fewer tools, or give it a longer context, in Settings → Local Models."
+          )
+        )
+      } else {
+        // A phone reads the whole prompt before it can write its first word, at tens of
+        // tokens a second, so the next half minute of silence is the turn working. Say so
+        // while there is still something to say it about.
+        onEvent(
+          AgentStreamEvent.Status(
+            "This model runs on this device: it reads ~$promptTokens tokens (tools $toolTokens) before its first word."
           )
         )
       }
@@ -619,7 +629,7 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
           }
 
           val err = failure
-          if (err != null && isTransient(err) && attempt < MAX_LLM_ATTEMPTS && currentCoroutineContext().isActive) {
+          if (err != null && isTransient(err, onDevice) && attempt < MAX_LLM_ATTEMPTS && currentCoroutineContext().isActive) {
             // Retry the exact pending request (same conversation state, same
             // tool results) after a backoff. Partial streamed text is kept in
             // the UI and the retry starts a fresh text block.
@@ -1301,9 +1311,16 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
     }
   }
 
-  /** Whether a failure is worth an automatic retry (transient provider/network issues). */
-  private fun isTransient(e: LlmException): Boolean = when (e.kind) {
-    LlmErrorKind.NETWORK, LlmErrorKind.TIMEOUT, LlmErrorKind.SERVER, LlmErrorKind.RATE_LIMIT -> true
+  /**
+   * Whether a failure is worth an automatic retry (transient provider/network issues).
+   *
+   * A model running on the device is not a flaky network: the same prompt costs the same
+   * time again, so a timeout there is answered by a shorter prompt or a longer patience,
+   * never by a second attempt that doubles the wait.
+   */
+  private fun isTransient(e: LlmException, onDevice: Boolean): Boolean = when (e.kind) {
+    LlmErrorKind.NETWORK, LlmErrorKind.TIMEOUT -> !onDevice
+    LlmErrorKind.SERVER, LlmErrorKind.RATE_LIMIT -> true
     else -> e.httpCode?.let { it == 429 || it in 500..599 } ?: false
   }
 

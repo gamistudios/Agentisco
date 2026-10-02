@@ -2,6 +2,8 @@ package com.agentisco
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import com.agentisco.agent.llm.LlmErrorKind
+import com.agentisco.agent.llm.LlmException
 import com.agentisco.agent.llm.LlmFinishReason
 import com.agentisco.agent.llm.LlmMessage
 import com.agentisco.agent.llm.LlmRequest
@@ -80,8 +82,15 @@ class LocalToolPromptTest {
     )
   }
 
-  /** Answers with text, or with one tool call the runtime will try to run. */
-  private class ScriptedLlm(private val call: LlmToolCall?) : LlmService() {
+  /**
+   * Answers with text, or with one tool call the runtime will try to run, or fails with
+   * [failure] for the first [failTimes] requests.
+   */
+  private class ScriptedLlm(
+    private val call: LlmToolCall?,
+    private val failure: LlmException? = null,
+    private val failTimes: Int = Int.MAX_VALUE
+  ) : LlmService() {
     val requests = mutableListOf<LlmRequest>()
     private val turns = AtomicInteger()
 
@@ -93,10 +102,13 @@ class LocalToolPromptTest {
       onEvent: (LlmStreamEvent) -> Unit
     ) {
       requests += request
+      val turn = turns.incrementAndGet()
       val usage = LlmUsage(inputTokens = 10, outputTokens = 5, totalTokens = 15)
       val call = this.call
       onEvent(LlmStreamEvent.Started)
-      if (turns.incrementAndGet() == 1 && call != null) {
+      val error = failure
+      if (error != null && turn <= failTimes) throw error
+      if (turn == 1 && call != null) {
         onEvent(LlmStreamEvent.ToolCallRequested(call))
         onEvent(
           LlmStreamEvent.Completed(
@@ -118,14 +130,20 @@ class LocalToolPromptTest {
   }
 
   /** One turn against a fresh workspace, with [allowed] as the model's own tool set. */
-  private fun runTurn(allowed: Set<String>?, call: LlmToolCall? = null, contextWindow: Int? = 4096): Run {
+  private fun runTurn(
+    allowed: Set<String>?,
+    call: LlmToolCall? = null,
+    contextWindow: Int? = 4096,
+    failure: LlmException? = null,
+    failTimes: Int = Int.MAX_VALUE
+  ): Run {
     val dir = File(ws.root, "project_${System.nanoTime()}")
     File(dir, "src").mkdirs()
     File(dir, "src/App.tsx").writeText("export const value = 1\n")
     val fileSystem = ProjectFileSystem(dir)
     val git = GitRepositoryManager(fileSystem) { _, _ -> GitRunResult(0, "") }
     val terminals = TerminalProcessManager { null }
-    val service = ScriptedLlm(call)
+    val service = ScriptedLlm(call, failure, failTimes)
     val events = mutableListOf<AgentStreamEvent>()
     val runtime = AgentRuntime(fileSystem, terminals, git, service, registryWith()) { null }
     runBlocking {
@@ -205,6 +223,41 @@ class LocalToolPromptTest {
     assertFalse(prompt, prompt.contains("Standards:"))
     assertFalse(prompt, prompt.contains("Workspace files:"))
     assertFalse(prompt, prompt.contains("Method:"))
+  }
+
+  /**
+   * A phone prefills the prompt before its first word, so the wait is the turn working.
+   * Saying what it costs is the only thing that separates that from a hang.
+   */
+  @Test
+  fun `an on-device turn says what it will read before it starts`() {
+    val run = runTurn(allowed = OnDeviceTools.DEFAULT)
+    assertTrue(run.statuses.toString(), run.statuses.any { it.contains("runs on this device") })
+    val cloud = runTurn(allowed = null)
+    assertEquals(cloud.statuses.toString(), 0, cloud.statuses.count { it.contains("runs on this device") })
+  }
+
+  /**
+   * A device that could not answer inside the timeout will not answer inside twice the
+   * timeout: the retry re-reads the same prompt from nothing. A cloud timeout stays
+   * retryable, because there the wait is the network and not the work.
+   */
+  @Test
+  fun `a timeout from an on-device model ends the turn instead of repeating it`() {
+    val run = runTurn(allowed = OnDeviceTools.DEFAULT, failure = LlmException("read timed out", LlmErrorKind.TIMEOUT))
+    assertEquals("the same prompt must be sent once", 1, run.service.requests.size)
+    assertEquals(run.statuses.toString(), 0, run.statuses.count { it.contains("retrying", ignoreCase = true) })
+  }
+
+  @Test
+  fun `a timeout from a cloud model is retried`() {
+    val run = runTurn(
+      allowed = null,
+      failure = LlmException("read timed out", LlmErrorKind.TIMEOUT),
+      failTimes = 1
+    )
+    assertEquals("one retry, then the answer", 2, run.service.requests.size)
+    assertTrue(run.statuses.toString(), run.statuses.any { it.contains("retrying", ignoreCase = true) })
   }
 
   /** Narrowing is not cosmetic: a tool the model was never shown cannot be executed. */
