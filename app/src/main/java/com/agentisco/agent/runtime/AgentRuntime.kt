@@ -1395,11 +1395,38 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
      */
     offeredToolNames: List<String>? = null
   ): String {
-    val compact = offeredToolNames != null
-    val files = fileSystem.getFileTree(project, maxDepth = if (compact) 2 else 3)
+    // An on-device model prefills every character of this before it can answer, at
+    // roughly sixty tokens a second on a mid-range phone, so its briefing is the cost
+    // of the turn rather than the quality of the answer. It gets its name, where it
+    // is, and what it may call - nothing else. Standards the model would have to be
+    // told twice are enforced by the tool gate instead of by wording.
+    if (offeredToolNames != null) {
+      return buildString {
+        append("You are Agentisco, a helpful assistant working in \"${project.name}\" at ${project.path}.")
+        appendLine()
+        if (role != null) {
+          // A brief the user wrote for their own specialist is theirs to pay for; the
+          // built-in identity block is an essay this model has no time for.
+          appendLine(
+            if (role.isCustom) role.prompt()
+            else "You are working as the ${role.name}: ${role.purpose}"
+          )
+        }
+        if (toolsAvailable) {
+          appendLine("Tools you may call: ${offeredToolNames.joinToString(", ")}.")
+          if (planMode) {
+            appendLine("Plan mode is ON: tools that would change something are refused. Answer with the plan.")
+          }
+        } else {
+          appendLine("You have no tools: answer with complete code the user can paste.")
+        }
+      }.trimEnd()
+    }
+
+    val files = fileSystem.getFileTree(project, maxDepth = 3)
     val paths = StringBuilder()
     fun walk(items: List<ProjectFile>, depth: Int) {
-      if (depth > (if (compact) 0 else 2)) return
+      if (depth > 2) return
       for (f in items) {
         paths.appendLine(f.path)
         if (f.isDirectory) walk(f.children, depth + 1)
@@ -1407,25 +1434,19 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
     }
     walk(files, 0)
     return buildString {
-      appendLine("You are Agentisco, ${if (compact) "a" else "an elite"} senior software engineer working inside the mobile IDE \"Agentisco\".")
+      appendLine("You are Agentisco, an elite senior software engineer working inside the mobile IDE \"Agentisco\".")
       appendLine("Active project: ${project.name} (${project.path}).")
       appendLine()
       appendLine("Standards:")
-      if (compact) {
-        appendLine("  - Ship production-quality code: correct, minimal, and consistent with this project's existing style.")
-        appendLine("  - Read a file before changing it, fix the root cause, and stay inside what was asked.")
-        appendLine("  - Never claim a change was built or tested unless you ran it and saw the result, and never leave the workspace half-edited.")
-      } else {
-        appendLine("  - Ship production-quality code: correct, idiomatic, secure, minimal, and consistent with the project's existing conventions, stack and style.")
-        appendLine("  - Reason before acting: understand the goal, read the surrounding code, and choose the simplest design that fully solves the problem. Fix root causes, not symptoms.")
-        appendLine("  - Verify every change with real evidence (build, test, run). Never claim success you have not observed.")
-        appendLine("  - Never leave the workspace broken: no half-applied edits, dangling references, failing builds or stray debug code. If you cannot finish, restore a working state and report exactly what remains.")
-        appendLine("  - Stay in scope: do what was asked, completely. No unrelated refactors, no invented requirements, no placeholders or TODO stubs.")
-        appendLine("  - Be honest and precise: report what you actually did and saw, including failures and uncertainty.")
-      }
+      appendLine("  - Ship production-quality code: correct, idiomatic, secure, minimal, and consistent with the project's existing conventions, stack and style.")
+      appendLine("  - Reason before acting: understand the goal, read the surrounding code, and choose the simplest design that fully solves the problem. Fix root causes, not symptoms.")
+      appendLine("  - Verify every change with real evidence (build, test, run). Never claim success you have not observed.")
+      appendLine("  - Never leave the workspace broken: no half-applied edits, dangling references, failing builds or stray debug code. If you cannot finish, restore a working state and report exactly what remains.")
+      appendLine("  - Stay in scope: do what was asked, completely. No unrelated refactors, no invented requirements, no placeholders or TODO stubs.")
+      appendLine("  - Be honest and precise: report what you actually did and saw, including failures and uncertainty.")
       appendLine()
-      appendLine(if (compact) "Files:" else "Workspace files:")
-      appendLine(paths.toString().take(if (compact) 700 else 4000))
+      appendLine("Workspace files:")
+      appendLine(paths.toString().take(4000))
       if (role != null) {
         // Which seat on the team this run occupies: its lane, its limits, its duty.
         appendLine()
@@ -1439,38 +1460,24 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
       }
       if (toolsAvailable) {
         appendLine()
-        if (compact) {
-          // Each tool already arrives with its own description and arguments, so a
-          // phone-sized model is charged an index rather than the whole method.
-          appendLine("Tools you may call: ${offeredToolNames!!.joinToString(", ")}.")
-          appendLine("Read before you change, verify with run_command, and finish with a plain-text answer saying what you did.")
-          if (planMode && role == null) {
-            appendLine("Plan mode is ON: every tool that would change something is refused. Investigate and present the plan as your answer.")
-          }
-        } else {
-          append(TOOL_PLAYBOOK)
-          // Names and one-liners only: the agent chooses from the description and
-          // pays for the instructions themselves when it does that kind of work.
-          val skills = skillStore.discover(java.io.File(project.path))
-          if (skills.isNotEmpty()) {
-            appendLine()
-            append(com.agentisco.agent.tool.UseSkillTool.index(skills))
-          }
-          // The wording is for the turn whose user decides whether to implement it;
-          // a research role is told to report by its own role block.
-          if (planMode && role == null) {
-            appendLine()
-            append(PLAN_MODE_ADDENDUM)
-          }
+        append(TOOL_PLAYBOOK)
+        // Names and one-liners only: the agent chooses from the description and
+        // pays for the instructions themselves when it does that kind of work.
+        val skills = skillStore.discover(java.io.File(project.path))
+        if (skills.isNotEmpty()) {
+          appendLine()
+          append(com.agentisco.agent.tool.UseSkillTool.index(skills))
+        }
+        // The wording is for the turn whose user decides whether to implement it;
+        // a research role is told to report by its own role block.
+        if (planMode && role == null) {
+          appendLine()
+          append(PLAN_MODE_ADDENDUM)
         }
       } else {
         appendLine()
         appendLine(
-          if (compact) {
-            "This run has no tools: you cannot read, change or run anything here. Answer with complete code the user can paste, state any assumption you had to make, and never claim a change was built or tested."
-          } else {
-            "This model cannot call tools: you cannot read, write or run anything in this workspace, and no tool will answer for you. Work from the files listed above and the conversation, answer with complete code the user can paste rather than descriptions of it, state any assumption you had to make instead of probing for it, and never claim a change was built or tested."
-          }
+          "This model cannot call tools: you cannot read, write or run anything in this workspace, and no tool will answer for you. Work from the files listed above and the conversation, answer with complete code the user can paste rather than descriptions of it, state any assumption you had to make instead of probing for it, and never claim a change was built or tested."
         )
       }
     }

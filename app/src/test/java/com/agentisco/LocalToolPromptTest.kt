@@ -186,8 +186,25 @@ class LocalToolPromptTest {
   fun `a model with no tools offered is told it has none`() {
     val run = runTurn(allowed = emptySet())
     assertEquals(emptyList<String>(), run.toolNames)
-    assertTrue(run.systemPrompt, run.systemPrompt.contains("This run has no tools"))
+    assertTrue(run.systemPrompt, run.systemPrompt.contains("You have no tools"))
     assertTrue(run.statuses.toString(), run.statuses.any { it.contains("No tools are offered") })
+  }
+
+  /**
+   * The briefing is what the phone pays for before it can answer, so it is capped at a
+   * few lines: who the agent is, which project it is in, what it may call. The standards,
+   * the file tree and the method are the cloud model's briefing and are not sent here.
+   */
+  @Test
+  fun `the on-device briefing is only an identity and a tool list`() {
+    val run = runTurn(allowed = OnDeviceTools.DEFAULT)
+    val prompt = run.systemPrompt
+    assertTrue(prompt, prompt.contains("You are Agentisco, a helpful assistant"))
+    assertTrue(prompt, prompt.contains("Tools you may call:"))
+    assertTrue(prompt, prompt.length < 600)
+    assertFalse(prompt, prompt.contains("Standards:"))
+    assertFalse(prompt, prompt.contains("Workspace files:"))
+    assertFalse(prompt, prompt.contains("Method:"))
   }
 
   /** Narrowing is not cosmetic: a tool the model was never shown cannot be executed. */
