@@ -4,6 +4,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -19,6 +20,7 @@ import androidx.compose.material.icons.outlined.Calculate
 import androidx.compose.material.icons.outlined.Compress
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.MailOutline
+import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material.icons.outlined.Security
 import androidx.compose.material3.*
@@ -27,6 +29,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
@@ -41,6 +44,7 @@ import com.agentisco.agent.model.UNLIMITED_ITERATIONS
 import com.agentisco.ui.WorkspaceViewModel
 import com.agentisco.ui.components.AgentTeamCard
 import com.agentisco.ui.components.SkillCard
+import com.agentisco.ui.components.formatModelBytes
 import com.agentisco.ui.theme.*
 
 @Composable
@@ -245,62 +249,41 @@ fun SettingsScreen(
 
     item { BackgroundExecutionCard(viewModel) }
 
-    // AI Providers & Models — managed on their own screen. The provider list
-    // grows long (10+ providers is normal), so embedding it here buried every
-    // setting below it. This card is the doorway instead.
+    // The two AI surfaces, each managed on its own screen: the provider list grows long
+    // (10+ providers is normal) and so does a device with several models on it, so
+    // embedding either here buried every setting below it.
     item {
       val providers by viewModel.providers.collectAsState()
       val models by viewModel.aiModels.collectAsState()
-      val providerCount = providers.size
-      val modelCount = models.size
+      val localModels by viewModel.localModels.collectAsState()
+      val installed = localModels.count { it.installed }
+      val bytesOnDisk = localModels.filter { it.installed }.sumOf { it.sizeBytes }
 
-      Card(
-        modifier = Modifier
-          .fillMaxWidth()
-          .clip(RoundedCornerShape(12.dp))
-          .border(1.dp, DarkBorder, RoundedCornerShape(12.dp))
-          .clickable { onNavigate(AppDestination.AI_PROVIDERS) }
-          .testTag("card_ai_providers")
-      ) {
-        Row(
-          modifier = Modifier
-            .fillMaxWidth()
-            .padding(14.dp),
-          horizontalArrangement = Arrangement.SpaceBetween,
-          verticalAlignment = Alignment.CenterVertically
-        ) {
-          Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.weight(1f)
-          ) {
-            Icon(
-              Icons.Outlined.Psychology,
-              contentDescription = null,
-              tint = ElectricBlue,
-              modifier = Modifier.size(18.dp)
-            )
-            Spacer(modifier = Modifier.width(10.dp))
-            Column {
-              Text("AI Providers", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-              Text(
-                if (providerCount == 0) {
-                  "No providers configured — tap to add one"
-                } else {
-                  "$providerCount provider${if (providerCount == 1) "" else "s"} · $modelCount model${if (modelCount == 1) "" else "s"}"
-                },
-                color = TextMuted,
-                fontSize = 11.sp
-              )
-            }
-          }
-          Icon(
-            Icons.Default.ChevronRight,
-            contentDescription = "Open AI providers",
-            tint = TextMuted,
-            modifier = Modifier.size(18.dp)
-          )
-        }
-      }
+      SettingsNavigationCard(
+        icon = Icons.Outlined.Psychology,
+        title = "AI Providers",
+        summary = if (providers.isEmpty()) {
+          "No providers configured — tap to add one"
+        } else {
+          "${providers.size} provider${if (providers.size == 1) "" else "s"} · ${models.size} model${if (models.size == 1) "" else "s"}"
+        },
+        onClick = { onNavigate(AppDestination.AI_PROVIDERS) },
+        tag = "card_ai_providers"
+      )
+
+      Spacer(modifier = Modifier.height(16.dp))
+
+      SettingsNavigationCard(
+        icon = Icons.Outlined.Memory,
+        title = "Local Models",
+        summary = if (installed == 0) {
+          "No models installed — tap to add one"
+        } else {
+          "$installed installed · ${formatModelBytes(bytesOnDisk)} on disk"
+        },
+        onClick = { onNavigate(AppDestination.LOCAL_MODELS) },
+        tag = "card_local_models"
+      )
     }
 
     // File Editing Permission Card (Section 22)
@@ -1335,6 +1318,60 @@ private fun PermissionRadioItem(
       fontSize = 13.sp,
       fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal
     )
+  }
+}
+
+/**
+ * Doorway to a surface that has its own screen. Settings keeps these instead of the
+ * lists themselves — a provider list or a device with several models on it pushes
+ * everything else below the fold — and the summary carries the one number that says
+ * whether there is anything to do on the other side.
+ */
+@Composable
+internal fun SettingsNavigationCard(
+  icon: ImageVector,
+  title: String,
+  summary: String,
+  onClick: () -> Unit,
+  tag: String
+) {
+  Card(
+    onClick = onClick,
+    modifier = Modifier
+      .fillMaxWidth()
+      .testTag(tag),
+    shape = RoundedCornerShape(12.dp),
+    colors = CardDefaults.cardColors(containerColor = DarkSurfaceElevated),
+    border = BorderStroke(1.dp, DarkBorder)
+  ) {
+    Row(
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(14.dp),
+      horizontalArrangement = Arrangement.spacedBy(12.dp),
+      verticalAlignment = Alignment.CenterVertically
+    ) {
+      Box(
+        modifier = Modifier
+          .size(34.dp)
+          .clip(RoundedCornerShape(10.dp))
+          .background(ElectricBlue.copy(alpha = 0.15f))
+          .border(1.dp, ElectricBlue.copy(alpha = 0.45f), RoundedCornerShape(10.dp)),
+        contentAlignment = Alignment.Center
+      ) {
+        Icon(icon, contentDescription = null, tint = ElectricBlueGlow, modifier = Modifier.size(18.dp))
+      }
+      Column(modifier = Modifier.weight(1f)) {
+        Text(title, color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        Text(summary, color = TextSecondary, fontSize = 11.sp)
+      }
+      Icon(
+        Icons.Default.ChevronRight,
+        contentDescription = "Open $title",
+        tint = ElectricBlueGlow.copy(alpha = 0.7f),
+        modifier = Modifier.size(18.dp)
+      )
+    }
   }
 }
 

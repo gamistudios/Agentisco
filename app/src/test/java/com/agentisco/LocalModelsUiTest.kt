@@ -5,9 +5,11 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ApplicationProvider
+import com.agentisco.core.model.AppDestination
 import com.agentisco.data.local.ProviderConfigStore
 import com.agentisco.data.repository.LocalModelInstallState
 import com.agentisco.data.repository.WorkspaceRepository
@@ -33,6 +35,8 @@ import com.agentisco.ui.components.LocalModelsSection
 import com.agentisco.ui.components.LocalSettingsInput
 import com.agentisco.ui.components.formatDuration
 import com.agentisco.ui.components.formatModelBytes
+import com.agentisco.ui.screens.AiProvidersScreen
+import com.agentisco.ui.screens.LocalModelsScreen
 import com.agentisco.ui.theme.AgentiscoTheme
 import com.github.takahirom.roborazzi.RobolectricDeviceQualifiers
 import kotlinx.coroutines.Dispatchers
@@ -362,6 +366,34 @@ class LocalModelsUiTest {
     // Select action to tap by accident.
     compose.onNodeWithText("Installed · in use").assertIsDisplayed()
     compose.onNodeWithText("Select").assertDoesNotExist()
+  }
+
+  /** The page Settings opens: the section under a header that returns where it came from. */
+  @Test
+  fun `the local models page carries the section and returns to settings`() = runTest {
+    val viewModel = viewModelWith("lfm2")
+    var destination: AppDestination? = null
+    compose.setContent {
+      AgentiscoTheme { LocalModelsScreen(viewModel, onNavigate = { destination = it }) }
+    }
+
+    compose.onNodeWithText("Local Models").assertIsDisplayed()
+    compose.onNodeWithText("On-device models").assertIsDisplayed()
+    compose.onNodeWithText("Lfm2").assertIsDisplayed()
+
+    compose.onNodeWithTag("btn_local_models_back").performClick()
+    assertEquals(AppDestination.SETTINGS, destination)
+  }
+
+  @Test
+  fun `the provider page no longer manages model files`() = runTest {
+    val viewModel = viewModelWith("lfm2")
+    compose.setContent {
+      AgentiscoTheme { AiProvidersScreen(viewModel, onNavigate = {}) }
+    }
+
+    compose.onNodeWithText("Cloud AI").assertIsDisplayed()
+    compose.onNodeWithText("On-device models").assertDoesNotExist()
   }
 
   @Test

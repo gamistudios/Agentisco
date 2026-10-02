@@ -3,7 +3,6 @@ package com.agentisco.ui.screens
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -22,8 +21,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -33,30 +30,28 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.agentisco.core.model.AppDestination
 import com.agentisco.ui.WorkspaceViewModel
-import com.agentisco.ui.components.AIProvidersSection
-import com.agentisco.ui.theme.*
+import com.agentisco.ui.components.LocalModelsSection
+import com.agentisco.ui.theme.DarkBackground
+import com.agentisco.ui.theme.DarkBorder
+import com.agentisco.ui.theme.DarkSurface
+import com.agentisco.ui.theme.TextMuted
+import com.agentisco.ui.theme.TextPrimary
 
 /**
- * Dedicated provider-management surface.
+ * Management surface for the models that run on this device.
  *
- * Providers and their models can grow long (a dozen providers is normal), and
- * embedding that list in [SettingsScreen] pushed every other setting far below
- * the fold. Settings now holds only a navigation card that opens this screen,
- * so provider management gets the whole scroll area and the rest of Settings
- * stays reachable.
+ * Separate from [AiProvidersScreen] because the two manage different objects: a provider
+ * row is an address and a secret, a model row is a file on disk with a download to resume,
+ * a size to reclaim and runtime settings of its own. Both are doorways from the same place
+ * in Settings, and a model still reaches the agent as a provider — only its management
+ * lives here.
  */
 @Composable
-fun AiProvidersScreen(
+fun LocalModelsScreen(
   viewModel: WorkspaceViewModel,
   onNavigate: (AppDestination) -> Unit,
   modifier: Modifier = Modifier
 ) {
-  val providers by viewModel.providers.collectAsState()
-  val models by viewModel.aiModels.collectAsState()
-
-  val providerCount = providers.size
-  val modelCount = models.size
-
   LazyColumn(
     modifier = modifier
       .fillMaxSize()
@@ -69,19 +64,12 @@ fun AiProvidersScreen(
       Row(verticalAlignment = Alignment.CenterVertically) {
         IconButton(
           onClick = { onNavigate(AppDestination.SETTINGS) },
-          modifier = Modifier.size(32.dp).testTag("btn_ai_providers_back")
+          modifier = Modifier.size(32.dp).testTag("btn_local_models_back")
         ) {
           Icon(Icons.Default.ChevronLeft, contentDescription = "Back to settings", tint = TextMuted)
         }
         Spacer(modifier = Modifier.width(6.dp))
-        Column {
-          Text("AI Providers & Models", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-          Text(
-            "$providerCount provider${if (providerCount == 1) "" else "s"} · $modelCount model${if (modelCount == 1) "" else "s"} configured",
-            color = TextMuted,
-            fontSize = 12.sp
-          )
-        }
+        Text("Local Models", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
       }
     }
 
@@ -93,9 +81,9 @@ fun AiProvidersScreen(
           .border(1.dp, DarkBorder, RoundedCornerShape(12.dp)),
         colors = CardDefaults.cardColors(containerColor = DarkSurface)
       ) {
-        // The section itself is not scrollable; this LazyColumn provides the
-        // scrolling for it (nesting a verticalScroll Column here would crash).
-        AIProvidersSection(viewModel = viewModel, modifier = Modifier.padding(14.dp))
+        // The section itself is not scrollable; this LazyColumn provides the scrolling
+        // for it (nesting a verticalScroll Column here would crash).
+        LocalModelsSection(viewModel = viewModel, modifier = Modifier.padding(14.dp))
       }
     }
 

@@ -301,6 +301,13 @@ fun CommandPaletteDialog(
         destination = AppDestination.AI_PROVIDERS
       ),
       PaletteAction(
+        id = "manage_local_models",
+        title = "Manage on-device models",
+        category = "Settings",
+        icon = Icons.Outlined.Memory,
+        destination = AppDestination.LOCAL_MODELS
+      ),
+      PaletteAction(
         id = "settings_permissions",
         title = "Configure Agent Permissions & Tool Guards",
         category = "Settings",

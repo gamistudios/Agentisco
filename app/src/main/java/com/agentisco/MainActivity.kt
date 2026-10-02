@@ -277,6 +277,10 @@ fun AgentIDEApp(
             viewModel = viewModel,
             onNavigate = { viewModel.navigateTo(it) }
           )
+          AppDestination.LOCAL_MODELS -> LocalModelsScreen(
+            viewModel = viewModel,
+            onNavigate = { viewModel.navigateTo(it) }
+          )
         }
       }
     }

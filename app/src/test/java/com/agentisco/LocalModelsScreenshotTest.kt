@@ -2,17 +2,17 @@ package com.agentisco
 
 import android.content.Context
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.Memory
+import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
@@ -23,8 +23,6 @@ import com.agentisco.data.repository.LocalModelInstallState
 import com.agentisco.data.repository.WorkspaceRepository
 import com.agentisco.local.FakeEngine
 import com.agentisco.local.LocalAiRuntime
-import com.agentisco.local.NoRemoteAssets
-import com.agentisco.local.ServingSource
 import com.agentisco.local.ggufBytes
 import com.agentisco.local.model.LocalModel
 import com.agentisco.local.model.LocalModelInstallStatus
@@ -37,11 +35,10 @@ import com.agentisco.settings.model.LLMProtocol
 import com.agentisco.settings.model.ModelCapabilities
 import com.agentisco.ui.WorkspaceViewModel
 import com.agentisco.ui.components.LocalModelCard
-import com.agentisco.ui.components.LocalModelsSection
+import com.agentisco.ui.screens.LocalModelsScreen
+import com.agentisco.ui.screens.SettingsNavigationCard
 import com.agentisco.ui.theme.AgentiscoTheme
 import com.agentisco.ui.theme.DarkBackground
-import com.agentisco.ui.theme.DarkBorder
-import com.agentisco.ui.theme.DarkSurface
 import com.github.takahirom.roborazzi.RobolectricDeviceQualifiers
 import com.github.takahirom.roborazzi.captureRoboImage
 import kotlinx.coroutines.Dispatchers
@@ -163,9 +160,9 @@ class LocalModelsScreenshotTest {
     compose.onRoot().captureRoboImage(filePath = "src/test/screenshots/local_model_states.png")
   }
 
-  /** The section the way AiProvidersScreen frames it, over a device that has a model. */
+  /** The page itself, over a device that has one model installed. */
   @Test
-  fun `the section over a real install frames the list inside one card`() = runBlocking {
+  fun `the local models page frames the list inside one card`() = runBlocking {
     val repository = repositoryWithInstalled(context, payload, "lfm2")
     val local = LocalAiRuntime(
       repository,
@@ -184,29 +181,49 @@ class LocalModelsScreenshotTest {
 
     compose.setContent {
       AgentiscoTheme {
+        LocalModelsScreen(viewModel, onNavigate = {})
+      }
+    }
+
+    compose.onNodeWithText("Local Models").assertIsDisplayed()
+    compose.onNodeWithText("On-device models").assertIsDisplayed()
+    compose.onNodeWithText("Lfm2").assertIsDisplayed()
+    compose.onRoot().captureRoboImage(filePath = "src/test/screenshots/local_models_section.png")
+  }
+
+  /** The two doorways Settings offers for AI configuration, as the page shows them. */
+  @Test
+  fun `the AI doorways in settings are one card each and read as a pair`() {
+    compose.setContent {
+      AgentiscoTheme {
         Column(
           modifier = Modifier
             .fillMaxSize()
             .background(DarkBackground)
-            .padding(horizontal = 16.dp, vertical = 14.dp)
+            .padding(16.dp),
+          verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-          Column(
-            modifier = Modifier
-              .fillMaxWidth()
-              .clip(RoundedCornerShape(12.dp))
-              .border(1.dp, DarkBorder, RoundedCornerShape(12.dp))
-              .background(DarkSurface)
-              .padding(14.dp)
-              .testTag("local_models_card")
-          ) {
-            LocalModelsSection(viewModel)
-          }
+          SettingsNavigationCard(
+            icon = Icons.Outlined.Psychology,
+            title = "AI Providers",
+            summary = "3 providers · 12 models",
+            onClick = {},
+            tag = "card_ai_providers"
+          )
+          SettingsNavigationCard(
+            icon = Icons.Outlined.Memory,
+            title = "Local Models",
+            summary = "1 installed · 142 MB on disk",
+            onClick = {},
+            tag = "card_local_models"
+          )
         }
       }
     }
 
-    compose.onNodeWithText("On-device models").assertExists()
-    compose.onNodeWithText("Lfm2").assertExists()
-    compose.onRoot().captureRoboImage(filePath = "src/test/screenshots/local_models_section.png")
+    compose.onNodeWithText("AI Providers").assertIsDisplayed()
+    compose.onNodeWithText("Local Models").assertIsDisplayed()
+    compose.onNodeWithText("1 installed · 142 MB on disk").assertIsDisplayed()
+    compose.onRoot().captureRoboImage(filePath = "src/test/screenshots/settings_ai_doorways.png")
   }
 }

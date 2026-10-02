@@ -62,10 +62,10 @@ import com.agentisco.ui.theme.*
 /**
  * Management surface for models that run on this device.
  *
- * Lives on the AI screen because it manages the same thing the cloud providers do — the
- * models the agent can be pointed at — with files instead of API keys. A model becomes
- * selectable only once its bytes are on disk and verified, so what this row shows is
- * read from the install, never remembered from a previous launch.
+ * Lives on [com.agentisco.ui.screens.LocalModelsScreen] because it manages the same thing
+ * the cloud providers do — the models the agent can be pointed at — with files instead of
+ * API keys. A model becomes selectable only once its bytes are on disk and verified, so
+ * what this row shows is read from the install, never remembered from a previous launch.
  */
 @Composable
 fun LocalModelsSection(

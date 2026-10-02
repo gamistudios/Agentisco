@@ -90,7 +90,7 @@ fun ModelSelectorSheet(
             .padding(16.dp)
         ) {
           Text(
-            text = "No models configured yet.\nAdd a provider and its models in Settings → AI Providers.",
+            text = "No models configured yet.\nAdd a provider in Settings → AI Providers, or install a model in Settings → Local Models.",
             color = TextMuted,
             fontSize = 12.sp
           )

@@ -10,5 +10,6 @@ enum class AppDestination {
   GIT,
   BUILD_RUN,
   SETTINGS,
-  AI_PROVIDERS
+  AI_PROVIDERS,
+  LOCAL_MODELS
 }
