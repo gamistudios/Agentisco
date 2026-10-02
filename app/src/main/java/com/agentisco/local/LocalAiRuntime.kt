@@ -190,6 +190,7 @@ class LocalAiRuntime(
       displayName = model.name + if (model.quantization.isBlank()) "" else " (${model.quantization})",
       contextWindow = model.configuration.runtime.contextSize,
       maxOutputTokens = model.configuration.generation.maxOutputTokens,
+      allowedToolNames = model.configuration.toolsOrDefault(),
       capabilities = ModelCapabilities(
         tools = caps?.supportsTools ?: true,
         images = false,

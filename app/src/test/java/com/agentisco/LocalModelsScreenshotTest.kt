@@ -191,6 +191,33 @@ class LocalModelsScreenshotTest {
     compose.onRoot().captureRoboImage(filePath = "src/test/screenshots/local_models_section.png")
   }
 
+  /** Choosing an on-device model's tools is a trade against numbers the page shows. */
+  @Test
+  fun `the page shows what each tool costs the model in use`() = runBlocking {
+    val repository = repositoryWithInstalled(context, payload, "lfm2")
+    val local = LocalAiRuntime(
+      repository,
+      LocalInferenceEngine(repository, FakeEngine(), Dispatchers.Unconfined),
+      dispatcher = Dispatchers.Unconfined
+    ).also { runtime = it }
+    val store = ProviderConfigStore().apply {
+      upsertProvider(
+        AIProvider("cloud", "Cloud AI", "https://cloud.test/v1", LLMProtocol.OPENAI_CHAT_COMPLETIONS, hasApiKey = true),
+        "sk-cloud-key"
+      )
+      upsertModel(AIModel("cloud-model", "cloud", "big-model", "Big Model", capabilities = ModelCapabilities(tools = true)))
+    }
+    val viewModel = WorkspaceViewModel(WorkspaceRepository(context = null, providerStore = store, localAi = local))
+    viewModel.localModelSelectable("lfm2")?.let(viewModel::selectModel)
+
+    compose.setContent {
+      AgentiscoTheme { LocalModelsScreen(viewModel, onNavigate = {}) }
+    }
+
+    compose.onNodeWithText("Tools offered").assertIsDisplayed()
+    compose.onRoot().captureRoboImage(filePath = "src/test/screenshots/local_model_tools.png")
+  }
+
   /** The two doorways Settings offers for AI configuration, as the page shows them. */
   @Test
   fun `the AI doorways in settings are one card each and read as a pair`() {

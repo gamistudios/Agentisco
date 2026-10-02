@@ -1423,6 +1423,12 @@ class WorkspaceViewModel(
     localStore?.resetConfiguration(modelId)
   }
 
+  /**
+   * The tools an on-device model can be offered, each with the share of the prompt it
+   * carries — the number a user has to trade against the model's context.
+   */
+  fun localToolChoices(): List<com.agentisco.agent.tool.ToolOffering> = repository.offerableTools()
+
   /** What the model file itself says — architecture, quantization, tensor count. */
   fun localModelMetadata(modelId: String): com.agentisco.local.model.GgufMetadata? {
     val store = localStore ?: return null

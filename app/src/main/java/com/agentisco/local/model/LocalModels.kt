@@ -114,10 +114,26 @@ data class LocalGenerationSettings(
 /** Everything the user can tune for one installed local model. */
 data class LocalModelConfiguration(
   val runtime: LocalRuntimeSettings = LocalRuntimeSettings.Defaults,
-  val generation: LocalGenerationSettings = LocalGenerationSettings.Defaults
+  val generation: LocalGenerationSettings = LocalGenerationSettings.Defaults,
+  /**
+   * The tools this model is offered. Every tool costs its description and its JSON
+   * schema in the prompt the phone must prefill before the first word, so an
+   * on-device model is handed a chosen set rather than the whole registry.
+   *
+   * Null is "the built-in default set" rather than a copy of it, which is what keeps a
+   * model added before this existed from silently inheriting a frozen, possibly stale,
+   * list — and what lets a later, better-chosen default reach it. An empty set is a
+   * deliberate answer: this model gets no tools at all.
+   */
+  val allowedTools: Set<String>? = null
 ) {
   val isDefault: Boolean
-    get() = this == Defaults
+    get() = runtime == LocalRuntimeSettings.Defaults &&
+      generation == LocalGenerationSettings.Defaults &&
+      (allowedTools == null || allowedTools == com.agentisco.agent.tool.OnDeviceTools.DEFAULT)
+
+  /** The tool set a run with this configuration may be offered. */
+  fun toolsOrDefault(): Set<String> = allowedTools ?: com.agentisco.agent.tool.OnDeviceTools.DEFAULT
 
   companion object {
     val Defaults = LocalModelConfiguration()

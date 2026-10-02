@@ -164,6 +164,8 @@ class LocalModelStore(private val context: Context? = null) {
       put("topP", configuration.generation.topP)
       put("repeatPenalty", configuration.generation.repeatPenalty)
     })
+    // Absent means "the default set", which is not the same as an empty one.
+    configuration.allowedTools?.let { names -> put("tools", JSONArray(names.toList())) }
   }
 
   private fun JSONObject?.toModel(): LocalModel? {
@@ -204,7 +206,10 @@ class LocalModelStore(private val context: Context? = null) {
             topP = generation?.optDouble("topP", 1.0) ?: 1.0,
             repeatPenalty = generation?.optDouble("repeatPenalty", LocalGenerationSettings.DEFAULT_REPEAT_PENALTY)
               ?: LocalGenerationSettings.DEFAULT_REPEAT_PENALTY
-          )
+          ),
+          allowedTools = obj.optJSONArray("tools")?.let { stored ->
+            (0 until stored.length()).map { stored.optString(it) }.toSet()
+          }
         )
       )
     }.getOrNull()

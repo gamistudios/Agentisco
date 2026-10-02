@@ -11,6 +11,7 @@ import com.agentisco.agent.compact.CompactTokenMeter
 import com.agentisco.agent.compact.ContextTokenUsage
 import com.agentisco.agent.compact.ManualCompact
 import com.agentisco.agent.compact.buildCompactSummaryMessage
+import com.agentisco.agent.compact.charsToTokens
 import com.agentisco.agent.compact.estimateMessageTokens
 import com.agentisco.agent.compact.groupByAssistantStartedRounds
 import com.agentisco.agent.llm.LlmErrorKind
@@ -420,9 +421,15 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
     onEvent(AgentStreamEvent.TaskStarted(prompt))
 
     // Pre-flight capability validation: never silently send tool calls a model can't honor.
-    val useTools = model.capabilities.tools
-    if (!useTools) {
+    // A model that names the tools it may be offered is one whose prompt a phone has to
+    // prefill before its first word, so it gets exactly that set through a registry that
+    // cannot reach past it - and the briefing that goes with it.
+    val runRegistry = model.allowedToolNames?.let { toolRegistry.narrowedTo(it) } ?: toolRegistry
+    val useTools = model.capabilities.tools && runRegistry.tools.isNotEmpty()
+    if (!model.capabilities.tools) {
       onEvent(AgentStreamEvent.Status("Selected model does not support tool calling — running in text-only mode."))
+    } else if (runRegistry.tools.isEmpty()) {
+      onEvent(AgentStreamEvent.Status("No tools are offered to this model — it answers in text."))
     }
 
     activePolicy = compactPolicy ?: CompactPolicyConfig.forModel(model.contextWindow, model.maxOutputTokens)
@@ -444,6 +451,7 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
     // The board is read, not joined, here: taking the seat after the prompt is
     // built is what keeps this run from listing itself as another agent, and it
     // means a run that fails before it starts has taken nothing to leave behind.
+    val toolSpecs = if (useTools) runRegistry.specs() else emptyList()
     val transcript = buildTranscript(
       project = project,
       useTools = useTools,
@@ -454,10 +462,31 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
       resume = resume,
       planMode = permissions().planMode,
       role = role,
-      teamActivity = teamBoard?.promptBlock(excludingId = null) ?: ""
+      teamActivity = teamBoard?.promptBlock(excludingId = null) ?: "",
+      offeredToolNames = if (model.allowedToolNames == null) null else runRegistry.tools.map { tool -> tool.name }
     )
     val messages = transcript.messages
     val rowIds = transcript.rowIds
+
+    // A cloud model gets away with a long briefing; an on-device one refuses a prompt
+    // that does not fit its window, or spends minutes rereading it. Say what the
+    // request costs and which part costs it before it goes out, so the number the
+    // user is given is one they can act on in Settings.
+    if (model.allowedToolNames != null) {
+      val window = activePolicy.contextWindow
+      val toolTokens = charsToTokens(
+        toolSpecs.sumOf { spec -> spec.name.length + spec.description.length + spec.parametersJsonSchema.length }
+      )
+      val promptTokens = estimateMessageTokens(messages) + toolTokens
+      if (promptTokens + (model.maxOutputTokens ?: 0) > window) {
+        onEvent(
+          AgentStreamEvent.Status(
+            "This turn needs ~$promptTokens tokens of the $window this model holds (tools $toolTokens · the rest ${promptTokens - toolTokens}). " +
+              "Offer this model fewer tools, or give it a longer context, in Settings → Local Models."
+          )
+        )
+      }
+    }
 
     /**
      * Replaces the transcript with a compressed one, keeping [rowIds] aligned.
@@ -555,7 +584,7 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
               apiKey = apiKey,
               request = LlmRequest(
                 messages = messages,
-                tools = if (useTools) toolRegistry.specs() else emptyList(),
+                tools = toolSpecs,
                 maxOutputTokens = model.maxOutputTokens,
                 conversationKey = sessionId
               )
@@ -699,7 +728,7 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
                   if (!currentCoroutineContext().isActive) {
                     call to ToolResult(success = false, error = "Agent task cancelled")
                   } else {
-                    call to executeToolCall(call, project, permissions(), terminalSession, askUserDecision, onEvent, modifiedFiles)
+                    call to executeToolCall(call, runRegistry, project, permissions(), terminalSession, askUserDecision, onEvent, modifiedFiles)
                   }
                 }
                 outcome
@@ -906,7 +935,8 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
     resume: Boolean,
     planMode: Boolean = false,
     role: com.agentisco.agent.model.AgentRole? = null,
-    teamActivity: String = ""
+    teamActivity: String = "",
+    offeredToolNames: List<String>? = null
   ): Transcript {
     val messages = mutableListOf<LlmMessage>()
     // Persisted rowId each message came from (0 = produced by this run), so a
@@ -917,7 +947,12 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
       rowIds.add(rowId)
     }
 
-    add(LlmMessage(LlmRole.SYSTEM, buildSystemPrompt(project, useTools, planMode, role, teamActivity)))
+    add(
+      LlmMessage(
+        LlmRole.SYSTEM,
+        buildSystemPrompt(project, useTools, planMode, role, teamActivity, offeredToolNames)
+      )
+    )
 
     val priorCompaction = sessionId?.let { sink?.latestCompaction(it) }
     val compactedThrough = priorCompaction?.summarizedThroughRowId ?: 0L
@@ -1171,6 +1206,7 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
   /** Validates, permission-checks, and executes one tool call; emits its events. */
   private suspend fun executeToolCall(
     call: LlmToolCall,
+    registry: AgentToolRegistry,
     project: Project,
     permissions: AgentPermissions,
     terminalSession: TerminalSession,
@@ -1182,10 +1218,11 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
     Log.d(TAG, "tool call id=${call.id} name=\"$requestedName\" args=${call.argumentsJson.take(300)}")
 
     // Never let an undefined/blank tool name reach the executor: return a
-    // structured tool error the model can correct.
-    val tool = requestedName.takeIf { it.isNotEmpty() && it != "null" }?.let { toolRegistry.get(it) }
+    // structured tool error the model can correct. The run's own registry decides,
+    // so a tool this model was never offered cannot be reached by naming it.
+    val tool = requestedName.takeIf { it.isNotEmpty() && it != "null" }?.let { registry.get(it) }
     if (requestedName.isEmpty() || requestedName == "null" || tool == null) {
-      val reason = "Error: \"$requestedName\" is not an available tool. Available tools: ${toolRegistry.tools.joinToString(", ") { it.name }}."
+      val reason = "Error: \"$requestedName\" is not an available tool. Available tools: ${registry.tools.joinToString(", ") { it.name }}."
       Log.w(TAG, "unresolved tool call id=${call.id} name=\"$requestedName\"")
       onEvent(AgentStreamEvent.ToolFinished(requestedName.ifBlank { "unknown" }, false, "Unknown tool \"$requestedName\"", reason, null, call.id))
       return ToolResult(success = false, error = reason)
@@ -1350,12 +1387,19 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
     toolsAvailable: Boolean,
     planMode: Boolean,
     role: com.agentisco.agent.model.AgentRole? = null,
-    teamActivity: String = ""
+    teamActivity: String = "",
+    /**
+     * The names of the tools this run is offered, when it is offered a chosen set.
+     * Non-null marks a model that pays for every character of this briefing in
+     * prefill time on a phone, which is what makes the prompt short.
+     */
+    offeredToolNames: List<String>? = null
   ): String {
-    val files = fileSystem.getFileTree(project, maxDepth = 3)
+    val compact = offeredToolNames != null
+    val files = fileSystem.getFileTree(project, maxDepth = if (compact) 2 else 3)
     val paths = StringBuilder()
     fun walk(items: List<ProjectFile>, depth: Int) {
-      if (depth > 2) return
+      if (depth > (if (compact) 0 else 2)) return
       for (f in items) {
         paths.appendLine(f.path)
         if (f.isDirectory) walk(f.children, depth + 1)
@@ -1363,19 +1407,25 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
     }
     walk(files, 0)
     return buildString {
-      appendLine("You are Agentisco, an elite senior software engineer working inside the mobile IDE \"Agentisco\".")
+      appendLine("You are Agentisco, ${if (compact) "a" else "an elite"} senior software engineer working inside the mobile IDE \"Agentisco\".")
       appendLine("Active project: ${project.name} (${project.path}).")
       appendLine()
       appendLine("Standards:")
-      appendLine("  - Ship production-quality code: correct, idiomatic, secure, minimal, and consistent with the project's existing conventions, stack and style.")
-      appendLine("  - Reason before acting: understand the goal, read the surrounding code, and choose the simplest design that fully solves the problem. Fix root causes, not symptoms.")
-      appendLine("  - Verify every change with real evidence (build, test, run). Never claim success you have not observed.")
-      appendLine("  - Never leave the workspace broken: no half-applied edits, dangling references, failing builds or stray debug code. If you cannot finish, restore a working state and report exactly what remains.")
-      appendLine("  - Stay in scope: do what was asked, completely. No unrelated refactors, no invented requirements, no placeholders or TODO stubs.")
-      appendLine("  - Be honest and precise: report what you actually did and saw, including failures and uncertainty.")
+      if (compact) {
+        appendLine("  - Ship production-quality code: correct, minimal, and consistent with this project's existing style.")
+        appendLine("  - Read a file before changing it, fix the root cause, and stay inside what was asked.")
+        appendLine("  - Never claim a change was built or tested unless you ran it and saw the result, and never leave the workspace half-edited.")
+      } else {
+        appendLine("  - Ship production-quality code: correct, idiomatic, secure, minimal, and consistent with the project's existing conventions, stack and style.")
+        appendLine("  - Reason before acting: understand the goal, read the surrounding code, and choose the simplest design that fully solves the problem. Fix root causes, not symptoms.")
+        appendLine("  - Verify every change with real evidence (build, test, run). Never claim success you have not observed.")
+        appendLine("  - Never leave the workspace broken: no half-applied edits, dangling references, failing builds or stray debug code. If you cannot finish, restore a working state and report exactly what remains.")
+        appendLine("  - Stay in scope: do what was asked, completely. No unrelated refactors, no invented requirements, no placeholders or TODO stubs.")
+        appendLine("  - Be honest and precise: report what you actually did and saw, including failures and uncertainty.")
+      }
       appendLine()
-      appendLine("Workspace files:")
-      appendLine(paths.toString().take(4000))
+      appendLine(if (compact) "Files:" else "Workspace files:")
+      appendLine(paths.toString().take(if (compact) 700 else 4000))
       if (role != null) {
         // Which seat on the team this run occupies: its lane, its limits, its duty.
         appendLine()
@@ -1389,23 +1439,39 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
       }
       if (toolsAvailable) {
         appendLine()
-        append(TOOL_PLAYBOOK)
-        // Names and one-liners only: the agent chooses from the description and
-        // pays for the instructions themselves when it does that kind of work.
-        val skills = skillStore.discover(java.io.File(project.path))
-        if (skills.isNotEmpty()) {
-          appendLine()
-          append(com.agentisco.agent.tool.UseSkillTool.index(skills))
-        }
-        // The wording is for the turn whose user decides whether to implement it;
-        // a research role is told to report by its own role block.
-        if (planMode && role == null) {
-          appendLine()
-          append(PLAN_MODE_ADDENDUM)
+        if (compact) {
+          // Each tool already arrives with its own description and arguments, so a
+          // phone-sized model is charged an index rather than the whole method.
+          appendLine("Tools you may call: ${offeredToolNames!!.joinToString(", ")}.")
+          appendLine("Read before you change, verify with run_command, and finish with a plain-text answer saying what you did.")
+          if (planMode && role == null) {
+            appendLine("Plan mode is ON: every tool that would change something is refused. Investigate and present the plan as your answer.")
+          }
+        } else {
+          append(TOOL_PLAYBOOK)
+          // Names and one-liners only: the agent chooses from the description and
+          // pays for the instructions themselves when it does that kind of work.
+          val skills = skillStore.discover(java.io.File(project.path))
+          if (skills.isNotEmpty()) {
+            appendLine()
+            append(com.agentisco.agent.tool.UseSkillTool.index(skills))
+          }
+          // The wording is for the turn whose user decides whether to implement it;
+          // a research role is told to report by its own role block.
+          if (planMode && role == null) {
+            appendLine()
+            append(PLAN_MODE_ADDENDUM)
+          }
         }
       } else {
         appendLine()
-        appendLine("This model cannot call tools: you cannot read, write or run anything in this workspace, and no tool will answer for you. Work from the files listed above and the conversation, answer with complete code the user can paste rather than descriptions of it, state any assumption you had to make instead of probing for it, and never claim a change was built or tested.")
+        appendLine(
+          if (compact) {
+            "This run has no tools: you cannot read, change or run anything here. Answer with complete code the user can paste, state any assumption you had to make, and never claim a change was built or tested."
+          } else {
+            "This model cannot call tools: you cannot read, write or run anything in this workspace, and no tool will answer for you. Work from the files listed above and the conversation, answer with complete code the user can paste rather than descriptions of it, state any assumption you had to make instead of probing for it, and never claim a change was built or tested."
+          }
+        )
       }
     }
   }

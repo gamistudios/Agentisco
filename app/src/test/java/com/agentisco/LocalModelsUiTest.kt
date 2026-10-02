@@ -9,6 +9,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ApplicationProvider
+import com.agentisco.agent.tool.OnDeviceTools
 import com.agentisco.core.model.AppDestination
 import com.agentisco.data.local.ProviderConfigStore
 import com.agentisco.data.repository.LocalModelInstallState
@@ -424,5 +425,49 @@ class LocalModelsUiTest {
 
     compose.onNodeWithText("None available to add").assertIsDisplayed()
     compose.onNodeWithText("Installed").assertDoesNotExist()
+  }
+
+  // ---- choosing the tools an on-device model is offered ----
+
+  /** The picker appears for the model the agent is actually using, not for a cloud one. */
+  @Test
+  fun `the tools a model is offered are chosen on its page`() = runTest {
+    val viewModel = viewModelWith("lfm2")
+    compose.setContent {
+      AgentiscoTheme { LocalModelsScreen(viewModel, onNavigate = {}) }
+    }
+
+    compose.onNodeWithText("Tools offered").assertDoesNotExist()
+
+    compose.onNodeWithText("Select").performClick()
+    compose.onNodeWithText("Tools offered").assertIsDisplayed()
+    compose.onNodeWithTag("chip_local_tool_read_file").assertIsDisplayed()
+    // Every tool is on the list, including the ones a phone may not be able to afford.
+    compose.onNodeWithTag("chip_local_tool_task_plan").assertExists()
+    compose.onNodeWithTag("chip_local_tool_delegate").assertDoesNotExist()
+    compose.onNodeWithText("Saved").assertIsDisplayed()
+  }
+
+  @Test
+  fun `unchecking a tool and saving changes what the model will be offered`() = runTest {
+    val viewModel = viewModelWith("lfm2")
+    compose.setContent {
+      AgentiscoTheme { LocalModelsScreen(viewModel, onNavigate = {}) }
+    }
+    compose.onNodeWithText("Select").performClick()
+
+    compose.onNodeWithTag("chip_local_tool_read_file").performClick()
+    compose.onNodeWithText("Not saved").assertIsDisplayed()
+    compose.onNodeWithTag("btn_local_tools_save").performClick()
+    assertEquals(
+      OnDeviceTools.DEFAULT - "read_file",
+      viewModel.localModels.value.first { it.id == "lfm2" }.configuration.allowedTools
+    )
+
+    // Choosing the default again stores no list at all, so a later, better default
+    // still reaches this model instead of being frozen by the choice made here.
+    compose.onNodeWithTag("btn_local_tools_default").performClick()
+    compose.onNodeWithTag("btn_local_tools_save").performClick()
+    assertNull(viewModel.localModels.value.first { it.id == "lfm2" }.configuration.allowedTools)
   }
 }

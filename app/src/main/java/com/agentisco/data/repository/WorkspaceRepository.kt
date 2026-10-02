@@ -440,6 +440,13 @@ class WorkspaceRepository(
   fun delegableToolNames(readOnly: Boolean): List<String> =
     toolRegistry.delegableToolNames(readOnly).sorted()
 
+  /**
+   * Every tool an on-device model may be handed, with what each one costs the prompt.
+   * Read from the same registry the runtime narrows, so the checklist can never offer
+   * a tool the agent could then be told about.
+   */
+  fun offerableTools(): List<com.agentisco.agent.tool.ToolOffering> = toolRegistry.offerableTools()
+
   fun removeCustomAgent(id: String): List<com.agentisco.agent.model.AgentRole> =
     customAgentStore.remove(id).also { _customAgents.value = it }
 

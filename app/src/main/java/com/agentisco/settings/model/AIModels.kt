@@ -49,7 +49,14 @@ data class AIModel(
   val contextWindow: Int? = null,
   val maxOutputTokens: Int? = null,
   val capabilities: ModelCapabilities = ModelCapabilities(),
-  val reasoning: ReasoningConfig? = null
+  val reasoning: ReasoningConfig? = null,
+  /**
+   * The only tools this model may be offered, when it is one whose prompt has to fit a
+   * phone. Null — every cloud model — means the run gets the whole registry and the
+   * full briefing; a set, however small, says this model pays for every character it
+   * is shown, so it is handed exactly those tools and a system prompt written to match.
+   */
+  val allowedToolNames: Set<String>? = null
 )
 
 /**

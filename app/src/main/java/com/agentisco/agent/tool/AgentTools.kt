@@ -136,6 +136,71 @@ class AgentToolRegistry(
     val chosen = role.toolNames.map { it.trim() }.filter { it.isNotEmpty() }.toSet()
     return if (chosen.isEmpty()) reachable else reachable intersect chosen
   }
+
+  /**
+   * The same collaborators offering exactly [names] - how an on-device model gets a
+   * prompt small enough to prefill on a phone. Narrowing rather than re-deriving is
+   * the point: a name that does not exist buys nothing, and dropping the launcher
+   * means a run with a hand-picked set can never delegate, so one short request
+   * cannot still fan out into a tree of model calls.
+   */
+  fun narrowedTo(names: Set<String>): AgentToolRegistry = AgentToolRegistry(
+    fileSystem = fileSystem,
+    gitManager = gitManager,
+    terminalManager = terminalManager,
+    stagedFilesProvider = stagedFilesProvider,
+    onStageFile = onStageFile,
+    onStageAll = onStageAll,
+    onUnstageAll = onUnstageAll,
+    extraTools = extraTools,
+    webClient = webClient,
+    skillStore = skillStore,
+    restrictTo = names
+  )
+
+  /**
+   * Every tool a run may be handed, with what its description and JSON schema cost
+   * the model in tokens. The on-device editor lists these so the choice is made
+   * against a number instead of a guess.
+   */
+  fun offerableTools(): List<ToolOffering> =
+    offered.filterNot { it.name == "delegate" }.map {
+      ToolOffering(it.name, charsOf(it))
+    }
+
+  private fun charsOf(tool: AgentTool): Int =
+    tool.name.length + tool.description.length + tool.parametersJsonSchema().length
+}
+
+/** One tool as the tool picker sees it: its name and its prompt cost in characters. */
+data class ToolOffering(val name: String, val charCost: Int) {
+  val estimatedTokens: Int get() = com.agentisco.agent.compact.charsToTokens(charCost)
+}
+
+/**
+ * What an on-device model is offered until the user chooses otherwise.
+ *
+ * Every tool the runtime knows costs its description plus its JSON schema in the
+ * prompt, and a phone has to prefill all of it before the first word appears. So
+ * the default is the shortest set that still completes a work loop - find, read,
+ * change, run, ask - rather than the whole registry. `task_plan`, git and the web
+ * tools are deliberately absent: each is useful, none is needed for the turn to
+ * finish, and the picker lets a user trade tokens for them per model.
+ */
+object OnDeviceTools {
+  val DEFAULT: Set<String> = setOf(
+    "read_file",
+    "list_files",
+    "search_files",
+    "edit_file",
+    "write_file",
+    "run_command",
+    "ask_user"
+  )
+
+  /** Names the user typed or an old record stored that no longer exist are dropped. */
+  fun resolve(chosen: Set<String>, offerable: Set<String>): Set<String> =
+    (chosen intersect offerable).ifEmpty { emptySet() }
 }
 
 // ================= Filesystem tools =================
