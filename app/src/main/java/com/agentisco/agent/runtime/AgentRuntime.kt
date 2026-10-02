@@ -452,7 +452,10 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
     // The board is read, not joined, here: taking the seat after the prompt is
     // built is what keeps this run from listing itself as another agent, and it
     // means a run that fails before it starts has taken nothing to leave behind.
-    val toolSpecs = if (useTools) runRegistry.specs() else emptyList()
+    val toolSpecs = if (!useTools) emptyList() else runRegistry.specs().let { specs ->
+      if (!onDevice) specs
+      else specs.map { spec -> spec.copy(description = spec.description.onDeviceSummary()) }
+    }
     val transcript = buildTranscript(
       project = project,
       useTools = useTools,
@@ -1510,6 +1513,18 @@ private fun normalizeArgsJson(raw: String): String {
   val text = raw.trim()
   if (text.isEmpty() || text == "null") return "{}"
   return runCatching { org.json.JSONObject(text).toString() }.getOrDefault("{}")
+}
+
+/**
+ * The one line an on-device model gets in place of a tool's whole description.
+ *
+ * A phone prefills every description before its first word, and a small model reads what
+ * it wrote back as prose, so the sentence that names the tool is the part worth sending.
+ * The parameter names and the tool's own arguments still describe how to call it.
+ */
+private fun String.onDeviceSummary(): String {
+  val first = indexOf(". ")
+  return (if (first >= 0) substring(0, first + 1) else this).take(220)
 }
 
 /**

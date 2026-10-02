@@ -226,6 +226,30 @@ class LocalToolPromptTest {
   }
 
   /**
+   * A tool description exists to instruct a model that can follow instructions. A 230M
+   * model repeats it back as a claim about the device it runs on, and every paragraph of
+   * it is prefilled before the first word, so an on-device list carries the sentence that
+   * names the tool and nothing more.
+   */
+  @Test
+  fun `an on-device tool list sends one sentence per tool`() {
+    val onDevice = runTurn(allowed = OnDeviceTools.DEFAULT)
+    val cloud = runTurn(allowed = null)
+    val specs = onDevice.request.tools.associate { it.name to it.description }
+    assertEquals(OnDeviceTools.DEFAULT, specs.keys)
+    specs.forEach { (name, description) ->
+      assertTrue("$name sent ${description.length} chars", description.length <= 220)
+      assertFalse("$name still holds a second sentence: $description", description.contains(". "))
+      val cloudText = cloud.request.tools.first { it.name == name }.description
+      assertTrue("$name sent something other than its own opening", cloudText.startsWith(description))
+    }
+    // The cloud model is still briefed in full, including the guidance a phone never sees.
+    assertTrue(
+      cloud.request.tools.first { it.name == "run_command" }.description.contains("terminal_output")
+    )
+  }
+
+  /**
    * A phone prefills the prompt before its first word, so the wait is the turn working.
    * Saying what it costs is the only thing that separates that from a hang.
    */
