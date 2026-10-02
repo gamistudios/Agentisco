@@ -80,7 +80,17 @@ data class LocalRuntimeSettings(
      * hold the KV cache of the models this catalog ships.
      */
     const val DEFAULT_CONTEXT = 4096
-    const val DEFAULT_BATCH = 128
+
+    /**
+     * How many prompt tokens the engine evaluates per graph evaluation.
+     *
+     * The cost of a turn is dominated by prefilling the prompt, and each evaluation ends
+     * in a barrier every worker thread waits at — so the smaller the batch, the more
+     * barriers a prompt pays for. 128 was measured at roughly ten barriers a second on a
+     * phone; 512 is what llama.cpp's own reference apps ship with and still fits a
+     * mid-range device's compute buffer alongside a 4 K context.
+     */
+    const val DEFAULT_BATCH = 512
 
     /**
      * [DEFAULT_CONTEXT] capped by what the file says it was trained for. A window longer

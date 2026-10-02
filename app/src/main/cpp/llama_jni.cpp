@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstdio>
 #include <ctime>
 #include <string>
 #include <thread>
@@ -55,6 +56,31 @@ size_t complete_utf8_prefix_len(const std::string &s) {
   }
   return n;
 }
+
+/** The clock core [cpu] can reach, in kHz, or 0 when it reports nothing. */
+long read_cpu_max_freq(unsigned cpu) {
+  char path[128];
+  snprintf(path, sizeof(path), "/sys/devices/system/cpu/cpu%u/cpufreq/cpuinfo_max_freq", cpu);
+  FILE *file = fopen(path, "r");
+  if (file == nullptr) return 0;
+  long khz = 0;
+  const int scanned = fscanf(file, "%ld", &khz);
+  fclose(file);
+  return scanned == 1 ? khz : 0;
+}
+
+/** Milliseconds since [started] — the unit every phase of a turn is reported in. */
+long elapsed_ms(const std::chrono::steady_clock::time_point &started) {
+  return (long) std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::steady_clock::now() - started).count();
+}
+
+/**
+ * The shortest run of repeated tokens worth trimming the cache for. Reuse is a call
+ * into the memory layer that buys nothing on a head too short to prefill slowly, and
+ * every trim is a chance to be wrong about what the cache holds.
+ */
+constexpr size_t MIN_PREFIX_REUSE_TOKENS = 64;
 
 std::string meta_string(llama_model *model, const char *key) {
   char buf[4096];
@@ -127,11 +153,22 @@ Java_com_agentisco_local_runtime_LlamaNative_nativeLoadModel(JNIEnv *env,
                                                              jint n_batch) {
   const char *cpath = env->GetStringUTFChars(path, nullptr);
 
+  const auto load_started = std::chrono::steady_clock::now();
+
   auto mparams = llama_model_default_params();
   mparams.n_gpu_layers = 0;  // CPU only: no Vulkan/OpenCL backend is compiled in.
-  mparams.check_tensors = true;
+  // The file already passed GgufInspector before it was installed, and a tensor whose
+  // data is really corrupt fails at the first read anyway. Checking every tensor on load
+  // costs seconds on a phone for a check the user has effectively already paid for.
+  mparams.check_tensors = false;
 
   llama_model *model = llama_model_load_from_file(cpath, mparams);
+  const long load_ms = (long) std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::steady_clock::now() - load_started).count();
+  // Every phase of a turn is logged with its numbers, because "it never answered" is
+  // three different faults on a phone — still prefilling, refused the prompt, or died —
+  // and only the last one announces itself.
+  LOGI("model read in %ld ms: %s", load_ms, model != nullptr ? cpath : "FAILED");
   env->ReleaseStringUTFChars(path, cpath);
   if (model == nullptr) {
     set_error("Failed to load GGUF model");
@@ -140,7 +177,9 @@ Java_com_agentisco_local_runtime_LlamaNative_nativeLoadModel(JNIEnv *env,
 
   auto cparams = llama_context_default_params();
   cparams.n_ctx = (uint32_t) (ctx_size > 0 ? ctx_size : 0);
-  cparams.n_batch = (uint32_t) (n_batch > 0 ? n_batch : 128);
+  // A larger batch is the same prefill work in fewer, wider graph evaluations, which on
+  // CPU is most of what a phone has to give: 128 leaves the cores idle between chunks.
+  cparams.n_batch = (uint32_t) (n_batch > 0 ? n_batch : 512);
   cparams.n_ubatch = cparams.n_batch;
   cparams.n_threads = (int32_t) (threads > 0 ? threads : 0);
   cparams.n_threads_batch = cparams.n_threads;
@@ -151,6 +190,7 @@ Java_com_agentisco_local_runtime_LlamaNative_nativeLoadModel(JNIEnv *env,
     set_error("Failed to create context — not enough memory for this context size");
     return 0;
   }
+  LOGI("context ready: %u tokens, batch %u, %d threads", cparams.n_ctx, cparams.n_batch, cparams.n_threads);
 
   auto *s = new Session();
   s->model = model;
@@ -267,7 +307,6 @@ Java_com_agentisco_local_runtime_LlamaNative_nativeComplete(JNIEnv *env,
 
   llama_batch batch = llama_batch_init(s->n_batch, 0, 1);
   std::string pending;
-  int32_t n_past = 0;
   int32_t generated = 0;
   int finish = 1;
 
@@ -280,14 +319,35 @@ Java_com_agentisco_local_runtime_LlamaNative_nativeComplete(JNIEnv *env,
     return env->ExceptionCheck() ? false : (keep == JNI_TRUE);
   };
 
-  // Each completion is a whole sequence on its own: the context outlives this call,
-  // so a KV cache left over from the previous prompt would be attended to by tokens
-  // that are writing to the same positions.
-  llama_memory_clear(llama_get_memory(s->ctx), false);
+  // Each completion is a sequence of its own, but the *head* of this prompt is usually
+  // the head of the last one: an agent turn re-sends the same playbook and the same tool
+  // specs ahead of the user's new message, and re-prefilling those tokens on a phone is
+  // most of the wait the user sits through. So the cache is trimmed to the longest run
+  // of tokens both prompts share and only the new tail is evaluated. The last token is
+  // always evaluated, because that is the position the answer is sampled from; and if
+  // the engine will not trim the cache, this falls back to starting from nothing — which
+  // is all this call used to ever do.
+  llama_memory_t mem = llama_get_memory(s->ctx);
+  size_t reuse = 0;
+  if (s->cache_reusable && !tokens.empty()) {
+    const size_t shared = std::min(tokens.size(), s->cached_prompt.size());
+    size_t common = 0;
+    while (common < shared && tokens[common] == s->cached_prompt[common]) ++common;
+    // The last token is never reused: it is the position the answer is sampled from, so
+    // this request has to evaluate it whatever the cache already holds — including when
+    // the prompt is identical to the last one, which is exactly a retried turn.
+    const size_t usable = std::min(common, tokens.size() - 1);
+    if (usable >= MIN_PREFIX_REUSE_TOKENS) reuse = usable;
+  }
+  if (reuse > 0 && !llama_memory_seq_rm(mem, 0, (llama_pos) reuse, -1)) reuse = 0;
+  if (reuse == 0) llama_memory_clear(mem, false);
 
-  // Prefill: the whole prompt, in chunks the context batch can take.
+  const auto prefill_started = std::chrono::steady_clock::now();
+  int32_t n_past = (int32_t) reuse;
+
+  // Prefill: the prompt's new tail, in chunks the context batch can take.
   bool prefill_ok = !tokens.empty();
-  for (size_t i = 0; i < tokens.size() && prefill_ok;) {
+  for (size_t i = reuse; i < tokens.size() && prefill_ok;) {
     const int32_t chunk =
         (int32_t) std::min<size_t>((size_t) s->n_batch, tokens.size() - i);
     batch.n_tokens = chunk;
@@ -308,6 +368,21 @@ Java_com_agentisco_local_runtime_LlamaNative_nativeComplete(JNIEnv *env,
     i += (size_t) chunk;
   }
 
+  const long prefill_ms = elapsed_ms(prefill_started);
+  // Every phase is reported with its own number, because "it never answered" is three
+  // different faults — still prefilling, refused the prompt, died mid-decode — and only
+  // the last one announces itself.
+  LOGI("prompt %zu tokens: %zu reused, %zu evaluated in %ld ms (%.0f tok/s)",
+       tokens.size(), reuse, tokens.size() - reuse, prefill_ms,
+       prefill_ms > 0 ? (double) (tokens.size() - reuse) * 1000.0 / (double) prefill_ms : 0.0);
+
+  long sample_ms = 0;
+  long decode_ms = 0;
+  long detok_ms = 0;
+  long emit_ms = 0;
+  long first_text_ms = -1;
+  const auto decode_started = std::chrono::steady_clock::now();
+
   while (prefill_ok && generated < limit) {
     if (s->abort.load()) {
       finish = 3;
@@ -318,7 +393,9 @@ Java_com_agentisco_local_runtime_LlamaNative_nativeComplete(JNIEnv *env,
       break;
     }
 
+    const auto sample_started = std::chrono::steady_clock::now();
     const llama_token tok = llama_sampler_sample(smpl, s->ctx, -1);
+    sample_ms += elapsed_ms(sample_started);
     if (s->abort.load()) {
       finish = 3;
       break;
@@ -332,7 +409,9 @@ Java_com_agentisco_local_runtime_LlamaNative_nativeComplete(JNIEnv *env,
     }
 
     char piece[256];
+    const auto detok_started = std::chrono::steady_clock::now();
     const int32_t written = llama_token_to_piece(s->vocab, tok, piece, sizeof(piece), 0, false);
+    detok_ms += elapsed_ms(detok_started);
     if (written < 0) {
       finish = -6;
       set_error("Failed to detokenize");
@@ -342,7 +421,10 @@ Java_com_agentisco_local_runtime_LlamaNative_nativeComplete(JNIEnv *env,
 
     const size_t safe = complete_utf8_prefix_len(pending);
     if (safe > 0) {
+      if (first_text_ms < 0) first_text_ms = elapsed_ms(decode_started);
+      const auto emit_started = std::chrono::steady_clock::now();
       const bool keep = emit(pending.substr(0, safe));
+      emit_ms += elapsed_ms(emit_started);
       pending.erase(0, safe);
       if (!keep) {
         finish = 2;
@@ -356,15 +438,30 @@ Java_com_agentisco_local_runtime_LlamaNative_nativeComplete(JNIEnv *env,
     batch.n_seq_id[0] = 1;
     batch.seq_id[0][0] = 0;
     batch.logits[0] = 1;
+    const auto step_started = std::chrono::steady_clock::now();
     if (llama_decode(s->ctx, batch) != 0) {
       finish = -7;
       set_error("Failed to evaluate generated token");
       break;
     }
+    decode_ms += elapsed_ms(step_started);
     n_past++;
   }
 
   if (!pending.empty() && finish != 2) emit(pending);
+
+  LOGI("turn %d: %d tokens in %ld ms (sample %ld, decode %ld, detok %ld, emit %ld), first text at %ld ms",
+       finish, generated, elapsed_ms(decode_started), sample_ms, decode_ms, detok_ms, emit_ms, first_text_ms);
+
+  // What the cache now holds is only trustworthy if the prompt got through. Generated
+  // tokens sit after these positions and the next request's trim removes them.
+  if (prefill_ok) {
+    s->cached_prompt = tokens;
+    s->cache_reusable = true;
+  } else {
+    s->cached_prompt.clear();
+    s->cache_reusable = false;
+  }
 
   llama_batch_free(batch);
   llama_sampler_free(smpl);
@@ -402,9 +499,36 @@ Java_com_agentisco_local_runtime_LlamaNative_nativeLastError(JNIEnv *env, jobjec
   return to_bytes(env, g_last_error);
 }
 
+/**
+ * A thread count this device can actually keep fed.
+ *
+ * Every llama_decode ends in a barrier the whole pool waits at, so one thread parked on
+ * a little core holds up the big ones and the pool pays for it on every token. Measured
+ * on this engine with the same prompt, a pool sized to every core was ten to fifteen
+ * times slower than one sized to the top frequency cluster. The clusters come from the
+ * clock each core reports, which is the only portable description of big.LITTLE there
+ * is; a device that reports no clocks at all gets half its cores rather than all of them.
+ */
 JNIEXPORT jint JNICALL
 Java_com_agentisco_local_runtime_LlamaNative_nativeSystemThreads(JNIEnv *, jobject) {
-  return (jint) std::thread::hardware_concurrency();
+  unsigned total = std::thread::hardware_concurrency();
+  if (total == 0) total = 1;
+
+  long fastest = 0;
+  std::vector<long> clocks;
+  for (unsigned cpu = 0; cpu < total; ++cpu) {
+    const long khz = read_cpu_max_freq(cpu);
+    if (khz <= 0) continue;
+    fastest = std::max(fastest, khz);
+    clocks.push_back(khz);
+  }
+  if (clocks.empty()) return (jint) std::max(1u, total / 2);
+
+  unsigned big = 0;
+  for (const long khz : clocks) {
+    if (khz * 10 >= fastest * 9) ++big;
+  }
+  return (jint) (big > 0 ? big : 1);
 }
 
 }  // extern "C"

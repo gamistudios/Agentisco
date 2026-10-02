@@ -30,6 +30,15 @@ struct Session {
   int32_t n_batch = 128;
   std::atomic<bool> abort{false};
 
+  /**
+   * The prompt the last request left in the KV cache, and whether that cache may be
+   * trimmed and reused. An agent turn re-sends the same playbook and the same tool
+   * specs ahead of the user's new message, and on a phone prefilling those tokens is
+   * most of the wait — so the next request keeps whatever head still matches.
+   */
+  std::vector<llama_token> cached_prompt;
+  bool cache_reusable = false;
+
   /** The chat template this model carries, plus its variants, parsed once at load. */
   common_chat_templates_ptr templates;
 };
