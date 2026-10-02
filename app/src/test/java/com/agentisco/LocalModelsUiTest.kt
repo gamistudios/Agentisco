@@ -137,6 +137,21 @@ class LocalModelsUiTest {
     assertEquals(configuration, LocalSettingsInput.of(configuration).parse(null).getOrThrow())
   }
 
+  /** The tools are chosen on the model's own page; a settings save must not undo that. */
+  @Test
+  fun `the form carries the tools choice it was opened with`() {
+    val configuration = LocalModelConfiguration(
+      runtime = LocalRuntimeSettings(contextSize = 2048),
+      allowedTools = setOf("read_file", "web_search")
+    )
+    assertEquals(
+      configuration,
+      LocalSettingsInput.of(configuration).parse(null).getOrThrow()
+    )
+    // Resetting the form to defaults is the one case where the choice goes back too.
+    assertNull(LocalSettingsInput.of(LocalModelConfiguration.Defaults).parse(null).getOrThrow().allowedTools)
+  }
+
   @Test
   fun `a context longer than the weights hold is refused with the limit named`() {
     val refusal = input(context = "8192").parse(2048).exceptionOrNull()
@@ -301,19 +316,83 @@ class LocalModelsUiTest {
   }
 
   @Test
-  fun `a model added by URL is not labelled built in`() {    val added = model(installed = false).copy(builtIn = false, quantization = "")
+  fun `a model added by URL is not labelled built in`() {
+    val added = model(installed = false).copy(builtIn = false, quantization = "")
+    renderCardFor(added)
+    compose.onNodeWithText("142 MB · added by URL").assertExists()
+    compose.onNodeWithText("Remove").assertExists()
+  }
+
+  private fun renderCardFor(
+    shown: LocalModel,
+    state: LocalModelInstallState? = null,
+    selected: Boolean = false
+  ) {
     compose.setContent {
       AgentiscoTheme {
         LocalModelCard(
-          model = added,
-          state = null,
-          selected = false,
+          model = shown,
+          state = state,
+          selected = selected,
           onInstall = {}, onCancel = {}, onSettings = {}, onInfo = {}, onUse = {}, onRedownload = {}, onDelete = {}, onForget = {}
         )
       }
     }
-    compose.onNodeWithText("142 MB · added by URL").assertExists()
+  }
+
+  // ---- a model that was copied off the device, not downloaded ----
+
+  private fun imported(installed: Boolean) =
+    model(installed).copy(builtIn = false, sourceUrl = "", downloadUrl = "", quantization = "")
+
+  @Test
+  fun `a model copied from this device says where it came from and has nothing to fetch`() {
+    renderCardFor(imported(installed = false))
+
+    compose.onNodeWithText("142 MB · from this device").assertExists()
+    compose.onNodeWithText("Download").assertDoesNotExist()
+    compose.onNodeWithText("Resume").assertDoesNotExist()
     compose.onNodeWithText("Remove").assertExists()
+  }
+
+  @Test
+  fun `an imported model in use cannot be re-downloaded because nobody publishes it`() {
+    renderCardFor(imported(installed = true), selected = true)
+
+    compose.onNodeWithText("Installed · in use").assertExists()
+    compose.onNodeWithText("Re-download").assertDoesNotExist()
+    // Everything the file itself can still do stays on the row.
+    compose.onNodeWithText("Settings").assertExists()
+    compose.onNodeWithText("Info").assertExists()
+    compose.onNodeWithText("Delete").assertExists()
+  }
+
+  @Test
+  fun `an imported model is never offered an update`() {
+    renderCardFor(imported(installed = true), LocalModelInstallState(LocalModelInstallStatus.UPDATE_AVAILABLE))
+
+    compose.onNodeWithText("Update").assertDoesNotExist()
+    compose.onNodeWithText("Select").assertExists()
+  }
+
+  @Test
+  fun `an import in flight names the wait and offers to stop it`() {
+    renderCardFor(imported(installed = false), LocalModelInstallState(LocalModelInstallStatus.IMPORTING))
+
+    compose.onNodeWithText("Importing").assertExists()
+    compose.onNodeWithText("Cancel").assertExists()
+    compose.onNodeWithText("Download").assertDoesNotExist()
+  }
+
+  @Test
+  fun `copying a file in is offered beside adding one by URL`() = runTest {
+    val viewModel = viewModelWith("lfm2")
+    compose.setContent {
+      AgentiscoTheme { LocalModelsSection(viewModel) }
+    }
+
+    compose.onNodeWithTag("btn_import_local_model").assertIsDisplayed()
+    compose.onNodeWithTag("btn_add_local_model").assertIsDisplayed()
   }
 
   // ---- the section over a real install ----

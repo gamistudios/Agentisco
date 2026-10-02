@@ -1,5 +1,7 @@
 package com.agentisco.ui.components
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -22,6 +24,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.outlined.FolderOpen
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -80,6 +83,18 @@ fun LocalModelsSection(
   var settingsFor by remember { mutableStateOf<LocalModel?>(null) }
   var infoFor by remember { mutableStateOf<LocalModel?>(null) }
   var confirmDelete by remember { mutableStateOf<LocalModel?>(null) }
+  var importError by remember { mutableStateOf<String?>(null) }
+
+  // Every mime type, because a .gguf has no registered one and file managers answer
+  // with anything from octet-stream to a bare `*/*`. What the file actually is, the
+  // repository decides from its header.
+  val importPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+    if (uri == null) return@rememberLauncherForActivityResult
+    importError = null
+    viewModel.importLocalModel(uri) { result ->
+      result.onFailure { importError = it.message ?: "That file could not be imported" }
+    }
+  }
 
   val installedCount = models.count { it.installed }
   val bytesOnDisk = models.filter { it.installed }.sumOf { it.sizeBytes }
@@ -99,25 +114,56 @@ fun LocalModelsSection(
             "$installedCount of ${models.size} installed · ${formatModelBytes(bytesOnDisk)} on disk"
           },
           color = TextMuted,
-          fontSize = 11.sp
+          fontSize = 11.sp,
+          maxLines = 1,
+          overflow = TextOverflow.Ellipsis
         )
       }
-      Surface(
-        onClick = { addOpen = true },
-        shape = RoundedCornerShape(8.dp),
-        color = ElectricBlue.copy(alpha = 0.15f),
-        border = androidx.compose.foundation.BorderStroke(1.dp, ElectricBlue),
-        modifier = Modifier.testTag("btn_add_local_model")
-      ) {
-        Row(
-          modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-          verticalAlignment = Alignment.CenterVertically
+      Spacer(modifier = Modifier.width(8.dp))
+      Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Surface(
+          onClick = { importPicker.launch(arrayOf("*/*")) },
+          shape = RoundedCornerShape(8.dp),
+          color = DarkSurfaceElevated,
+          border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder),
+          modifier = Modifier.testTag("btn_import_local_model")
         ) {
-          Icon(Icons.Default.Add, contentDescription = null, tint = ElectricBlueGlow, modifier = Modifier.size(14.dp))
-          Spacer(modifier = Modifier.width(4.dp))
-          Text("Add model", color = ElectricBlueGlow, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+          Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Icon(
+              Icons.Outlined.FolderOpen,
+              contentDescription = null,
+              tint = TextSecondary,
+              modifier = Modifier.size(14.dp)
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Text("Import", color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+          }
+        }
+        Surface(
+          onClick = { addOpen = true },
+          shape = RoundedCornerShape(8.dp),
+          color = ElectricBlue.copy(alpha = 0.15f),
+          border = androidx.compose.foundation.BorderStroke(1.dp, ElectricBlue),
+          modifier = Modifier.testTag("btn_add_local_model")
+        ) {
+          Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Icon(Icons.Default.Add, contentDescription = null, tint = ElectricBlueGlow, modifier = Modifier.size(14.dp))
+            Spacer(modifier = Modifier.width(4.dp))
+            Text("Add model", color = ElectricBlueGlow, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+          }
         }
       }
+    }
+
+    importError?.let {
+      Spacer(modifier = Modifier.height(6.dp))
+      Text(it, color = DangerRed.copy(alpha = 0.9f), fontSize = 10.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
     }
 
     Spacer(modifier = Modifier.height(10.dp))
@@ -337,36 +383,38 @@ internal fun LocalModelCard(
       horizontalArrangement = Arrangement.spacedBy(6.dp),
       verticalAlignment = Alignment.CenterVertically
     ) {
-      when (status) {
-        LocalModelInstallStatus.NOT_INSTALLED, LocalModelInstallStatus.FAILED -> MiniAction(
-          label = if (resumable) "Resume" else "Download",
-          tint = ElectricBlueGlow,
-          modifier = Modifier.testTag("btn_local_install_${model.id}"),
-          onClick = onInstall
-        )
-        LocalModelInstallStatus.DOWNLOADING, LocalModelInstallStatus.INSTALLING -> MiniAction(
+      when {
+        state?.isBusy == true -> MiniAction(
           label = "Cancel",
           tint = DangerRed,
           modifier = Modifier.testTag("btn_local_cancel_${model.id}"),
           onClick = onCancel
         )
-        LocalModelInstallStatus.UPDATE_AVAILABLE -> MiniAction(
+        // An imported model has nothing to fetch, nothing to update from and no second
+        // copy to re-download: its bytes only ever arrive from the picker, so the row
+        // says so by offering no such button.
+        !model.isImported && (status == LocalModelInstallStatus.NOT_INSTALLED || status == LocalModelInstallStatus.FAILED) -> MiniAction(
+          label = if (resumable) "Resume" else "Download",
+          tint = ElectricBlueGlow,
+          modifier = Modifier.testTag("btn_local_install_${model.id}"),
+          onClick = onInstall
+        )
+        !model.isImported && status == LocalModelInstallStatus.UPDATE_AVAILABLE -> MiniAction(
           label = "Update",
           tint = ElectricBlueGlow,
           modifier = Modifier.testTag("btn_local_update_${model.id}"),
           onClick = onInstall
         )
-        LocalModelInstallStatus.INSTALLED -> if (selected) {
-          MiniAction(
-            label = "Re-download",
-            modifier = Modifier.testTag("btn_local_redownload_${model.id}"),
-            onClick = onRedownload
-          )
-        } else MiniAction(
+        model.installed && !selected -> MiniAction(
           label = "Select",
           tint = ElectricBlueGlow,
           modifier = Modifier.testTag("btn_local_select_${model.id}"),
           onClick = onUse
+        )
+        model.installed && selected && !model.isImported -> MiniAction(
+          label = "Re-download",
+          modifier = Modifier.testTag("btn_local_redownload_${model.id}"),
+          onClick = onRedownload
         )
       }
       if (model.installed) {
@@ -416,7 +464,8 @@ private fun QuantTag(text: String) {
 private fun statusColor(status: LocalModelInstallStatus): Color = when (status) {
   LocalModelInstallStatus.INSTALLED -> TerminalGreen
   LocalModelInstallStatus.UPDATE_AVAILABLE -> ElectricBlue
-  LocalModelInstallStatus.DOWNLOADING, LocalModelInstallStatus.INSTALLING -> WarningAmber
+  LocalModelInstallStatus.DOWNLOADING, LocalModelInstallStatus.IMPORTING,
+  LocalModelInstallStatus.INSTALLING -> WarningAmber
   LocalModelInstallStatus.FAILED -> DangerRed
   LocalModelInstallStatus.NOT_INSTALLED -> TextMuted
 }
@@ -425,6 +474,7 @@ private fun statusLabel(status: LocalModelInstallStatus, selected: Boolean): Str
   LocalModelInstallStatus.INSTALLED -> if (selected) "Installed · in use" else "Installed"
   LocalModelInstallStatus.UPDATE_AVAILABLE -> "Update available"
   LocalModelInstallStatus.DOWNLOADING -> "Downloading"
+  LocalModelInstallStatus.IMPORTING -> "Importing"
   LocalModelInstallStatus.INSTALLING -> "Verifying"
   LocalModelInstallStatus.FAILED -> "Failed"
   LocalModelInstallStatus.NOT_INSTALLED -> "Not installed"
@@ -440,11 +490,18 @@ private fun localModelSummary(model: LocalModel, resumable: Boolean): String {
     parts.add("ctx ${model.configuration.runtime.contextSize}")
     parts.add("max ${model.configuration.generation.maxOutputTokens}")
   }
-  parts.add(if (model.builtIn) "built in" else "added by URL")
+  parts.add(when {
+    model.builtIn -> "built in"
+    model.isImported -> "from this device"
+    else -> "added by URL"
+  })
   return parts.joinToString(" · ")
 }
 
 private fun transferLabel(progress: LocalModelProgress): String {
+  // A file the provider will not size has no percentage to show; counting the bytes
+  // that actually landed is the honest version of the same fact.
+  if (progress.totalBytes <= 0L) return "${formatModelBytes(progress.bytesTransferred)} copied"
   val speed = if (progress.speedBytesPerSec > 0L) "${formatModelBytes(progress.speedBytesPerSec)}/s" else "—"
   val eta = progress.etaSeconds?.let { " · ${formatDuration(it)}" } ?: ""
   return "${progress.percent}% · $speed$eta"
@@ -577,7 +634,7 @@ private fun LocalModelInfoDialog(
           fontSize = 10.sp
         )
         InfoRow("Size", if (model.sizeBytes > 0L) formatModelBytes(model.sizeBytes) else "unknown")
-        InfoRow("Source", model.sourceUrl)
+        InfoRow("Source", if (model.isImported) "Copied from this device" else model.sourceUrl)
         if (model.version.isNotBlank()) InfoRow("Version", model.version)
         model.checksum?.let { InfoRow("SHA-256", it) }
         InfoRow("Status", statusLabel(state?.status ?: if (model.installed) LocalModelInstallStatus.INSTALLED else LocalModelInstallStatus.NOT_INSTALLED, false))
@@ -736,7 +793,13 @@ internal data class LocalSettingsInput(
   val temperature: String,
   val topK: String,
   val topP: String,
-  val repeatPenalty: String
+  val repeatPenalty: String,
+  /**
+   * Carried through untouched. The form has no widget for it — the tools a model is
+   * offered are picked on its own page — but a settings save writes the whole
+   * configuration, so a form that dropped this would unset that choice.
+   */
+  val allowedTools: Set<String>? = null
 ) {
   /** Reads the form, or names the field that cannot be applied to a model load. */
   fun parse(contextLimit: Int?): Result<LocalModelConfiguration> {
@@ -777,7 +840,8 @@ internal data class LocalSettingsInput(
           topK = topK,
           topP = topP,
           repeatPenalty = penalty
-        )
+        ),
+        allowedTools = allowedTools
       )
     )
   }
@@ -801,7 +865,8 @@ internal data class LocalSettingsInput(
       temperature = configuration.generation.temperature.toString(),
       topK = configuration.generation.topK.toString(),
       topP = configuration.generation.topP.toString(),
-      repeatPenalty = configuration.generation.repeatPenalty.toString()
+      repeatPenalty = configuration.generation.repeatPenalty.toString(),
+      allowedTools = configuration.allowedTools
     )
   }
 }

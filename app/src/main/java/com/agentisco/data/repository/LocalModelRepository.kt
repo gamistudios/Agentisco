@@ -1,6 +1,8 @@
 package com.agentisco.data.repository
 
 import android.content.Context
+import android.net.Uri
+import android.provider.OpenableColumns
 import com.agentisco.data.local.LocalModelStore
 import com.agentisco.local.HuggingFaceAssetSource
 import com.agentisco.local.LocalModelAssetSource
@@ -11,6 +13,7 @@ import com.agentisco.local.model.GgufInspector
 import com.agentisco.local.model.GgufMetadata
 import com.agentisco.local.model.LocalModel
 import com.agentisco.local.model.LocalModelConfiguration
+import com.agentisco.local.model.LocalModelFormat
 import com.agentisco.local.model.LocalModelInstallStatus
 import com.agentisco.local.model.LocalModelProgress
 import com.agentisco.local.model.LocalRuntimeSettings
@@ -41,7 +44,9 @@ data class LocalModelInstallState(
   val resumableBytes: Long = 0L
 ) {
   val isBusy: Boolean
-    get() = status == LocalModelInstallStatus.DOWNLOADING || status == LocalModelInstallStatus.INSTALLING
+    get() = status == LocalModelInstallStatus.DOWNLOADING ||
+      status == LocalModelInstallStatus.IMPORTING ||
+      status == LocalModelInstallStatus.INSTALLING
 }
 
 /**
@@ -250,6 +255,16 @@ class LocalModelRepository(
     if (record != null && record.installed && !updateAvailable(record)) return true
 
     val target = store.model(model.id) ?: model
+    if (target.isImported) {
+      setState(
+        target.id,
+        LocalModelInstallState(
+          LocalModelInstallStatus.FAILED,
+          error = "That model was imported from this device, so there is nothing to download"
+        )
+      )
+      return false
+    }
     // Known before a single byte arrives, so an interrupted transfer still has a row
     // to resume into after a restart — and a partial file nobody can name is a
     // partial file that never gets cleaned up.
@@ -281,6 +296,221 @@ class LocalModelRepository(
       publish(recomputeRecords())
       deleted
     }
+  }
+
+  // ---- Import from this device ----
+
+  /**
+   * Installs a model file the user picked out of the device's own storage.
+   *
+   * An import is an install whose source happens to already be on the phone: the bytes
+   * land in the same partial file, face the same GGUF checks and are renamed into place
+   * the same way, so a model that came off a USB stick becomes selectable on exactly the
+   * evidence a downloaded one does. Nothing is taken on trust from the picked file's
+   * name or extension — the header is checked before a megabyte is copied and the whole
+   * file is parsed again before it is promoted. A server publishes the digest a download
+   * is verified against; here the digest is computed from the bytes, which is what lets
+   * [verifyInstalled] notice corruption later.
+   *
+   * There is no resume: re-reading a local file is not the slow part, and a content URI
+   * is no promise that the same bytes are still there tomorrow. And a rejected import
+   * leaves no row behind, because an imported model has no URL to try again from — such
+   * a row could only ever be deleted.
+   */
+  suspend fun import(uri: Uri): Result<LocalModel> = withContext(Dispatchers.IO) {
+    val declared = readOffering(uri)
+    val name = declared.name ?: return@withContext rejectedImport(null, "That file has no name to install it under")
+    val id = customId(name)
+    if (store.model(id) != null) {
+      return@withContext rejectedImport(null, "\"$name\" is already added")
+    }
+
+    val model = LocalModel(
+      id = id,
+      name = name,
+      // No source and no download: these bytes came from the device and nothing else
+      // publishes them, which is what makes the row report an update as impossible.
+      sourceUrl = "",
+      downloadUrl = "",
+      sizeBytes = declared.sizeBytes?.coerceAtLeast(0L) ?: 0L,
+      builtIn = false
+    )
+    spaceFailure(model, model.sizeBytes)?.let { return@withContext rejectedImport(null, it) }
+
+    // Named before the first byte is copied, so the row exists for the progress to live on.
+    store.upsert(model)
+    cancelled[id] = false
+    val partial = partialFile(model)
+    val bytes = copyFrom(uri, model, partial, model.sizeBytes)
+      .getOrElse { error ->
+        return@withContext rejectedImport(model, error.message ?: "That file could not be read")
+      }
+
+    val metadata = (GgufInspector.inspect(partial) as? GgufInspection.Valid)?.metadata
+      ?: return@withContext rejectedImport(model, "That file is not a usable GGUF model")
+    val installed = installedFile(model)
+    val digest = UpdateDownloadVerifier.sha256Hex(partial)
+    if (!replaceFile(partial, installed)) {
+      return@withContext rejectedImport(model, "The model could not be moved into place")
+    }
+
+    val recorded = model.copy(
+      sizeBytes = bytes,
+      checksum = digest,
+      quantization = GgufMetadata.fileTypeLabel(metadata.fileType).orEmpty(),
+      configuration = configurationAfterInstall(model.configuration, metadata)
+    )
+    store.upsert(recorded)
+    store.markInstalled(
+      recorded,
+      LocalModelStore.InstallEvidence(
+        digest = digest,
+        version = "",
+        sizeBytes = bytes,
+        installedAtMillis = System.currentTimeMillis()
+      )
+    )
+    cancelled.remove(recorded.id)
+    val records = recomputeRecords()
+    publish(records)
+    setState(recorded.id, LocalModelInstallState(LocalModelInstallStatus.INSTALLED))
+    // The list is the truth about what is on disk, so it is what the caller gets back:
+    // a record assembled by hand could claim a model is installed when the recheck of
+    // the file says it is not.
+    Result.success(records.first { it.id == recorded.id })
+  }
+
+  /** What the picked file's provider is willing to say about it. */
+  private data class Offering(val name: String?, val sizeBytes: Long?)
+
+  /**
+   * Reads the name and size the provider publishes for [uri].
+   *
+   * Neither is guaranteed: a provider that answers nothing still gets its file copied,
+   * since the name falls back to the URI's own last segment and the missing size only
+   * costs the progress bar its percentage. The size is never taken from the file's own
+   * claim about itself — it is what the copy is measured against, so a wrong one has to
+   * be the provider's, not the model's.
+   */
+  private fun readOffering(uri: Uri): Offering {
+    val fromProvider = runCatching {
+      appContext.contentResolver
+        .query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)
+        ?.use { cursor ->
+          if (!cursor.moveToFirst()) return@use null
+          cursor.columnNames.indexOf(OpenableColumns.DISPLAY_NAME)
+            .takeIf { it >= 0 && !cursor.isNull(it) }?.let { cursor.getString(it) } to
+            cursor.columnNames.indexOf(OpenableColumns.SIZE)
+              .takeIf { it >= 0 && !cursor.isNull(it) }?.let { cursor.getLong(it) }
+        }
+    }.getOrNull()
+    val providerName = fromProvider?.first?.takeIf { it.isNotBlank() }
+      ?.removeSuffixIgnoreCase(".gguf")?.trim()?.takeIf { it.isNotBlank() }?.take(60)
+    return Offering(name = providerName ?: nameFromUri(uri), sizeBytes = fromProvider?.second)
+  }
+
+  /**
+   * The file name a URI carries, however its provider chose to express it.
+   *
+   * Document providers encode the path into the last segment (`primary%3ADownload%2Fx`),
+   * so the name is whatever follows the last separator of either kind. The extension is
+   * dropped because it is a label, not evidence — [LocalModelFormat] is decided from the
+   * header instead.
+   */
+  internal fun nameFromUri(uri: Uri): String? =
+    runCatching { uri.lastPathSegment }.getOrNull()
+      ?.substringAfterLast(':')
+      ?.substringAfterLast('/')
+      ?.trim()
+      ?.removeSuffixIgnoreCase(".gguf")
+      ?.takeIf { it.isNotBlank() }
+      ?.take(60)
+
+  private fun String?.removeSuffixIgnoreCase(suffix: String): String? =
+    this?.takeIf { it.isNotEmpty() }?.let {
+      if (it.length >= suffix.length && it.endsWith(suffix, ignoreCase = true)) {
+        it.dropLast(suffix.length)
+      } else it
+    }
+
+  /** Copies the picked file into [target], counting every byte it writes. */
+  private fun copyFrom(uri: Uri, model: LocalModel, target: File, totalBytes: Long): Result<Long> {
+    val source = runCatching { appContext.contentResolver.openInputStream(uri) }.getOrNull()
+      ?: return Result.failure(IllegalStateException("That file could not be read from this device"))
+
+    val buffer = ByteArray(COPY_BUFFER_BYTES)
+    val header = ByteArray(LocalModelFormat.GGUF.magic.size)
+    val speed = TransferSpeedTracker()
+    var headerFilled = 0
+    var copied = 0L
+    var nextReport = 0L
+    var reason: String? = null
+    try {
+      target.outputStream().use { sink ->
+        while (true) {
+          if (cancelled[model.id] == true) {
+            reason = "Import cancelled"
+            break
+          }
+          val read = source.read(buffer)
+          if (read < 0) break
+          if (headerFilled < header.size) {
+            val taken = minOf(read, header.size - headerFilled)
+            System.arraycopy(buffer, 0, header, headerFilled, taken)
+            headerFilled += taken
+            // Refuse on the magic alone rather than after a 5 GB copy: a file that does
+            // not start with GGUF is not a model whatever it is called.
+            if (headerFilled == header.size && LocalModelFormat.fromMagic(header) == null) {
+              reason = "That is not a GGUF model file"
+              break
+            }
+          }
+          sink.write(buffer, 0, read)
+          copied += read
+          if (copied >= nextReport) {
+            nextReport = copied + PROGRESS_STEP_BYTES
+            setState(
+              model.id,
+              LocalModelInstallState(
+                LocalModelInstallStatus.IMPORTING,
+                progress = LocalModelProgress(copied, totalBytes, speed.speedFor(copied))
+              )
+            )
+          }
+        }
+        sink.flush()
+      }
+    } catch (error: Exception) {
+      reason = error.message ?: "That file could not be read"
+    } finally {
+      runCatching { source.close() }
+    }
+
+    reason?.let { return Result.failure(IllegalStateException(it)) }
+    // A cancel that lands between two reads still stops the loop by reaching the end of
+    // the stream, so the flag is asked again here: whichever stopped the copy names it.
+    if (cancelled[model.id] == true) return Result.failure(IllegalStateException("Import cancelled"))
+    if (copied < header.size) return Result.failure(IllegalStateException("That file is empty"))
+    // The end of a stream is not a promise the file was whole. A copy that lost its
+    // tail still starts with GGUF and still parses, so the only thing that catches it is
+    // the size the provider declared when the user picked the file.
+    if (totalBytes > 0L && copied < totalBytes) {
+      return Result.failure(
+        IllegalStateException("The copy stopped after $copied of $totalBytes bytes")
+      )
+    }
+    return Result.success(copied)
+  }
+
+  /** Takes back the row and the bytes a rejected import put down. */
+  private fun rejectedImport(model: LocalModel?, reason: String): Result<LocalModel> {
+    model?.let {
+      cancelled.remove(it.id)
+      runCatching { partialFile(it).delete() }
+      store.delete(it.id)
+    }
+    publish(recomputeRecords())
+    return Result.failure(IllegalArgumentException(reason))
   }
 
   private suspend fun installLock(modelId: String, block: suspend () -> Boolean): Boolean {
@@ -481,9 +711,13 @@ class LocalModelRepository(
    */
   suspend fun refreshRemoteInfo(): List<LocalModel> = withContext(Dispatchers.IO) {
     val refreshed = _models.value.map { model ->
-      val updated = LocalModelCatalog.refresh(model, remoteSource.fetch(model.downloadUrl))
-      if (updated != model) store.upsert(updated)
-      updated
+      // An imported model has no publisher to ask; its numbers are the bytes on disk.
+      if (model.isImported) model
+      else {
+        val updated = LocalModelCatalog.refresh(model, remoteSource.fetch(model.downloadUrl))
+        if (updated != model) store.upsert(updated)
+        updated
+      }
     }
     publish(refreshed)
     refreshed
@@ -524,7 +758,9 @@ class LocalModelRepository(
       val next = current.toMutableMap()
       records.forEach { model ->
         val live = next[model.id]?.status
-        val running = live == LocalModelInstallStatus.DOWNLOADING || live == LocalModelInstallStatus.INSTALLING
+        val running = live == LocalModelInstallStatus.DOWNLOADING ||
+          live == LocalModelInstallStatus.IMPORTING ||
+          live == LocalModelInstallStatus.INSTALLING
         if (!running) {
           next[model.id] = when {
             model.installed && updateAvailable(model) ->
@@ -598,6 +834,8 @@ class LocalModelRepository(
     private const val MAX_ATTEMPTS = 3
     private const val RETRY_DELAY_MS = 2_000L
     private const val BYTES_PER_MB = 1024L * 1024L
+    private const val COPY_BUFFER_BYTES = 128 * 1024
+    private const val PROGRESS_STEP_BYTES = 512 * 1024L
 
     /** A file-system-safe, stable id for a user-supplied model name. */
     internal fun customId(name: String): String =

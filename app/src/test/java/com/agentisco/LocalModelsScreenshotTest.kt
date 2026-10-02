@@ -160,6 +160,66 @@ class LocalModelsScreenshotTest {
     compose.onRoot().captureRoboImage(filePath = "src/test/screenshots/local_model_states.png")
   }
 
+  /**
+   * The two rows a file copied off the device's own storage gets: one installed, one
+   * still being read. Their own capture because a phone's height fits four of the
+   * catalog's rows plus two of these, and a clipped screenshot verifies nothing.
+   */
+  @Test
+  fun `a model from this device's own storage shows what it can do and what it cannot`() {
+    compose.setContent {
+      AgentiscoTheme {
+        Column(
+          modifier = Modifier
+            .fillMaxSize()
+            .background(DarkBackground)
+            .padding(14.dp)
+        ) {
+          // No source, so no download, no update and no second copy — only what the
+          // bytes already here can do.
+          LocalModelCard(
+            model = model(true).copy(
+              builtIn = false,
+              sourceUrl = "",
+              downloadUrl = "",
+              name = "Tiny Qwen",
+              quantization = "Q4_K_M",
+              sizeBytes = 734_003_200L
+            ),
+            state = LocalModelInstallState(LocalModelInstallStatus.INSTALLED),
+            selected = false,
+            onInstall = {}, onCancel = {}, onSettings = {}, onInfo = {}, onUse = {},
+            onRedownload = {}, onDelete = {}, onForget = {}
+          )
+          Spacer(modifier = Modifier.height(12.dp))
+          LocalModelCard(
+            model = model(false).copy(
+              builtIn = false,
+              sourceUrl = "",
+              downloadUrl = "",
+              name = "Tiny Qwen",
+              quantization = "",
+              sizeBytes = 734_003_200L
+            ),
+            state = LocalModelInstallState(
+              LocalModelInstallStatus.IMPORTING,
+              progress = LocalModelProgress(bytesTransferred = 367_001_600L, totalBytes = 0L)
+            ),
+            selected = false,
+            onInstall = {}, onCancel = {}, onSettings = {}, onInfo = {}, onUse = {},
+            onRedownload = {}, onDelete = {}, onForget = {}
+          )
+        }
+      }
+    }
+
+    compose.onNodeWithText("700 MB · main · ctx 4096 · max 200 · from this device").assertExists()
+    compose.onNodeWithText("700 MB · main · from this device").assertExists()
+    compose.onNodeWithText("Importing").assertExists()
+    compose.onNodeWithText("350 MB copied").assertExists()
+    compose.onRoot().captureRoboImage(filePath = "src/test/screenshots/local_model_import.png")
+  }
+
   /** The page itself, over a device that has one model installed. */
   @Test
   fun `the local models page frames the list inside one card`() = runBlocking {

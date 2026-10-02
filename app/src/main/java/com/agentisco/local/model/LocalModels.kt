@@ -23,13 +23,18 @@ enum class LocalModelFormat(
 }
 
 /**
- * The six installation states the local-model screen distinguishes. Named exactly
- * as the product asks, because the UI's whole job here is to never let a
- * half-downloaded file look like an installed one.
+ * The installation states the local-model screen distinguishes. Named exactly as the
+ * product asks, because the UI's whole job here is to never let a half-downloaded file
+ * look like an installed one.
+ *
+ * [IMPORTING] is the same moment seen from the other end: the bytes are already on the
+ * device, so the app copies them instead of fetching them, and the user has to be able to
+ * tell those two waits apart.
  */
 enum class LocalModelInstallStatus(val label: String) {
   NOT_INSTALLED("Not installed"),
   DOWNLOADING("Downloading"),
+  IMPORTING("Importing"),
   INSTALLING("Installing"),
   INSTALLED("Installed"),
   UPDATE_AVAILABLE("Update available"),
@@ -166,4 +171,14 @@ data class LocalModel(
   val installed: Boolean = false,
   val localPath: String? = null,
   val configuration: LocalModelConfiguration = LocalModelConfiguration.Defaults
-)
+) {
+  /**
+   * True when these bytes were copied off the device's own storage rather than fetched
+   * from anywhere. There is no source to update them from, which is the only thing the
+   * screen needs to know in order to stop offering a Download or an Update.
+   *
+   * Derived instead of stored so a model added before imports existed cannot be
+   * mislabelled, and so nothing has to keep two fields in step.
+   */
+  val isImported: Boolean get() = !builtIn && downloadUrl.isBlank()
+}

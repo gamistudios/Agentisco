@@ -1403,6 +1403,19 @@ class WorkspaceViewModel(
     viewModelScope.launch { onResult(store.addCustom(name, downloadUrl, description, quantization)) }
   }
 
+  /**
+   * Copies a model the user picked from the device's storage. The result comes back to
+   * the screen because a file that turns out not to be a model is the picker's problem
+   * to explain — the list never sees a row for it.
+   */
+  fun importLocalModel(
+    uri: android.net.Uri,
+    onResult: (Result<com.agentisco.local.model.LocalModel>) -> Unit
+  ) {
+    val store = localStore ?: return
+    viewModelScope.launch { onResult(store.import(uri)) }
+  }
+
   /** Proves the bytes on disk still match what the install recorded. */
   fun verifyLocalModel(modelId: String) {
     viewModelScope.launch { localStore?.verifyInstalled(modelId) }
