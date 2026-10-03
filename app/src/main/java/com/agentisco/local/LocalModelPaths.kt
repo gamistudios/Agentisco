@@ -25,8 +25,13 @@ object LocalModelPaths {
   /** The interpreter every local AI command runs on once setup has finished. */
   const val VENV_PYTHON = "$VENV_DIR/bin/python"
 
+  /** File name of the model server, inside [HOST_DIR_NAME] on the host and [GUEST_DIR] below. */
+  const val SERVER_SCRIPT_NAME = "serve.py"
+
   /** The resident model server, written by the app and started by the venv interpreter. */
-  const val SERVER_SCRIPT = "$GUEST_DIR/serve.py"
+  const val SERVER_SCRIPT = "$GUEST_DIR/$SERVER_SCRIPT_NAME"
 
   fun hostDir(filesDir: File): File = File(filesDir, HOST_DIR_NAME)
+
+  fun hostScript(filesDir: File): File = File(hostDir(filesDir), SERVER_SCRIPT_NAME)
 }
