@@ -31,3 +31,5 @@ KEYSTORE_SETUP.md
 GITHUB_SECRETS.txt
 generate-keystore.sh
 debug.keystore.base64
+# Section files staged into the Python model server; never part of the app.
+.scratch/

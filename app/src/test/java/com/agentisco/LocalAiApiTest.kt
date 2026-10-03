@@ -7,9 +7,9 @@ import com.agentisco.local.ggufBytes
 import com.agentisco.local.model.LocalGenerationSettings
 import com.agentisco.local.model.LocalRuntimeSettings
 import com.agentisco.local.repositoryWithInstalled
+import com.agentisco.local.runtime.LocalAnswerDelta
 import com.agentisco.local.runtime.LocalEngineException
 import com.agentisco.local.runtime.LocalInferenceEngine
-import com.agentisco.local.runtime.LocalParseDelta
 import com.agentisco.local.runtime.LocalPromptTooLongException
 import com.agentisco.local.runtime.LocalTemplateCapabilities
 import com.agentisco.local.runtime.LocalToolCall
@@ -139,10 +139,12 @@ class LocalAiApiTest {
         assertNotNull(json.getString("id"))
         assertEquals("hello", choice.getJSONObject("message").getString("content"))
         assertEquals("stop", choice.getString("finish_reason"))
-        // The engine is handed the rendered prompt, which carries every message.
-        assertEquals("system: be brief\nuser: hi", session.requests.single().prompt)
-        // The turn that rendered the prompt is closed as soon as the answer is in.
-        assertEquals(1, session.turns.single().closes)
+        // The runtime is handed the whole transcript, in the order the client sent it; turning
+        // it into a prompt is the model's own template's business.
+        assertEquals(
+            listOf("system: be brief", "user: hi"),
+            session.requests.single().inputs.messages.map { "${it.role}: ${it.content}" }
+        )
     }
 
     @Test
@@ -212,7 +214,7 @@ class LocalAiApiTest {
 
         complete(api, request.toString())
 
-        val inputs = fake.sessions.single().turns.single().inputs
+        val inputs = fake.sessions.single().requests.single().inputs
         val call = inputs.messages.first { it.role == "assistant" }.toolCalls.single()
         assertEquals("call_1", call.id)
         assertEquals("read_file", call.name)
@@ -249,8 +251,7 @@ class LocalAiApiTest {
           supportsTools = false,
           supportsParallelToolCalls = false,
           supportsThinking = false,
-          supportsSystemMessage = true,
-          supportsTypedContent = false
+          supportsSystemMessage = true
         )
 
         val reply = complete(api, toolsRequest())
@@ -286,61 +287,50 @@ class LocalAiApiTest {
     }
 
     @Test
-    fun `a model's own end-of-turn marker never reaches the client`() = runTest {
+    fun `a client's stop sequences are passed to the runtime that watches for them`() = runTest {
         val (api, fake) = apiFor("alpha")
-        fake.sessionScript = { session ->
-            session.stopSequences = listOf("|stop|")
-            // The marker arrives with text after it, and the run has more to say.
-            session.reply = listOf("The answer is ", "42.", "|stop|", "text nobody asked for")
-        }
-        val chunks = mutableListOf<String>()
-        call(
-            api, "POST", "/v1/chat/completions",
-            """{"model":"alpha","stream":true,"messages":[{"role":"user","content":"hi"}]}""", chunks
-        )
 
-        assertEquals(
-            listOf("assistant", "The answer is ", "42.", null, "[DONE]"),
-            chunks.map { if (it == "[DONE]") it else JSONObject(it).chunkText() }
-        )
-        assertEquals("stop", JSONObject(chunks[3]).getJSONArray("choices").getJSONObject(0).getString("finish_reason"))
-        assertEquals(3, fake.sessions.single().consumed)
+        complete(api, """{"model":"alpha","messages":[{"role":"user","content":"hi"}],"stop":["HALT","STOP"]}""")
 
-        // The same rule, seen from a client that asked for the answer in one piece.
-        val whole = complete(api, """{"model":"alpha","messages":[{"role":"user","content":"hi"}]}""")
-        val choice = bodyOf(whole).getJSONArray("choices").getJSONObject(0)
-        assertEquals("The answer is 42.", choice.getJSONObject("message").getString("content"))
-        assertEquals("stop", choice.getString("finish_reason"))
+        // The end of a turn is decided where the text is produced — the runtime owns the template
+        // those markers come from — so this layer's job is to hand the list over unchanged.
+        assertEquals(listOf("HALT", "STOP"), fake.sessions.single().requests.single().inputs.stop)
     }
 
     @Test
-    fun `a marker split across two pieces still ends the turn`() = runTest {
+    fun `a request with no stop list leaves the runtime's own markers alone`() = runTest {
         val (api, fake) = apiFor("alpha")
-        fake.sessionScript = { session ->
-            session.stopSequences = listOf("|stop|")
-            // Neither piece holds the marker whole: the tail of the first is only the
-            // beginning of one, and it has to be held back until the second decides.
-            session.reply = listOf("done|", "stop|ignored", "more")
-        }
 
-        val choice = bodyOf(complete(api, oneTurn)).getJSONArray("choices").getJSONObject(0)
+        complete(api, oneTurn)
 
-        assertEquals("done", choice.getJSONObject("message").getString("content"))
-        assertEquals("stop", choice.getString("finish_reason"))
-        assertEquals(2, fake.sessions.single().consumed)
+        assertTrue(fake.sessions.single().requests.single().inputs.stop.isEmpty())
     }
 
     // ---- tools and thinking ----
 
+    /** The pieces of one call's arguments, streamed as the runtime reads them out. */
+    private fun callFragments(session: com.agentisco.local.FakeSession) {
+        session.reply = listOf("""{"path":"a""", """","file":"b"}""")
+        // The id and the function name arrive with the first fragment; the rest only grow the
+        // arguments, exactly as a streaming client assembles them.
+        session.deltas = { piece ->
+            listOf(
+                LocalAnswerDelta(
+                  toolCallIndex = 0,
+                  toolCall = LocalToolCall(
+                    if (piece.startsWith("{")) "call_1" else "",
+                    if (piece.startsWith("{")) "read_file" else "",
+                    piece
+                  )
+                )
+            )
+        }
+    }
+
     @Test
     fun `a tool call streams as fragments and finishes as tool_calls`() = runTest {
         val (api, fake) = apiFor("alpha")
-        fake.sessionScript = { session ->
-            session.stopSequences = listOf("|stop|")
-            session.reply = listOf("""{"path":"a""", """","file":"b"}|stop|""")
-            session.deltas = { piece -> listOf(LocalParseDelta("", "", 0, LocalToolCall("", "read_file", piece))) }
-            session.calls = listOf(LocalToolCall("call_1", "read_file", """{"path":"a","file":"b"}"""))
-        }
+        fake.sessionScript = { session -> callFragments(session) }
         val chunks = mutableListOf<String>()
         call(
             api, "POST", "/v1/chat/completions",
@@ -353,27 +343,41 @@ class LocalAiApiTest {
                 .optJSONArray("tool_calls")?.getJSONObject(0)
         }
         assertEquals(2, fragments.size)
+        assertEquals("call_1", fragments.first().getString("id"))
+        assertEquals("function", fragments.first().getString("type"))
         assertEquals("read_file", fragments.first().getJSONObject("function").getString("name"))
         assertEquals("""{"path":"a""", fragments.first().getJSONObject("function").getString("arguments"))
         assertEquals(0, fragments.first().getInt("index"))
+        // A later fragment extends the same call: no id, no name, only arguments.
+        assertEquals("""","file":"b"}""", fragments.last().getJSONObject("function").getString("arguments"))
+        assertTrue(fragments.last().isNull("id"))
         val finish = JSONObject(chunks[chunks.size - 2]).getJSONArray("choices").getJSONObject(0)
         assertEquals("tool_calls", finish.getString("finish_reason"))
+    }
 
-        val message = bodyOf(complete(api, oneTurn)).getJSONArray("choices").getJSONObject(0).getJSONObject("message")
-        val assembled = message.getJSONArray("tool_calls").getJSONObject(0)
+    @Test
+    fun `a client that asked for one body gets the call reassembled`() = runTest {
+        val (api, fake) = apiFor("alpha")
+        fake.sessionScript = { session -> callFragments(session) }
+
+        val choice = bodyOf(complete(api, oneTurn)).getJSONArray("choices").getJSONObject(0)
+        val assembled = choice.getJSONObject("message").getJSONArray("tool_calls").getJSONObject(0)
+
         assertEquals("call_1", assembled.getString("id"))
         assertEquals("function", assembled.getString("type"))
+        assertEquals("read_file", assembled.getJSONObject("function").getString("name"))
         assertEquals("""{"path":"a","file":"b"}""", assembled.getJSONObject("function").getString("arguments"))
+        // The reason tells the caller it has a call to run, which is the point of the field.
+        assertEquals("tool_calls", choice.getString("finish_reason"))
+        // A turn that produced only a call is an empty answer, never a literal "null".
+        assertEquals("", choice.getJSONObject("message").getString("content"))
     }
 
     @Test
     fun `thinking streams in its own field instead of the answer`() = runTest {
         val (api, fake) = apiFor("alpha")
         fake.sessionScript = { session ->
-            // No marker to watch for: this test is about which field thinking lands in,
-            // and a held-back tail would move letters between chunks.
-            session.stopSequences = emptyList()
-            session.deltas = { piece -> listOf(LocalParseDelta("", "weighing $piece", -1, null)) }
+            session.deltas = { piece -> listOf(LocalAnswerDelta(reasoning = "weighing $piece")) }
             session.reply = listOf("twice", "three times")
         }
         val chunks = mutableListOf<String>()
@@ -389,13 +393,13 @@ class LocalAiApiTest {
     }
 
     @Test
-    fun `a caller that asks for no thinking is passed to the template`() = runTest {
+    fun `a caller that asks for no thinking is passed to the runtime`() = runTest {
         val (api, fake) = apiFor("alpha")
         complete(api, """{"model":"alpha","messages":[{"role":"user","content":"hi"}],"enable_thinking":false}""")
-        assertFalse(fake.sessions.single().turns.single().inputs.enableThinking)
+        assertFalse(fake.sessions.single().requests.single().inputs.enableThinking)
 
         complete(api, """{"model":"alpha","messages":[{"role":"user","content":"hi"}],"reasoning_effort":"none"}""")
-        assertFalse(fake.sessions.single().turns.last().inputs.enableThinking)
+        assertFalse(fake.sessions.single().requests.last().inputs.enableThinking)
     }
 
     // ---- a client that goes away, and an engine that fails ----
@@ -514,7 +518,6 @@ class LocalAiApiTest {
             supportsParallelToolCalls = false,
             supportsThinking = false,
             supportsSystemMessage = false,
-            supportsTypedContent = false,
             reason = "The model ships no usable chat template"
         )
 
@@ -582,7 +585,9 @@ class LocalAiApiTest {
                 """{"type":"text","text":"two"}]}]}"""
         )
 
-        assertEquals("user: one two", fake.sessions.single().requests.single().prompt)
+        val message = fake.sessions.single().requests.single().inputs.messages.single()
+        assertEquals("user", message.role)
+        assertEquals("one two", message.content)
     }
 }
 

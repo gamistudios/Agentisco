@@ -45,13 +45,58 @@ class AgentiscoApplication : Application() {
   }
 
   private val localAiDelegate = lazy {
-    com.agentisco.local.LocalAiRuntime(com.agentisco.data.repository.LocalModelRepository(this))
+    val repository = com.agentisco.data.repository.LocalModelRepository(this)
+    com.agentisco.local.LocalAiRuntime(
+      repository,
+      com.agentisco.local.runtime.LocalInferenceEngine(repository, pythonModelRuntime())
+    )
+  }
+
+  /**
+   * The Python environment the models run in, as the engine contract the runtime layer knows.
+   *
+   * Built here rather than in [com.agentisco.data.repository.WorkspaceRepository] because a
+   * model answers whoever asks, including a conversation started before any workspace is open.
+   * The two pieces it needs from the Linux environment are the proot command line and the model
+   * directory's guest twin, and both are cheap to name from the app's own files.
+   */
+  private fun pythonModelRuntime(): com.agentisco.local.py.PythonEngine {
+    val binaries = com.agentisco.workspace.terminal.NativeBinaries(this)
+    val bootstrap = com.agentisco.workspace.terminal.DebianBootstrap(this, binaries)
+    val modelsDir = com.agentisco.local.LocalModelPaths.hostDir(filesDir).apply { mkdirs() }
+    val modelBind = listOf(modelsDir.absolutePath to com.agentisco.local.LocalModelPaths.GUEST_DIR)
+    val server = com.agentisco.local.py.PythonModelServer(
+      filesDir = filesDir,
+      readScript = { assets.open(com.agentisco.local.py.ServerScript.ASSET_PATH).use { it.readBytes() } },
+      commandFor = { port, token ->
+        if (!binaries.isComplete() || !bootstrap.isBootstrapped()) null
+        else {
+          val args = com.agentisco.workspace.terminal.ProotArgsBuilder(binaries, bootstrap.rootfsDir, modelBind)
+          args.buildCommand(
+            com.agentisco.local.py.PythonModelServer.guestCommand(port, token, args.guestEnv())
+          )
+        }
+      },
+      // The pipe this process keeps open is what the server watches: if the app dies, the
+      // pipe closes and the guest interpreter exits with the model's memory.
+      start = { argv, environment ->
+        ProcessBuilder(argv)
+          .redirectErrorStream(true)
+          .apply { this.environment().putAll(environment) }
+          .start()
+      }
+    )
+    return com.agentisco.local.py.PythonEngine(
+      filesDir = filesDir,
+      server = server,
+      environmentReady = { com.agentisco.local.py.PythonEnvironment.venvPresent(filesDir) }
+    )
   }
 
   /**
    * The models installed on this device, behind the loopback OpenAI endpoint they are
    * served through. Created lazily: a phone with no installed model never opens a port,
-   * and a build without the native engine never looks like it can answer.
+   * and a device whose Python environment is missing never looks like it can answer.
    */
   val localAi: com.agentisco.local.LocalAiRuntime by localAiDelegate
 

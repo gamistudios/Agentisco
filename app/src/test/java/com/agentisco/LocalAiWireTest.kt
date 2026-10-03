@@ -16,7 +16,7 @@ import com.agentisco.local.ggufBytes
 import com.agentisco.local.repositoryWithInstalled
 import com.agentisco.local.runtime.LocalEngineException
 import com.agentisco.local.runtime.LocalInferenceEngine
-import com.agentisco.local.runtime.LocalParseDelta
+import com.agentisco.local.runtime.LocalAnswerDelta
 import com.agentisco.local.runtime.LocalPromptTooLongException
 import com.agentisco.local.runtime.LocalToolCall
 import com.agentisco.local.server.LocalAiApi
@@ -135,9 +135,6 @@ class LocalAiWireTest {
   fun `a local answer arrives as streamed text the way a cloud answer does`() {
     val trio = serve {
       sessionScript = { session ->
-        // No end-of-turn marker to watch for: this is about the pieces arriving one at a
-        // time, and a held-back tail would move letters between them.
-        session.stopSequences = emptyList()
         session.reply = listOf("Sure", " — no", " problem.")
       }
     }
@@ -166,8 +163,11 @@ class LocalAiWireTest {
     val trio = serve {
       sessionScript = { session ->
         session.reply = listOf(arguments)
-        session.deltas = { piece -> listOf(LocalParseDelta("", "", 0, LocalToolCall("call_1", "read_file", piece))) }
-        session.calls = listOf(LocalToolCall("call_1", "read_file", arguments))
+        // The runtime already read the answer as a call: name, id and arguments come across
+        // the seam separated, so no layer above has to guess from prose.
+        session.deltas = { piece ->
+          listOf(LocalAnswerDelta(toolCallIndex = 0, toolCall = LocalToolCall("call_1", "read_file", piece)))
+        }
       }
     }
 
@@ -203,10 +203,10 @@ class LocalAiWireTest {
 
     assertEquals("done", events.filterIsInstance<LlmStreamEvent.Token>().joinToString("") { it.text })
     // What the model was actually offered, read back off the request the server received.
-    val turn = trio.engine.sessions.single().turns.single()
-    assertEquals(24, turn.inputs.tools.size)
-    assertEquals(2, turn.inputs.messages.size)
-    assertEquals(playbook, turn.inputs.messages.first().content)
+    val inputs = trio.engine.sessions.single().requests.single().inputs
+    assertEquals(24, inputs.tools.size)
+    assertEquals(2, inputs.messages.size)
+    assertEquals(playbook, inputs.messages.first().content)
   }
 
   @Test

@@ -128,12 +128,12 @@ class LocalAiRuntimeTest {
   }
 
   @Test
-  fun `a build with no inference engine offers no on-device provider`() = runTest {
+  fun `a device without the Python environment offers no on-device provider`() = runTest {
     val local = serving("lfm2", engine = FakeEngine(available = false))
 
     assertNull(local.provider.value)
     assertNull(local.endpoint.value)
-    assertTrue(local.unavailableReason!!.contains("inference engine"))
+    assertTrue(local.unavailableReason!!.contains("Python environment"))
   }
 
   @Test
@@ -202,8 +202,10 @@ class LocalAiRuntimeTest {
     assertEquals("The answer is 42.", streamed.toString())
     assertEquals("The answer is 42.", completed?.content)
     assertEquals(LlmFinishReason.STOP, completed?.finishReason)
-    // The transcript reached the template in the shape the model was trained on.
-    assertEquals("user: what is six times seven?", engine.sessions.single().turns.single().prompt)
+    // The transcript reaches the runtime as messages: rendering them into the shape this model
+    // was trained on is the Python side's job, next door to the file that says what that is.
+    val inputs = engine.sessions.single().requests.single().inputs
+    assertEquals(listOf("user: what is six times seven?"), inputs.messages.map { "${it.role}: ${it.content}" })
   }
 
   @Test

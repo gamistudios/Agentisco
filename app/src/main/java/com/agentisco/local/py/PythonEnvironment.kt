@@ -123,17 +123,14 @@ class PythonEnvironment(
     }.also { log += "-> exit $it" }
   }
 
-  private fun modelsHostDir(): File = LocalModelPaths.hostDir(filesDir)
-
   /**
    * The venv's own marker files. `bin/python` is a symlink to an absolute *guest* path, so
    * from the host it dangles and reports as missing; `pyvenv.cfg` and `bin/pip` are real
    * files, and a directory holding both is a virtualenv whatever else changed underneath it.
    */
-  private fun venvOnDisk(): Boolean {
-    val venv = File(modelsHostDir(), ".venv")
-    return File(venv, "pyvenv.cfg").isFile && File(venv, "bin/pip").isFile
-  }
+  private fun venvOnDisk(): Boolean = venvPresent(filesDir)
+
+  private fun modelsHostDir(): File = LocalModelPaths.hostDir(filesDir)
 
   /** One labelled guest command. Each is idempotent, so a rerun repairs rather than repeats. */
   private class Step(val label: String, val command: String)
@@ -175,5 +172,17 @@ class PythonEnvironment(
   companion object {
     /** Lines of guest output the screen keeps. The tail is what matters when a step fails. */
     const val LOG_LINES = 60
+
+    /**
+     * Whether a virtualenv exists on disk, as the cheap host-side answer to "can a model run".
+     *
+     * Only the guest knows whether the packages still import, and asking costs a proot launch;
+     * this is the check that decides whether asking is even worth it. A venv that is present but
+     * broken fails later, with the interpreter's own words in the reason.
+     */
+    fun venvPresent(filesDir: File): Boolean {
+      val venv = File(LocalModelPaths.hostDir(filesDir), ".venv")
+      return File(venv, "pyvenv.cfg").isFile && File(venv, "bin/pip").isFile
+    }
   }
 }

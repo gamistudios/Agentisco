@@ -31,14 +31,14 @@ import kotlinx.coroutines.launch
  * approval and tool machinery as any cloud endpoint, with no branch anywhere that asks
  * which kind of model it is talking to.
  *
- * Two things decide when the server exists. A build without the native engine has nothing
- * to serve, so it never binds a port; and a device with no installed model has no reason
- * to hold one. Otherwise the server lives for as long as the first model does, and the
+ * Two things decide when the server exists. A device whose Python environment is not set up
+ * has nothing to serve, so it never binds a port; and a device with no installed model has no
+ * reason to hold one. Otherwise the server lives for as long as the first model does, and the
  * model itself stays asleep until a request actually needs it.
  */
 class LocalAiRuntime(
   val repository: LocalModelRepository,
-  private val engine: LocalInferenceEngine = LocalInferenceEngine(repository),
+  private val engine: LocalInferenceEngine,
   private val server: LocalAiServer = LocalAiServer(LocalAiApi(engine, repository)),
   private val dispatcher: CoroutineDispatcher = Dispatchers.Default
 ) {

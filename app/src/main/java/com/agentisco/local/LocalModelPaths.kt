@@ -34,4 +34,13 @@ object LocalModelPaths {
   fun hostDir(filesDir: File): File = File(filesDir, HOST_DIR_NAME)
 
   fun hostScript(filesDir: File): File = File(hostDir(filesDir), SERVER_SCRIPT_NAME)
+
+  /**
+   * The same file as the guest reads it.
+   *
+   * The model directory is bind-mounted rather than copied, so a host path under [hostDir] has
+   * an exact guest twin by name — which is how a download the app wrote becomes a file the
+   * Python runtime can open without either side holding a second copy.
+   */
+  fun guestPath(hostFile: File): String = "$GUEST_DIR/${hostFile.name}"
 }

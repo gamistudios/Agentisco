@@ -3,15 +3,13 @@ package com.agentisco.local.server
 import com.agentisco.data.repository.LocalModelRepository
 import com.agentisco.local.model.LocalGenerationSettings
 import com.agentisco.local.model.LocalModel
+import com.agentisco.local.runtime.LocalAnswerDelta
 import com.agentisco.local.runtime.LocalChatInputs
 import com.agentisco.local.runtime.LocalChatMessage
 import com.agentisco.local.runtime.LocalChatTool
-import com.agentisco.local.runtime.LocalChatTurn
 import com.agentisco.local.runtime.LocalEngineException
 import com.agentisco.local.runtime.LocalFinishReason
 import com.agentisco.local.runtime.LocalInferenceEngine
-import com.agentisco.local.runtime.LocalParseDelta
-import com.agentisco.local.runtime.LocalParsedMessage
 import com.agentisco.local.runtime.LocalPromptTooLongException
 import com.agentisco.local.runtime.LocalToolCall
 import org.json.JSONArray
@@ -25,8 +23,8 @@ import java.util.UUID
  * what makes a local model *not* a special case: the agent loop, the streaming UI, the
  * retries, the approvals and the tool runner all keep working untouched, because from
  * their side there is just another provider at a base URL. Nothing in this file knows
- * about GGUF, tokens or JNI — it knows the wire format, and it asks [LocalInferenceEngine]
- * for an answer.
+ * about GGUF, tokens or template dialects — it knows the wire format, and it asks
+ * [LocalInferenceEngine] for an answer.
  *
  * Transport lives next door in [LocalAiServer]; this class takes a request body and a
  * callback for streamed chunks, which keeps every rule here testable on the JVM.
@@ -129,49 +127,42 @@ class LocalAiApi(
         return Reply.Body(400, errorJson(it.message ?: "The request does not fit the chat format", "invalid_request_error"))
       }
 
-    val turn = try {
-      engine.openTurn(model, parsed.chatInputs)
+    // Loading the model is what makes its template's abilities known. A model whose template has
+    // nowhere to put tool definitions would answer as though no tools had been offered at all —
+    // a quietly wrong answer, so it is refused instead.
+    val capabilities = try {
+      engine.capabilities(model)
     } catch (e: LocalEngineException) {
       return Reply.Body(503, errorJson(e.message ?: "The model could not start", "server_error"))
     }
-    return try {
-      // Rendering the request is what made the template's capabilities known. A model whose
-      // template has nowhere to put tool definitions would answer as though no tools had
-      // been offered at all — a quietly wrong answer, so it is refused instead.
-      if (parsed.chatInputs.tools.isNotEmpty() && engine.loadedCapabilities()?.supportsTools == false) {
-        Reply.Body(
-          400,
-          errorJson("The model '$modelId' has no tool-calling template, so it cannot be given tools.", "invalid_request_error")
-        )
-      } else {
-        runCompletion(model, parsed, turn, emit)
-      }
-    } finally {
-      turn.close()
+    if (parsed.chatInputs.tools.isNotEmpty() && !capabilities.supportsTools) {
+      return Reply.Body(
+        400,
+        errorJson("The model '$modelId' has no tool-calling template, so it cannot be given tools.", "invalid_request_error")
+      )
     }
+    return runCompletion(model, parsed, emit)
   }
 
   /**
    * Decodes one turn and hands the answer out, streamed or whole.
    *
-   * Two things happen between the engine and the client. The sequences that end the
-   * turn are watched for and cut — llama.cpp's stop-string hook is not in the build
-   * this runs in, so a model's own end-of-turn marker arrives as ordinary text and
-   * would reach the conversation if nothing caught it. And the answer is read back
-   * through the template's own parser, so what the client sees is content, reasoning
-   * and tool calls rather than the markup the model wrapped them in.
+   * The runtime has already rendered the transcript with the model's own template, watched for
+   * the sequences that end the turn and read the answer back into content, reasoning and tool
+   * calls — so what arrives here is exactly what a client is told. This layer only keeps the
+   * OpenAI envelope: the opening frame rides with the first real delta rather than before the
+   * decode starts, because once it is written the only remaining answer is a truncated one,
+   * and before it a failure can still be returned as the plain 4xx request error that it is.
    */
   private suspend fun runCompletion(
     model: LocalModel,
     request: WireRequest,
-    turn: LocalChatTurn,
     emit: (String) -> Boolean
   ): Reply {
     val id = "chatcmpl-" + UUID.randomUUID().toString().replace("-", "")
     val created = System.currentTimeMillis() / 1000L
     val stream = request.stream
-    val visible = StringBuilder()
-    val filter = StopSequenceFilter(turn.stopSequences + request.stop)
+    val answer = Answer()
     var clientGone = false
     var headSent = false
 
@@ -181,48 +172,24 @@ class LocalAiApi(
       return emit(chunk(id, created, request.model, JSONObject().put("role", "assistant"), null))
     }
 
-    /** Re-reads everything shown so far and pushes whatever is new. */
-    fun publish(): Boolean {
-      // Only a client that went away is a reason to stop the decode; a caller that asked
-      // for the answer in one piece has nowhere to push to and keeps going.
-      if (clientGone) return false
-      if (!stream || visible.isEmpty()) return true
-      for (delta in turn.parse(visible.toString(), partial = true).deltas) {
-        val node = deltaNode(delta) ?: continue
-        // The opening frame goes out with the first real delta rather than before the
-        // decode starts. Once it is written the client is told a completion is on its
-        // way and the only remaining answer is a truncated one; before it, a failure can
-        // still be returned as the plain 4xx request error that it is.
-        if (!headSent && !emitHead()) {
-          clientGone = true
-          return false
-        }
-        if (!emit(chunk(id, created, request.model, node, null))) {
-          clientGone = true
-          return false
-        }
-      }
-      return true
-    }
-
     var finish = LocalFinishReason.END_OF_SEQUENCE
     var failure: LocalEngineException? = null
     try {
-      finish = engine.generate(
-        model = model,
-        prompt = turn.prompt,
-        grammar = turn.grammar,
-        seed = request.seed,
-        settings = request.settings
-      ) { piece ->
-        val text = filter.feed(piece)
-        if (text.isNotEmpty()) {
-          visible.append(text)
-          if (!publish()) return@generate false
+      finish = engine.chat(model, request.chatInputs, request.settings, request.seed) { delta ->
+        answer.append(delta)
+        // Only a client that went away is a reason to stop the decode; a caller that asked for
+        // the answer in one piece has nowhere to push to and keeps going.
+        if (!stream || clientGone) return@chat true
+        val node = deltaNode(delta) ?: return@chat true
+        if (!headSent && !emitHead()) {
+          clientGone = true
+          return@chat false
         }
-        // End of the turn, or a client that stopped listening: either way there is no
-        // sense spending the rest of the battery budget on text nobody will read.
-        !clientGone && filter.triggered == null
+        if (!emit(chunk(id, created, request.model, node, null))) {
+          clientGone = true
+          return@chat false
+        }
+        true
       }
     } catch (e: LocalEngineException) {
       failure = e
@@ -245,18 +212,11 @@ class LocalAiApi(
       }
     }
 
-    val tail = filter.flush()
-    if (tail.isNotEmpty()) {
-      visible.append(tail)
-      publish()
-    }
-
-    val answer = if (visible.isEmpty()) LocalParsedMessage.empty else turn.parse(visible.toString(), partial = false)
-    val finishReason = finishReasonFor(finish, filter.triggered, answer)
+    val finishReason = finishReasonFor(finish, answer)
 
     if (!stream) return Reply.Body(200, completionJson(id, created, request.model, answer, finishReason))
 
-    // A turn that showed no text — an empty answer, or markup the parser consumed — still
+    // A turn that showed no text — an empty answer, or markup the runtime consumed — still
     // has to open its stream the way every other one does: role first, then the end.
     if (!clientGone && !headSent) emitHead()
     emit(chunk(id, created, request.model, JSONObject(), finishReason))
@@ -267,39 +227,64 @@ class LocalAiApi(
   private companion object {
     const val OWNERSHIP = "agentisco-local"
 
-    /** Maps the engine's reason for stopping onto OpenAI's `finish_reason`. */
-    fun finishReasonFor(
-      finish: LocalFinishReason,
-      stopSequence: String?,
-      answer: LocalParsedMessage
-    ): String = when {
-      answer.toolCalls.isNotEmpty() -> "tool_calls"
-      // A turn that ended on its own marker is finished, however the decoder counts it.
-      stopSequence != null -> "stop"
+    /** Maps the runtime's reason for stopping onto OpenAI's `finish_reason`. */
+    fun finishReasonFor(finish: LocalFinishReason, answer: Answer): String = when {
       finish == LocalFinishReason.MAX_TOKENS || finish == LocalFinishReason.CONTEXT_FULL -> "length"
+      finish == LocalFinishReason.ABORTED -> "abort"
+      // A call the model finished writing is a call the caller has to run; a turn that ended
+      // on its own marker is finished, however the decoder counts it.
+      answer.toolCalls.isNotEmpty() -> "tool_calls"
       else -> "stop"
     }
 
     /** One streamed change in the shape the client appends deltas from. */
-    fun deltaNode(delta: LocalParseDelta): JSONObject? {
+    fun deltaNode(delta: LocalAnswerDelta): JSONObject? {
       val node = JSONObject()
       if (delta.reasoning.isNotEmpty()) node.put("reasoning_content", delta.reasoning)
       if (delta.content.isNotEmpty()) node.put("content", delta.content)
       val call = delta.toolCall
       if (call != null) {
-        val opening = JSONObject()
-        if (call.id.isNotEmpty()) opening.put("id", call.id).put("type", "function")
+        val piece = JSONObject().put("index", delta.toolCallIndex)
+        if (call.id.isNotEmpty()) piece.put("id", call.id).put("type", "function")
         val function = JSONObject()
         if (call.name.isNotEmpty()) function.put("name", call.name)
         if (call.argumentsJson.isNotEmpty()) function.put("arguments", call.argumentsJson)
-        if (function.length() > 0) opening.put("function", function)
-        if (opening.length() > 0) {
-          opening.put("index", delta.toolCallIndex)
-          node.put("tool_calls", JSONArray().put(opening))
-        }
+        if (function.length() > 0) piece.put("function", function)
+        if (piece.length() > 1) node.put("tool_calls", JSONArray().put(piece))
       }
       return node.takeIf { it.length() > 0 }
     }
+  }
+}
+
+/**
+ * The answer as it arrives, reassembled from its fragments.
+ *
+ * A tool call streams as its name and id once and its arguments growing token by token, so
+ * they are joined here by index — which is how a client that asked for one JSON body gets the
+ * same calls a streaming client assembles for itself.
+ */
+internal class Answer {
+  private val text = StringBuilder()
+  private val thinking = StringBuilder()
+  private val calls = sortedMapOf<Int, LocalToolCall>()
+
+  val content: String get() = text.toString()
+  val reasoning: String get() = thinking.toString()
+
+  /** Only a call that named its function is one the caller can run. */
+  val toolCalls: List<LocalToolCall> get() = calls.values.filter { it.name.isNotEmpty() }
+
+  fun append(delta: LocalAnswerDelta) {
+    text.append(delta.content)
+    thinking.append(delta.reasoning)
+    val piece = delta.toolCall ?: return
+    val previous = calls[delta.toolCallIndex] ?: LocalToolCall("", "", "")
+    calls[delta.toolCallIndex] = LocalToolCall(
+      id = piece.id.ifEmpty { previous.id },
+      name = piece.name.ifEmpty { previous.name },
+      argumentsJson = previous.argumentsJson + piece.argumentsJson
+    )
   }
 }
 
@@ -337,7 +322,7 @@ private fun completionJson(
   id: String,
   created: Long,
   model: String,
-  answer: LocalParsedMessage,
+  answer: Answer,
   finishReason: String
 ): String = JSONObject()
   .put("id", id)
@@ -419,7 +404,8 @@ private class WireRequest(raw: JSONObject, saved: LocalGenerationSettings) {
     // A caller that asks for no thinking is honoured; `reasoning_effort: none` is the
     // OpenAI-shaped way to say the same thing.
     enableThinking = thinkingRequested(raw),
-    parallelToolCalls = raw.optBoolean("parallel_tool_calls", false)
+    parallelToolCalls = raw.optBoolean("parallel_tool_calls", false),
+    stop = stop
   )
 }
 

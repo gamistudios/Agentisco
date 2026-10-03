@@ -14,16 +14,15 @@ import com.agentisco.local.model.LocalModelInstallStatus
 import com.agentisco.local.model.LocalRuntimeSettings
 import com.agentisco.local.runtime.LoadedLocalModel
 import com.agentisco.local.runtime.LoadedModelInfo
+import com.agentisco.local.runtime.LocalAnswerDelta
 import com.agentisco.local.runtime.LocalChatInputs
 import com.agentisco.local.runtime.LocalChatMessage
+import com.agentisco.local.runtime.LocalChatRequest
 import com.agentisco.local.runtime.LocalChatTool
-import com.agentisco.local.runtime.LocalChatTurn
 import com.agentisco.local.runtime.LocalEngineException
 import com.agentisco.local.runtime.LocalFinishReason
-import com.agentisco.local.runtime.LocalGenerationRequest
 import com.agentisco.local.runtime.LocalInferenceEngine
 import com.agentisco.local.runtime.LocalModelEngine
-import com.agentisco.local.runtime.LocalParsedMessage
 import com.agentisco.local.runtime.LocalPromptTooLongException
 import com.agentisco.local.runtime.LocalTemplateCapabilities
 import kotlinx.coroutines.Dispatchers
@@ -44,13 +43,12 @@ import java.io.File
 import java.nio.charset.StandardCharsets
 
 /**
- * Lifecycle rules for the on-device engine: nothing loaded until it is needed, one
- * model at a time, a file proven before it is opened, and a failure that leaves the
- * user's download intact.
+ * Lifecycle rules for the on-device runtime: nothing loaded until it is needed, one model at a
+ * time, a file proven before it is opened, and a failure that leaves the user's download intact.
  *
- * The repository is real — models install through the same verified transfer a device
- * uses — while the decode backend is a fake, so these tests are about ownership and
- * integrity rather than about llama.cpp itself.
+ * The repository is real — models install through the same verified transfer a device uses —
+ * while the decode backend is a fake, so these tests are about ownership and integrity rather
+ * than about the Python environment, which owns the chat template and the answer read-back.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -75,8 +73,7 @@ class LocalInferenceEngineTest {
         val path: String,
         val runtime: LocalRuntimeSettings
     ) : LoadedLocalModel {
-        val requests = mutableListOf<LocalGenerationRequest>()
-        val turns = mutableListOf<LocalChatInputs>()
+        val requests = mutableListOf<LocalChatRequest>()
         var reply = listOf("hello")
         var finish = LocalFinishReason.END_OF_SEQUENCE
         var failure: Throwable? = null
@@ -89,27 +86,24 @@ class LocalInferenceEngineTest {
             supportsTools = true,
             supportsParallelToolCalls = true,
             supportsThinking = false,
-            supportsSystemMessage = true,
-            supportsTypedContent = false
+            supportsSystemMessage = true
         )
 
         override val info: LoadedModelInfo =
-            LoadedModelInfo("fake", "lfm2", "", "</s>", 65536, runtime.contextSize, 8192, true)
+            LoadedModelInfo("fake", "lfm2", 65536, runtime.contextSize)
 
-        override fun templateCapabilities(): LocalTemplateCapabilities {
+        override fun capabilities(): LocalTemplateCapabilities {
             capabilityReads++
+            if (!capabilities.available) throw LocalEngineException(capabilities.reason)
             return capabilities
         }
 
-        override fun openTurn(inputs: LocalChatInputs): LocalChatTurn {
-            if (!capabilities.available) throw LocalEngineException(capabilities.reason)
-            return FakeTurn(inputs).also { turns += inputs }
-        }
-
-        override fun generate(request: LocalGenerationRequest, onPiece: (String) -> Boolean): LocalFinishReason {
+        override fun chat(request: LocalChatRequest, onDelta: (LocalAnswerDelta) -> Boolean): LocalFinishReason {
             requests += request
             failure?.let { throw it }
-            for (piece in reply) if (!onPiece(piece)) return LocalFinishReason.STOPPED
+            for (piece in reply) {
+                if (!onDelta(LocalAnswerDelta(content = piece))) return LocalFinishReason.ABORTED
+            }
             return finish
         }
 
@@ -122,27 +116,10 @@ class LocalInferenceEngineTest {
         }
     }
 
-    /** A turn that renders by joining the messages, so the layer above can be asserted on. */
-    private class FakeTurn(val inputs: LocalChatInputs) : LocalChatTurn {
-        var closes = 0
-        var parses = 0
-        var reply = LocalParsedMessage("ok", "", emptyList(), emptyList(), rejected = false)
-        override val prompt: String get() = inputs.messages.joinToString("\n") { "${it.role}: ${it.content}" }
-        override val grammar: String? get() = null
-        override val stopSequences: List<String> get() = listOf("end of turn")
-        override val format: String get() = "FAKE"
-        override val expectsToolCalls: Boolean get() = inputs.tools.isNotEmpty()
-        override val supportsThinking: Boolean get() = false
-        override fun parse(text: String, partial: Boolean): LocalParsedMessage {
-            parses++
-            return reply
-        }
-        override fun close() {
-            closes++
-        }
-    }
-
-    private class FakeEngine(var available: Boolean = true) : LocalModelEngine {
+    private class FakeEngine(
+        var available: Boolean = true,
+        override val unavailableReason: String = NO_ENVIRONMENT
+    ) : LocalModelEngine {
         val sessions = mutableListOf<FakeSession>()
         var threadCount = 8
         var loadFailure: Throwable? = null
@@ -153,10 +130,15 @@ class LocalInferenceEngineTest {
 
         override fun load(path: String, runtime: LocalRuntimeSettings): LoadedLocalModel {
             loadFailure?.let { throw it }
+            if (!available) throw LocalEngineException(unavailableReason)
             return FakeSession(path, runtime).also { sessions += it }
         }
 
         override fun shutdown() {}
+
+        companion object {
+            const val NO_ENVIRONMENT = "The Python environment the models run in is not set up yet."
+        }
     }
 
     private class ServingSource(private val payload: ByteArray) : UpdateStreamSource {
@@ -220,14 +202,22 @@ class LocalInferenceEngineTest {
     private fun engineFor(repository: LocalModelRepository, fake: FakeEngine) =
         LocalInferenceEngine(repository, fake, Dispatchers.Unconfined)
 
-    private suspend fun generateOnce(engine: LocalInferenceEngine, model: LocalModel): String {
+    private fun chatInputs(id: String) = LocalChatInputs(
+        messages = listOf(
+            LocalChatMessage("system", "be terse"),
+            LocalChatMessage("user", "what is $id?")
+        ),
+        tools = listOf(LocalChatTool("lookup", "find a thing", """{"type":"object"}"""))
+    )
+
+    private suspend fun answerOnce(engine: LocalInferenceEngine, model: LocalModel): String {
         val pieces = StringBuilder()
-        engine.generate(model, "hi") { pieces.append(it); true }
+        engine.chat(model, chatInputs("alpha")) { pieces.append(it.content); true }
         return pieces.toString()
     }
 
     private suspend fun failureOf(engine: LocalInferenceEngine, model: LocalModel): Throwable? =
-        runCatching { engine.generate(model, "hi") { true } }.exceptionOrNull()
+        runCatching { engine.chat(model, chatInputs("alpha")) { true } }.exceptionOrNull()
 
     // ---- laziness ----
 
@@ -243,7 +233,7 @@ class LocalInferenceEngineTest {
         assertNull(engine.loadedModelId)
         assertTrue("no model may be resident before it is asked for", fake.sessions.isEmpty())
 
-        assertEquals("hello", generateOnce(engine, installed))
+        assertEquals("hello", answerOnce(engine, installed))
         assertEquals(listOf(File(modelsDir, "alpha.gguf").absolutePath), fake.sessions.map { it.path })
         assertEquals("alpha", engine.loadedModelId)
     }
@@ -256,8 +246,8 @@ class LocalInferenceEngineTest {
         val fake = FakeEngine()
         val engine = engineFor(repository, fake)
 
-        engine.generate(installed, "one") { true }
-        engine.generate(installed, "two") { true }
+        engine.chat(installed, chatInputs("one")) { true }
+        engine.chat(installed, chatInputs("two")) { true }
 
         assertEquals(1, fake.sessions.size)
         assertEquals(2, fake.sessions.single().requests.size)
@@ -275,8 +265,8 @@ class LocalInferenceEngineTest {
         val fake = FakeEngine()
         val engine = engineFor(repository, fake)
 
-        engine.generate(alpha, "a") { true }
-        engine.generate(beta, "b") { true }
+        engine.chat(alpha, chatInputs("a")) { true }
+        engine.chat(beta, chatInputs("b")) { true }
 
         assertEquals(listOf("alpha.gguf", "beta.gguf"), fake.sessions.map { File(it.path).name })
         assertEquals(1, fake.sessions.first().closes)
@@ -291,37 +281,46 @@ class LocalInferenceEngineTest {
         val fake = FakeEngine()
         val engine = engineFor(repository, fake)
 
-        engine.generate(installed, "first") { true }
+        engine.chat(installed, chatInputs("first")) { true }
         repository.updateConfiguration(
             "alpha",
             LocalModelConfiguration(runtime = LocalRuntimeSettings(contextSize = 4096, threadCount = 2))
         )
-        engine.generate(installed, "second") { true }
+        engine.chat(installed, chatInputs("second")) { true }
 
         assertEquals(2, fake.sessions.size)
         assertEquals(1, fake.sessions.first().closes)
-        assertEquals(listOf(LocalRuntimeSettings.DEFAULT_CONTEXT, 4096), fake.sessions.map { it.runtime.contextSize })
-        // "use all" was resolved at load, and the saved thread count is what a request runs with.
-        assertEquals(listOf(8, 2), fake.sessions.map { it.runtime.threadCount })
+        assertEquals(
+            listOf(LocalRuntimeSettings.DEFAULT_CONTEXT, 4096),
+            fake.sessions.map { it.runtime.contextSize }
+        )
+        // What the user saved is what the runtime is handed; turning "use every core" into a
+        // number is the Python runtime's decision, not this layer's.
+        assertEquals(listOf(0, 2), fake.sessions.map { it.runtime.threadCount })
     }
 
     @Test
-    fun `thread count zero means the engine's own count, not one`() = runTest {
+    fun `the transcript reaches the runtime whole, in the order it was sent`() = runTest {
         val payload = ggufBytes(4096)
         val repository = repositoryFor(payload)
         val installed = install(repository, "alpha", payload)
-        val fake = FakeEngine().apply { threadCount = 6 }
+        val fake = FakeEngine()
         val engine = engineFor(repository, fake)
 
-        engine.generate(installed, "hi") { true }
+        engine.chat(installed, chatInputs("alpha")) { true }
 
-        assertEquals(6, fake.sessions.single().runtime.threadCount)
+        val request = fake.sessions.single().requests.single()
+        assertEquals(
+            listOf("system: be terse", "user: what is alpha?"),
+            request.inputs.messages.map { "${it.role}: ${it.content}" }
+        )
+        assertEquals(listOf("lookup"), request.inputs.tools.map { it.name })
     }
 
     // ---- integrity before inference ----
 
     @Test
-    fun `a model that is not installed is refused before the engine is touched`() = runTest {
+    fun `a model that is not installed is refused before the runtime is touched`() = runTest {
         val payload = ggufBytes(4096)
         val repository = repositoryFor(payload)
         val fake = FakeEngine()
@@ -335,7 +334,7 @@ class LocalInferenceEngineTest {
     }
 
     @Test
-    fun `a file that no longer matches its checksum is not handed to the engine`() = runTest {
+    fun `a file that no longer matches its checksum is not handed to the runtime`() = runTest {
         val payload = ggufBytes(4096)
         val repository = repositoryFor(payload)
         val installed = install(repository, "alpha", payload)
@@ -352,17 +351,18 @@ class LocalInferenceEngineTest {
     }
 
     @Test
-    fun `a build without the engine says so instead of crashing`() = runTest {
+    fun `a device without the Python environment says so instead of crashing`() = runTest {
         val payload = ggufBytes(4096)
         val repository = repositoryFor(payload)
         val installed = install(repository, "alpha", payload)
-        val engine = engineFor(repository, FakeEngine(available = false))
+        val fake = FakeEngine(available = false)
+        val engine = engineFor(repository, fake)
 
         assertFalse(engine.isAvailable)
         val error = failureOf(engine, installed)
 
         assertTrue(error is LocalEngineException)
-        assertTrue(error!!.message!!.contains("inference engine"))
+        assertTrue(error!!.message!!.contains("Python environment"))
     }
 
     // ---- memory and failure ----
@@ -385,13 +385,13 @@ class LocalInferenceEngineTest {
     }
 
     @Test
-    fun `a failure mid-generation drops the context but keeps the model`() = runTest {
+    fun `a failure mid-turn drops the context but keeps the model`() = runTest {
         val payload = ggufBytes(4096)
         val repository = repositoryFor(payload)
         val installed = install(repository, "alpha", payload)
         val fake = FakeEngine()
         val engine = engineFor(repository, fake)
-        generateOnce(engine, installed)
+        answerOnce(engine, installed)
 
         fake.sessions.single().failure = LocalEngineException("Failed to evaluate generated token")
         assertNotNull(failureOf(engine, installed))
@@ -402,14 +402,14 @@ class LocalInferenceEngineTest {
 
         // The next attempt opens the model again rather than staying broken.
         fake.sessions.single().failure = null
-        assertEquals("hello", generateOnce(engine, installed))
+        assertEquals("hello", answerOnce(engine, installed))
         assertEquals(2, fake.sessions.size)
     }
 
     /**
-     * A prompt longer than the window is the request being wrong, not the model being
-     * broken. Dropping the resident model here would make every turn after it pay for a
-     * reload that cannot change the answer.
+     * A prompt longer than the window is the request being wrong, not the model being broken.
+     * Dropping the resident model here would make every turn after it pay for a reload that
+     * cannot change the answer.
      */
     @Test
     fun `a prompt too long for the context leaves the model loaded`() = runTest {
@@ -418,7 +418,7 @@ class LocalInferenceEngineTest {
         val installed = install(repository, "alpha", payload)
         val fake = FakeEngine()
         val engine = engineFor(repository, fake)
-        generateOnce(engine, installed)
+        answerOnce(engine, installed)
 
         fake.sessions.single().failure = LocalPromptTooLongException("needs 2900 tokens, holds 2048")
         assertTrue(failureOf(engine, installed) is LocalPromptTooLongException)
@@ -426,34 +426,35 @@ class LocalInferenceEngineTest {
 
         assertEquals(0, fake.sessions.single().closes)
         assertEquals("alpha", engine.loadedModelId)
-        assertEquals("hello", generateOnce(engine, installed))
+        assertEquals("hello", answerOnce(engine, installed))
         assertEquals(1, fake.sessions.size)
     }
 
     @Test
-    fun `stopping the engine reaches the model that is running`() = runTest {
+    fun `stopping the runtime reaches the model that is running`() = runTest {
         val payload = ggufBytes(4096)
         val repository = repositoryFor(payload)
         val installed = install(repository, "alpha", payload)
         val fake = FakeEngine()
         val engine = engineFor(repository, fake)
-        generateOnce(engine, installed)
+        answerOnce(engine, installed)
 
         val session = fake.sessions.single()
         session.reply = listOf("one ", "two ", "three ")
 
         val seen = mutableListOf<String>()
-        val finish = engine.generate(installed, "hi") { piece ->
+        val finish = engine.chat(installed, chatInputs("alpha")) { delta ->
             if (seen.size == 2) {
-                engine.stop() // a client that goes away stops asking for pieces
+                // a client that goes away stops asking for pieces
+                engine.stop()
                 false
             } else {
-                seen += piece
+                seen += delta.content
                 true
             }
         }
 
-        assertEquals(LocalFinishReason.STOPPED, finish)
+        assertEquals(LocalFinishReason.ABORTED, finish)
         assertEquals(listOf("one ", "two "), seen)
         assertEquals(1, session.aborts)
     }
@@ -465,14 +466,14 @@ class LocalInferenceEngineTest {
         val installed = install(repository, "alpha", payload)
         val fake = FakeEngine()
         val engine = engineFor(repository, fake)
-        generateOnce(engine, installed)
+        answerOnce(engine, installed)
 
         engine.release()
 
         assertNull(engine.loadedModelId)
         assertEquals(1, fake.sessions.single().closes)
 
-        engine.generate(installed, "again") { true }
+        engine.chat(installed, chatInputs("again")) { true }
         assertEquals(2, fake.sessions.size)
     }
 
@@ -483,46 +484,16 @@ class LocalInferenceEngineTest {
         val installed = install(repository, "alpha", payload)
         val fake = FakeEngine()
         val engine = engineFor(repository, fake)
-        generateOnce(engine, installed)
+        answerOnce(engine, installed)
         fake.sessions.single().finish = LocalFinishReason.CONTEXT_FULL
 
-        val finish = engine.generate(installed, "long") { true }
+        val finish = engine.chat(installed, chatInputs("long")) { true }
 
         assertEquals(LocalFinishReason.CONTEXT_FULL, finish)
         assertEquals(0, fake.sessions.single().closes)
     }
 
-    // ---- chat templates ----
-
-    private fun chatInputs(id: String) = LocalChatInputs(
-        messages = listOf(
-            LocalChatMessage("system", "be terse"),
-            LocalChatMessage("user", "what is $id?")
-        ),
-        tools = listOf(LocalChatTool("lookup", "find a thing", """{"type":"object"}"""))
-    )
-
-    @Test
-    fun `a turn is rendered by the model's own template and its prompt is what runs`() = runTest {
-        val payload = ggufBytes(4096)
-        val repository = repositoryFor(payload)
-        val installed = install(repository, "alpha", payload)
-        val fake = FakeEngine()
-        val engine = engineFor(repository, fake)
-
-        val turn = engine.openTurn(installed, chatInputs("alpha"))
-        val pieces = StringBuilder()
-        val finish = engine.generate(installed, turn.prompt, turn.grammar) {
-            pieces.append(it)
-            true
-        }
-
-        assertEquals(LocalFinishReason.END_OF_SEQUENCE, finish)
-        assertEquals(listOf("system: be terse", "user: what is alpha?").joinToString("\n"), turn.prompt)
-        assertTrue(turn.expectsToolCalls)
-        assertEquals(listOf(turn.prompt), fake.sessions.single().requests.map { it.prompt })
-        assertEquals("hello", pieces.toString())
-    }
+    // ---- what the file can do ----
 
     @Test
     fun `what a model can do is read once when it loads, not on every request`() = runTest {
@@ -533,7 +504,7 @@ class LocalInferenceEngineTest {
         val engine = engineFor(repository, fake)
 
         assertTrue(engine.capabilities(installed).supportsTools)
-        engine.generate(installed, "hi") { true }
+        engine.chat(installed, chatInputs("alpha")) { true }
         engine.capabilities(installed)
 
         assertEquals(1, fake.sessions.size)
@@ -551,9 +522,9 @@ class LocalInferenceEngineTest {
         val repository = repositoryFor(payload)
         val installed = install(repository, "alpha", payload)
         val fake = FakeEngine()
-        val engine = engineFor(repository, fake)
-        // Capabilities are read when the model loads, so a file whose template will not
-        // compile is known before any turn is asked for.
+        val opened = mutableListOf<FakeSession>()
+        // Capabilities are read when the model loads, so a file whose template will not compile
+        // is known before any turn is asked for.
         val unavailable = LocalTemplateCapabilities(
             available = false,
             usesOwnTemplate = false,
@@ -561,19 +532,27 @@ class LocalInferenceEngineTest {
             supportsParallelToolCalls = false,
             supportsThinking = false,
             supportsSystemMessage = false,
-            supportsTypedContent = false,
             reason = "This model's chat template could not be compiled"
         )
-        val engineWithBrokenTemplate = object : LocalModelEngine by fake {
+        val engine = object : LocalModelEngine by fake {
             override fun load(path: String, runtime: LocalRuntimeSettings): LoadedLocalModel =
-                FakeSession(path, runtime).apply { capabilities = unavailable }
+                FakeSession(path, runtime).apply { capabilities = unavailable }.also { opened += it }
         }
-        val manager = LocalInferenceEngine(repository, engineWithBrokenTemplate, Dispatchers.Unconfined)
+        val manager = LocalInferenceEngine(repository, engine, Dispatchers.Unconfined)
 
-        assertFalse(manager.capabilities(installed).available)
-        val error = runCatching { manager.openTurn(installed, chatInputs("alpha")) }.exceptionOrNull()
+        // Refusing to render is the load failing, not a model that answers badly: the reason
+        // comes back as the engine's own words, and nothing is decoded.
+        val error = runCatching { manager.capabilities(installed) }.exceptionOrNull()
         assertTrue(error is LocalEngineException)
         assertTrue(error!!.message!!.contains("could not be compiled"))
+
+        assertTrue(runCatching { manager.chat(installed, chatInputs("alpha")) { true } }.isFailure)
+        assertTrue("a model that cannot render chat is not left holding memory", opened.isNotEmpty())
+        assertNull(manager.loadedModelId)
+        opened.forEach {
+            assertEquals("the refused model was closed again", 1, it.closes)
+            assertTrue("no turn was ever asked of it", it.requests.isEmpty())
+        }
     }
 
     @Test
@@ -586,33 +565,17 @@ class LocalInferenceEngineTest {
         val engine = engineFor(repository, fake)
 
         engine.capabilities(alpha)
-        val betaTurn = engine.openTurn(beta, chatInputs("beta"))
+        engine.chat(beta, chatInputs("beta")) { true }
 
         assertEquals("beta", engine.loadedModelId)
         assertEquals(1, fake.sessions.first().closes)
-        assertEquals(listOf("system: be terse", "user: what is beta?").joinToString("\n"), betaTurn.prompt)
-        assertTrue("the new model renders the request, not the one that was swapped out",
-            fake.sessions.last().turns.single().tools.isNotEmpty())
-    }
-
-    @Test
-    fun `a turn the caller never closes is still not a model left loaded`() = runTest {
-        val payload = ggufBytes(4096)
-        val repository = repositoryFor(payload)
-        val installed = install(repository, "alpha", payload)
-        val fake = FakeEngine()
-        val engine = engineFor(repository, fake)
-
-        val turn = engine.openTurn(installed, chatInputs("alpha")) as FakeTurn
-        turn.parse("partial answer", partial = true)
-        turn.close()
-
-        assertEquals(1, turn.parses)
-        assertEquals(1, turn.closes)
-        // Closing a turn releases the render, not the model: the next request reuses it.
-        assertEquals(1, fake.sessions.size)
-        assertEquals(0, fake.sessions.single().closes)
-        engine.release()
-        assertEquals(1, fake.sessions.single().closes)
+        assertEquals(
+            listOf("system: be terse", "user: what is beta?"),
+            fake.sessions.last().requests.single().inputs.messages.map { "${it.role}: ${it.content}" }
+        )
+        assertTrue(
+            "the new model answers the request, not the one that was swapped out",
+            fake.sessions.last().requests.single().inputs.tools.isNotEmpty()
+        )
     }
 }

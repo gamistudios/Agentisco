@@ -39,7 +39,7 @@ class LocalServerScriptTest {
     // Installed under the name the guest command runs, which is the only path the two sides
     // share; a rename here has to happen in LocalModelPaths too.
     assertEquals("serve.py", target.name)
-    assertTrue(target.readText().contains("PROTOCOL_VERSION = 1"))
+    assertTrue(target.readText().contains("PROTOCOL_VERSION = 2"))
   }
 
   @Test
@@ -47,8 +47,13 @@ class LocalServerScriptTest {
     val source = String(asset(), Charsets.UTF_8)
     assertTrue(source, source.startsWith("#!/usr/bin/env python3"))
     // The routes the Kotlin client calls, by name, so a rename on either side fails a test.
-    listOf("/health", "/v1/models", "/v1/load", "/v1/completions", "/abort", "/v1/unload").forEach {
+    listOf("/health", "/v1/models", "/v1/load", "/v1/chat/completions", "/abort", "/v1/unload").forEach {
       assertTrue("the script has no $it", source.contains("\"$it\""))
+    }
+    // The fields the client reads an answer out of: it splits these into prose, thinking and
+    // calls, and a script that stopped writing one would silently lose part of every answer.
+    listOf("\"messages\"", "\"delta\"", "\"finish_reason\"", "\"reasoning_content\"", "\"tool_calls\"").forEach {
+      assertTrue("the script neither takes nor writes $it", source.contains(it))
     }
     assertTrue(source, source.contains("class PromptTooLong"))
     assertTrue(source, source.contains("exceed context window"))

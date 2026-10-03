@@ -6,13 +6,10 @@ import com.agentisco.data.repository.LocalModelRepository
 import com.agentisco.data.repository.UpdateStream
 import com.agentisco.data.repository.UpdateStreamSource
 import com.agentisco.local.model.LocalModel
-import com.agentisco.local.runtime.LocalChatInputs
-import com.agentisco.local.runtime.LocalChatTurn
+import com.agentisco.local.runtime.LocalAnswerDelta
+import com.agentisco.local.runtime.LocalChatRequest
 import com.agentisco.local.runtime.LocalEngineException
 import com.agentisco.local.runtime.LocalFinishReason
-import com.agentisco.local.runtime.LocalGenerationRequest
-import com.agentisco.local.runtime.LocalParseDelta
-import com.agentisco.local.runtime.LocalParsedMessage
 import com.agentisco.local.runtime.LocalTemplateCapabilities
 import com.agentisco.local.runtime.LocalToolCall
 import com.agentisco.local.model.LocalRuntimeSettings
@@ -29,8 +26,8 @@ import java.security.MessageDigest
  *
  * The repository and the transfer are real — a model installs through the same verified
  * path a device uses — while the engine answers from a script. That is what lets the
- * routing, the stop sequences and the SSE framing run their actual code on the JVM,
- * leaving llama.cpp itself to the device test.
+ * routing and the SSE framing run their actual code on the JVM, leaving the chat template
+ * and the answer read-back to the Python runtime those are tested in.
  */
 
 private val CAPABLE = LocalTemplateCapabilities(
@@ -39,8 +36,7 @@ private val CAPABLE = LocalTemplateCapabilities(
   supportsTools = true,
   supportsParallelToolCalls = false,
   supportsThinking = false,
-  supportsSystemMessage = true,
-  supportsTypedContent = false
+  supportsSystemMessage = true
 )
 
 internal class FakeEngine(var available: Boolean = true) : LocalModelEngine {
@@ -48,16 +44,20 @@ internal class FakeEngine(var available: Boolean = true) : LocalModelEngine {
   var threadCount = 8
   var capabilities = CAPABLE
   var loadFailure: Throwable? = null
+  var unavailableText = "The Python environment is not set up yet."
 
   /** Applied to a session as it is created, so a test can script the answer before it runs. */
   var sessionScript: (FakeSession) -> Unit = {}
 
   override val isAvailable: Boolean get() = available
 
+  override val unavailableReason: String get() = unavailableText
+
   override fun systemThreads(): Int = threadCount
 
   override fun load(path: String, runtime: LocalRuntimeSettings): LoadedLocalModel {
     loadFailure?.let { throw it }
+    if (!available) throw LocalEngineException(unavailableText)
     return FakeSession(path, runtime, capabilities).also {
       sessionScript(it)
       sessions += it
@@ -73,10 +73,9 @@ internal class FakeSession(
   val capabilities: LocalTemplateCapabilities
 ) : LoadedLocalModel {
 
-  val requests = mutableListOf<LocalGenerationRequest>()
-  val turns = mutableListOf<FakeTurn>()
+  val requests = mutableListOf<LocalChatRequest>()
 
-  /** The pieces the decode hands out, one callback each. */
+  /** The pieces the decode hands out; each becomes [deltas] worth of answer. */
   var reply = listOf("hello")
   var finish = LocalFinishReason.END_OF_SEQUENCE
   var failure: Throwable? = null
@@ -89,32 +88,26 @@ internal class FakeSession(
   /** How many pieces the decode handed out, so a test can prove a run was cut short. */
   var consumed = 0
 
-  /** What this fake template writes at the end of a turn. */
-  var stopSequences = listOf("end of turn")
-
-  /** How the template reads a newly-arrived piece back: text, reasoning, or a call fragment. */
-  var deltas: (String) -> List<LocalParseDelta> = { piece -> listOf(LocalParseDelta(piece, "", -1, null)) }
-
-  /** The calls the finished answer contains. */
-  var calls: List<LocalToolCall> = emptyList()
+  /** How a newly-arrived piece of text is split: prose, reasoning, or a call fragment. */
+  var deltas: (String) -> List<LocalAnswerDelta> = { piece -> listOf(LocalAnswerDelta(content = piece)) }
 
   override val info: LoadedModelInfo =
-    LoadedModelInfo("fake", "lfm2", "", "</s>", 65536, runtime.contextSize, 8192, true)
+    LoadedModelInfo("fake", "lfm2", 65536, runtime.contextSize)
 
-  override fun templateCapabilities(): LocalTemplateCapabilities = capabilities
-
-  override fun openTurn(inputs: LocalChatInputs): LocalChatTurn {
-    if (!capabilities.available) throw LocalEngineException(capabilities.reason)
-    return FakeTurn(inputs, stopSequences, deltas = { piece -> deltas(piece) }, calls = { calls })
-      .also { turns += it }
+  override fun capabilities(): LocalTemplateCapabilities = capabilities.also {
+    // A file whose template will not render chat is known at load, before any turn is asked for.
+    if (!it.available) throw LocalEngineException(it.reason)
   }
 
-  override fun generate(request: LocalGenerationRequest, onPiece: (String) -> Boolean): LocalFinishReason {
+  override fun chat(request: LocalChatRequest, onDelta: (LocalAnswerDelta) -> Boolean): LocalFinishReason {
     requests += request
+    if (!capabilities.available) throw LocalEngineException(capabilities.reason)
     failIfDue()
     for (piece in reply) {
       consumed++
-      if (!onPiece(piece)) return LocalFinishReason.STOPPED
+      for (delta in deltas(piece)) {
+        if (!onDelta(delta)) return LocalFinishReason.ABORTED
+      }
       failIfDue()
     }
     return finish
@@ -127,46 +120,6 @@ internal class FakeSession(
 
   override fun abort() {
     aborts++
-  }
-
-  override fun close() {
-    closes++
-  }
-}
-
-/**
- * A template that treats generated text as content: the answer is the text, and each
- * parse reports only what arrived since the last one, which is how a real incremental
- * parser behaves.
- */
-internal class FakeTurn(
-  val inputs: LocalChatInputs,
-  override val stopSequences: List<String>,
-  private val deltas: (String) -> List<LocalParseDelta>,
-  private val calls: () -> List<LocalToolCall>
-) : LocalChatTurn {
-
-  var closes = 0
-  var parses = 0
-  private var reported = 0
-
-  override val prompt: String get() = inputs.messages.joinToString("\n") { "${it.role}: ${it.content}" }
-  override val grammar: String? get() = null
-  override val format: String get() = "FAKE"
-  override val expectsToolCalls: Boolean get() = inputs.tools.isNotEmpty()
-  override val supportsThinking: Boolean get() = false
-
-  override fun parse(text: String, partial: Boolean): LocalParsedMessage {
-    parses++
-    val fresh = if (text.length > reported) text.substring(reported) else ""
-    reported = maxOf(reported, text.length)
-    return LocalParsedMessage(
-      content = text,
-      reasoning = "",
-      toolCalls = if (partial) emptyList() else calls(),
-      deltas = if (fresh.isEmpty()) emptyList() else deltas(fresh),
-      rejected = false
-    )
   }
 
   override fun close() {
