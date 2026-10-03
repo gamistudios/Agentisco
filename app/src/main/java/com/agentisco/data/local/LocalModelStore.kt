@@ -166,6 +166,8 @@ class LocalModelStore(private val context: Context? = null) {
     })
     // Absent means "the default set", which is not the same as an empty one.
     configuration.allowedTools?.let { names -> put("tools", JSONArray(names.toList())) }
+    // Absent means Agentisco writes the briefing itself.
+    configuration.systemInstruction?.takeIf { it.isNotBlank() }?.let { put("systemInstruction", it) }
   }
 
   private fun JSONObject?.toModel(): LocalModel? {
@@ -209,7 +211,8 @@ class LocalModelStore(private val context: Context? = null) {
           ),
           allowedTools = obj.optJSONArray("tools")?.let { stored ->
             (0 until stored.length()).map { stored.optString(it) }.toSet()
-          }
+          },
+          systemInstruction = obj.optString("systemInstruction").takeIf { it.isNotBlank() }
         )
       )
     }.getOrNull()

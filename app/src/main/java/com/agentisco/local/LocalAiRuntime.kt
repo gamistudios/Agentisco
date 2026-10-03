@@ -191,6 +191,7 @@ class LocalAiRuntime(
       contextWindow = model.configuration.runtime.contextSize,
       maxOutputTokens = model.configuration.generation.maxOutputTokens,
       allowedToolNames = model.configuration.toolsOrDefault(),
+      systemInstruction = model.configuration.systemInstruction?.takeIf { it.isNotBlank() },
       capabilities = ModelCapabilities(
         tools = caps?.supportsTools ?: true,
         images = false,

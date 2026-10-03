@@ -140,12 +140,20 @@ data class LocalModelConfiguration(
    * list — and what lets a later, better-chosen default reach it. An empty set is a
    * deliberate answer: this model gets no tools at all.
    */
-  val allowedTools: Set<String>? = null
+  val allowedTools: Set<String>? = null,
+  /**
+   * What the model is told about itself before its first answer. Null is Agentisco's own
+   * one-line briefing; text here replaces it, so the person paying the prefill cost on a
+   * phone decides what that cost is spent on. The project, the specialist's role and the
+   * tool list stay ours, because they are facts a run cannot state truthfully on its own.
+   */
+  val systemInstruction: String? = null
 ) {
   val isDefault: Boolean
     get() = runtime == LocalRuntimeSettings.Defaults &&
       generation == LocalGenerationSettings.Defaults &&
-      (allowedTools == null || allowedTools == com.agentisco.agent.tool.OnDeviceTools.DEFAULT)
+      (allowedTools == null || allowedTools == com.agentisco.agent.tool.OnDeviceTools.DEFAULT) &&
+      systemInstruction.isNullOrBlank()
 
   /** The tool set a run with this configuration may be offered. */
   fun toolsOrDefault(): Set<String> = allowedTools ?: com.agentisco.agent.tool.OnDeviceTools.DEFAULT

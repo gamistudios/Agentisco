@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -717,6 +718,22 @@ private fun LocalModelSettingsDialog(
             testTag = "input_local_repeat")
         )
 
+        Text("Instruction", color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+        OutlinedTextField(
+          value = input.systemInstruction.orEmpty(),
+          onValueChange = { input = input.copy(systemInstruction = it) },
+          label = { Text("System instruction", fontSize = 10.sp) },
+          placeholder = { Text("blank = Agentisco's own briefing", fontSize = 10.sp) },
+          supportingText = {
+            Text(
+              "Replaces the line telling the model who it is. The tool list and answer format are still added.",
+              fontSize = 9.sp
+            )
+          },
+          modifier = Modifier.fillMaxWidth().heightIn(max = 150.dp)
+            .testTag("input_local_system_instruction")
+        )
+
         parsed.exceptionOrNull()?.message?.let { Text(it, color = DangerRed, fontSize = 10.sp) }
       }
     },
@@ -799,7 +816,9 @@ internal data class LocalSettingsInput(
    * offered are picked on its own page — but a settings save writes the whole
    * configuration, so a form that dropped this would unset that choice.
    */
-  val allowedTools: Set<String>? = null
+  val allowedTools: Set<String>? = null,
+  /** Typed here, so it is carried and parsed rather than passed through untouched. */
+  val systemInstruction: String? = null
 ) {
   /** Reads the form, or names the field that cannot be applied to a model load. */
   fun parse(contextLimit: Int?): Result<LocalModelConfiguration> {
@@ -841,7 +860,8 @@ internal data class LocalSettingsInput(
           topP = topP,
           repeatPenalty = penalty
         ),
-        allowedTools = allowedTools
+        allowedTools = allowedTools,
+        systemInstruction = systemInstruction?.trim()?.takeIf { it.isNotEmpty() }
       )
     )
   }
@@ -866,7 +886,8 @@ internal data class LocalSettingsInput(
       topK = configuration.generation.topK.toString(),
       topP = configuration.generation.topP.toString(),
       repeatPenalty = configuration.generation.repeatPenalty.toString(),
-      allowedTools = configuration.allowedTools
+      allowedTools = configuration.allowedTools,
+      systemInstruction = configuration.systemInstruction
     )
   }
 }

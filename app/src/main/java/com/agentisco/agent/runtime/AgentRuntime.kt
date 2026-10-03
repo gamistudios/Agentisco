@@ -467,7 +467,8 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
       planMode = permissions().planMode,
       role = role,
       teamActivity = teamBoard?.promptBlock(excludingId = null) ?: "",
-      offeredToolNames = if (model.allowedToolNames == null) null else runRegistry.tools.map { tool -> tool.name }
+      offeredToolNames = if (model.allowedToolNames == null) null else runRegistry.tools.map { tool -> tool.name },
+      systemInstruction = model.systemInstruction
     )
     val messages = transcript.messages
     val rowIds = transcript.rowIds
@@ -949,7 +950,9 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
     planMode: Boolean = false,
     role: com.agentisco.agent.model.AgentRole? = null,
     teamActivity: String = "",
-    offeredToolNames: List<String>? = null
+    offeredToolNames: List<String>? = null,
+    /** The instruction the user wrote for this model, when they wrote one. */
+    systemInstruction: String? = null
   ): Transcript {
     val messages = mutableListOf<LlmMessage>()
     // Persisted rowId each message came from (0 = produced by this run), so a
@@ -963,7 +966,7 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
     add(
       LlmMessage(
         LlmRole.SYSTEM,
-        buildSystemPrompt(project, useTools, planMode, role, teamActivity, offeredToolNames)
+        buildSystemPrompt(project, useTools, planMode, role, teamActivity, offeredToolNames, systemInstruction)
       )
     )
 
@@ -1413,7 +1416,13 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
      * Non-null marks a model that pays for every character of this briefing in
      * prefill time on a phone, which is what makes the prompt short.
      */
-    offeredToolNames: List<String>? = null
+    offeredToolNames: List<String>? = null,
+    /**
+     * The briefing the user wrote for this model in place of Agentisco's own, when they
+     * wrote one. Only an on-device run reads it, because only there is the briefing a
+     * cost the user can decide to pay.
+     */
+    systemInstruction: String? = null
   ): String {
     // An on-device model prefills every character of this before it can answer, at
     // roughly sixty tokens a second on a mid-range phone, so its briefing is the cost
@@ -1422,8 +1431,12 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
     // told twice are enforced by the tool gate instead of by wording.
     if (offeredToolNames != null) {
       return buildString {
-        append("You are Agentisco, a helpful assistant working in \"${project.name}\" at ${project.path}.")
-        appendLine()
+        if (!systemInstruction.isNullOrBlank()) {
+          appendLine(systemInstruction.trim())
+        } else {
+          append("You are Agentisco, a helpful assistant working in \"${project.name}\" at ${project.path}.")
+          appendLine()
+        }
         if (role != null) {
           // A brief the user wrote for their own specialist is theirs to pay for; the
           // built-in identity block is an essay this model has no time for.

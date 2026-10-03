@@ -135,7 +135,8 @@ class LocalToolPromptTest {
     call: LlmToolCall? = null,
     contextWindow: Int? = 4096,
     failure: LlmException? = null,
-    failTimes: Int = Int.MAX_VALUE
+    failTimes: Int = Int.MAX_VALUE,
+    instruction: String? = null
   ): Run {
     val dir = File(ws.root, "project_${System.nanoTime()}")
     File(dir, "src").mkdirs()
@@ -159,7 +160,8 @@ class LocalToolPromptTest {
           contextWindow = contextWindow,
           maxOutputTokens = 200,
           capabilities = ModelCapabilities(tools = true),
-          allowedToolNames = allowed
+          allowedToolNames = allowed,
+          systemInstruction = instruction
         ),
         apiKey = "k",
         permissions = {
@@ -223,6 +225,37 @@ class LocalToolPromptTest {
     assertFalse(prompt, prompt.contains("Standards:"))
     assertFalse(prompt, prompt.contains("Workspace files:"))
     assertFalse(prompt, prompt.contains("Method:"))
+  }
+
+  /**
+   * The briefing is the one part of an on-device prompt the user can trade away: a small
+   * model answers a persona it was tuned for better than it answers a job description.
+   * Writing one replaces Agentisco's identity line and nothing else — the tool list is
+   * what makes the answer callable, so it stays whatever the user thinks about identity.
+   */
+  @Test
+  fun `an instruction written for the model replaces the identity line only`() {
+    val run = runTurn(allowed = OnDeviceTools.DEFAULT, instruction = "You are Victor. Answer in one short sentence.")
+    val prompt = run.systemPrompt
+    assertTrue(prompt, prompt.contains("You are Victor. Answer in one short sentence."))
+    assertFalse(prompt, prompt.contains("You are Agentisco"))
+    assertTrue(prompt, prompt.contains("Tools you may call:"))
+    assertTrue(prompt, prompt.length < 600)
+  }
+
+  /** An emptied box is the default, not a briefing of one space. */
+  @Test
+  fun `a blank instruction leaves Agentisco's own briefing in place`() {
+    val run = runTurn(allowed = OnDeviceTools.DEFAULT, instruction = "   ")
+    assertTrue(run.systemPrompt, run.systemPrompt.contains("You are Agentisco, a helpful assistant"))
+  }
+
+  /** The box belongs to a model that runs on the phone; a cloud model keeps its playbook. */
+  @Test
+  fun `an instruction is not handed to a cloud model`() {
+    val run = runTurn(allowed = null, instruction = "You are Victor.")
+    assertFalse(run.systemPrompt, run.systemPrompt.contains("You are Victor"))
+    assertTrue(run.systemPrompt, run.systemPrompt.contains("elite senior software engineer"))
   }
 
   /**
@@ -360,7 +393,21 @@ class LocalToolPromptTest {
     assertTrue(LocalModelConfiguration.Defaults.isDefault)
     assertFalse(LocalModelConfiguration(allowedTools = setOf("read_file")).isDefault)
     assertTrue(LocalModelConfiguration(allowedTools = OnDeviceTools.DEFAULT).isDefault)
+    assertFalse(LocalModelConfiguration(systemInstruction = "You are Victor").isDefault)
     assertEquals(OnDeviceTools.DEFAULT, LocalModelConfiguration.Defaults.toolsOrDefault())
+  }
+
+  /** The instruction is typed into a form, so it has to come back out of the store. */
+  @Test
+  fun `an instruction survives a restart and a blank one is stored as none`() {
+    val context = ApplicationProvider.getApplicationContext<Context>()
+    val store = LocalModelStore(context)
+    store.upsert(modelWithInstruction("written", "Say less than you are asked."))
+    store.upsert(modelWithInstruction("blank", "   "))
+
+    val reloaded = LocalModelStore(context)
+    assertEquals("Say less than you are asked.", reloaded.model("written")?.configuration?.systemInstruction)
+    assertNull("an emptied box means the default briefing", reloaded.model("blank")?.configuration?.systemInstruction)
   }
 
   private fun modelWithTools(id: String, tools: Set<String>?) = LocalModel(
@@ -369,5 +416,13 @@ class LocalToolPromptTest {
     sourceUrl = "https://example.test/$id",
     downloadUrl = "https://example.test/$id.gguf",
     configuration = LocalModelConfiguration(allowedTools = tools)
+  )
+
+  private fun modelWithInstruction(id: String, instruction: String?) = LocalModel(
+    id = id,
+    name = id,
+    sourceUrl = "https://example.test/$id",
+    downloadUrl = "https://example.test/$id.gguf",
+    configuration = LocalModelConfiguration(systemInstruction = instruction)
   )
 }

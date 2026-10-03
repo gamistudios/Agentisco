@@ -56,7 +56,13 @@ data class AIModel(
    * full briefing; a set, however small, says this model pays for every character it
    * is shown, so it is handed exactly those tools and a system prompt written to match.
    */
-  val allowedToolNames: Set<String>? = null
+  val allowedToolNames: Set<String>? = null,
+  /**
+   * The system instruction the user wrote for this model, when they wrote one. Only an
+   * on-device model can carry one, and only its briefing reads it; null leaves the run
+   * the briefing Agentisco builds by itself.
+   */
+  val systemInstruction: String? = null
 )
 
 /**
