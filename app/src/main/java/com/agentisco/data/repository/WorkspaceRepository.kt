@@ -383,20 +383,51 @@ class WorkspaceRepository(
   }
 
   // (Terminal stack initialized above — the projects root depends on it.)
+
+  /**
+   * The model directory, offered to every guest command at the path the guest calls home.
+   * The app writes bytes into it from a download and the Python server reads the same bytes
+   * from inside the rootfs, so neither side copies and neither keeps a list the other could
+   * disagree with. proot refuses a bind whose host directory is missing, hence `mkdirs`.
+   */
+  private val guestModelBinds: List<Pair<String, String>> = context?.let { ctx ->
+    val dir = com.agentisco.local.LocalModelPaths.hostDir(ctx.filesDir).apply { mkdirs() }
+    listOf(dir.absolutePath to com.agentisco.local.LocalModelPaths.GUEST_DIR)
+  } ?: emptyList()
+
   private val prootSessionManager: ProotSessionManager? = context?.let { ctx ->
     val bootstrap = debianBootstrap ?: return@let null
     val bins = nativeBinaries ?: return@let null
-    ProotSessionManager(ctx, bins, bootstrap.rootfsDir)
+    ProotSessionManager(ctx, bins, bootstrap.rootfsDir, guestModelBinds)
   }
   val terminalManager = TerminalProcessManager {
     val bootstrap = debianBootstrap?.takeIf { it.isBootstrapped() } ?: return@TerminalProcessManager null
     val bins = nativeBinaries ?: return@TerminalProcessManager null
-    ProotArgsBuilder(bins, bootstrap.rootfsDir)
+    ProotArgsBuilder(bins, bootstrap.rootfsDir, guestModelBinds)
   }.also { manager ->
     // Every scripted Linux command - an agent tool call, a Run & Build stage, a dev
     // server - is a child of this process, so the moment one is live the app owes
     // itself a foreground service to keep the whole tree running.
     manager.onRunningChanged = { commands -> syncRunningCommands(commands) }
+  }
+
+  /**
+   * The Python environment the on-device models run in, driven through the same scripted
+   * PRoot path git uses. It lives here rather than beside the model records because apt,
+   * proot and the foreground service all answer to this repository.
+   */
+  val pythonEnvironment: com.agentisco.local.py.PythonEnvironment? = context?.let { ctx ->
+    com.agentisco.local.py.PythonEnvironment(
+      filesDir = ctx.filesDir,
+      execute = { command, onLine ->
+        terminalManager.executeCommand(
+          TerminalSession(id = PYTHON_ENV_SESSION_ID, name = "model environment", currentDir = "/"),
+          command,
+          { line -> onLine(line.text) }
+        )
+      },
+      interrupt = { terminalManager.interrupt(PYTHON_ENV_SESSION_ID) }
+    )
   }
 
   /** Real execution + state behind the Run & Build Center. */
@@ -2738,6 +2769,49 @@ class WorkspaceRepository(
     }
   }
 
+  /**
+   * Creates — or repairs — the Python environment the local models run in. A no-op while a
+   * setup is already running, because the slow step is a compile and a second one would only
+   * fight the first over the same virtualenv.
+   */
+  fun startPythonEnvironmentSetup() {
+    val environment = pythonEnvironment ?: return
+    if (environment.state.value is com.agentisco.local.py.PythonEnvironment.State.Installing) return
+    if (nativeBinaries?.isComplete() != true || debianBootstrap?.isBootstrapped() != true) {
+      environment.markUnavailable(
+        "The Linux environment is not set up yet — run it from the Terminal screen first."
+      )
+      return
+    }
+    repositoryScope.launch {
+      // Minutes of on-device compilation, with the screen off by the time it reaches the
+      // package that has no wheel: this belongs to the foreground service, not to a screen.
+      workRegistry?.begin(
+        id = PYTHON_ENV_WORK_ID,
+        kind = com.agentisco.background.WorkKind.BOOTSTRAP,
+        label = "Setting up the model environment",
+        detail = "Creating the Python virtual environment",
+        canceller = { environment.cancel() }
+      )
+      try {
+        environment.setup { step ->
+          workRegistry?.setProgress(
+            PYTHON_ENV_WORK_ID,
+            label = "Setting up the model environment",
+            detail = step
+          )
+        }
+      } finally {
+        workRegistry?.end(PYTHON_ENV_WORK_ID)
+      }
+    }
+  }
+
+  /** Stops the setup run: the flag ends the sequence, the interrupt ends the command inside it. */
+  fun cancelPythonEnvironmentSetup() {
+    pythonEnvironment?.cancel()
+  }
+
   fun selectTerminalSession(id: String) {
     _activeTerminalSessionId.value = id
   }
@@ -3270,6 +3344,12 @@ class WorkspaceRepository(
 
     /** Registry record for the one-shot Debian rootfs bootstrap. */
     private const val LINUX_BOOTSTRAP_WORK_ID = "linux-bootstrap"
+
+    /** Registry record for the model environment: apt, a venv, and a source build of llama.cpp. */
+    private const val PYTHON_ENV_WORK_ID = "local-model-env"
+
+    /** The scripted session those commands run in, named so a cancel can kill the right one. */
+    private const val PYTHON_ENV_SESSION_ID = "local-model-env"
 
     /** System prompt for the Run & Build AI auto-configuration pass. */
     private const val AI_BUILD_CONFIG_SYSTEM_PROMPT =

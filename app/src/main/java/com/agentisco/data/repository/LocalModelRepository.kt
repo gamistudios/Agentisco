@@ -6,6 +6,7 @@ import android.provider.OpenableColumns
 import com.agentisco.data.local.LocalModelStore
 import com.agentisco.local.HuggingFaceAssetSource
 import com.agentisco.local.LocalModelAssetSource
+import com.agentisco.local.LocalModelPaths
 import com.agentisco.local.LocalModelCatalog
 import com.agentisco.local.fetch
 import com.agentisco.local.model.GgufInspection
@@ -82,8 +83,13 @@ class LocalModelRepository(
 
   private val appContext = context.applicationContext
 
-  /** Every model file sits in one private directory; nothing else writes there. */
-  private val modelsDir: File = File(appContext.filesDir, MODELS_DIR_NAME).apply { mkdirs() }
+  /**
+   * Every model file sits in one private directory, and the Linux guest mounts that same
+   * directory at [com.agentisco.local.LocalModelPaths.GUEST_DIR] — a download or an import
+   * becomes servable without a copy, and the Python environment set up beside it outlives a
+   * rootfs reinstall because it is not inside the rootfs.
+   */
+  val modelsDir: File = LocalModelPaths.hostDir(appContext.filesDir).apply { mkdirs() }
 
   private val partialDir: File = File(modelsDir, PARTIALS_DIR_NAME).apply { mkdirs() }
 
@@ -829,7 +835,6 @@ class LocalModelRepository(
   }
 
   companion object {
-    private const val MODELS_DIR_NAME = "local-models"
     private const val PARTIALS_DIR_NAME = "partials"
     private const val MAX_ATTEMPTS = 3
     private const val RETRY_DELAY_MS = 2_000L

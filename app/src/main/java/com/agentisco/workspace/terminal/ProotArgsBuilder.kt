@@ -9,7 +9,14 @@ import java.io.File
  */
 class ProotArgsBuilder(
   private val nativeBinaries: NativeBinaries,
-  private val rootfsDir: File
+  private val rootfsDir: File,
+  /**
+   * Host directories every guest command sees, as host to guest pairs. The model files are
+   * in here because the guest is what reads them: a server that cannot see the weights it is
+   * about to load is not the same environment as the one that downloaded them, and a bind
+   * costs nothing while a copy costs the size of the model twice.
+   */
+  private val extraBinds: List<Pair<String, String>> = emptyList()
 ) {
 
   /**
@@ -34,6 +41,9 @@ class ProotArgsBuilder(
     if (File("/storage/emulated/0").exists()) {
       binds += "/storage/emulated/0" to "/sdcard"
     }
+    // A bind whose host directory does not exist yet is skipped rather than passed to proot,
+    // which would fail the whole command over an absent optional directory.
+    extraBinds.forEach { (from, to) -> if (File(from).isDirectory) binds += from to to }
     // The active project's real folder is mounted at a fixed guest path so the
     // terminal and agent commands always operate inside the workspace.
     if (bindHostDir != null && bindHostDir.isDirectory) {

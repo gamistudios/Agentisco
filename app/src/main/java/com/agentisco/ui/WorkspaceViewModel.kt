@@ -1350,6 +1350,22 @@ class WorkspaceViewModel(
   /** Why the on-device models cannot answer, or null when the agent can use them. */
   val localAiNote: String? get() = repository.localAiNote
 
+  /**
+   * The Python environment the models run in. Reading it costs nothing when the build has no
+   * Linux side at all, which is why this is a flow and not a nullable lookup.
+   */
+  val pythonEnvironmentState: StateFlow<com.agentisco.local.py.PythonEnvironment.State> =
+    repository.pythonEnvironment?.state ?: MutableStateFlow(com.agentisco.local.py.PythonEnvironment.State.Missing)
+
+  /** Creates or repairs that environment. Slow the first time: llama.cpp is compiled here. */
+  fun setupPythonEnvironment() {
+    repository.startPythonEnvironmentSetup()
+  }
+
+  fun cancelPythonEnvironmentSetup() {
+    repository.cancelPythonEnvironmentSetup()
+  }
+
   private val localStore: com.agentisco.data.repository.LocalModelRepository?
     get() = repository.localModelStore
 

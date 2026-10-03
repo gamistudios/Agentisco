@@ -14,7 +14,9 @@ import java.io.File
 class ProotSessionManager(
   context: Context,
   private val nativeBinaries: NativeBinaries,
-  private val rootfsDir: File
+  private val rootfsDir: File,
+  /** Host directories the shell also sees, so `~/local-models` is real in a terminal. */
+  private val extraBinds: List<Pair<String, String>> = emptyList()
 ) {
 
   private val appFilesDir: File = context.filesDir
@@ -32,7 +34,7 @@ class ProotSessionManager(
     if (!nativeBinaries.isComplete()) return null
     if (!File(rootfsDir, ".scoos-ready").exists()) return null
 
-    val argsBuilder = ProotArgsBuilder(nativeBinaries, rootfsDir)
+    val argsBuilder = ProotArgsBuilder(nativeBinaries, rootfsDir, extraBinds)
 
     val shellScript = guestStartupScript()
 

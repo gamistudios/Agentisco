@@ -23,6 +23,7 @@ import com.agentisco.local.model.LocalModelConfiguration
 import com.agentisco.local.model.LocalModelInstallStatus
 import com.agentisco.local.model.LocalModelProgress
 import com.agentisco.local.model.LocalRuntimeSettings
+import com.agentisco.local.py.PythonEnvironment
 import com.agentisco.local.repositoryWithInstalled
 import com.agentisco.local.runtime.LocalInferenceEngine
 import com.agentisco.settings.model.AIModel
@@ -32,6 +33,7 @@ import com.agentisco.settings.model.ModelCapabilities
 import com.agentisco.ui.WorkspaceViewModel
 import com.agentisco.ui.components.AIProvidersSection
 import com.agentisco.ui.components.LocalModelCard
+import com.agentisco.ui.components.LocalModelEnvironmentRow
 import com.agentisco.ui.components.LocalModelsSection
 import com.agentisco.ui.components.LocalSettingsInput
 import com.agentisco.ui.components.formatDuration
@@ -548,5 +550,71 @@ class LocalModelsUiTest {
     compose.onNodeWithTag("btn_local_tools_default").performClick()
     compose.onNodeWithTag("btn_local_tools_save").performClick()
     assertNull(viewModel.localModels.value.first { it.id == "lfm2" }.configuration.allowedTools)
+  }
+
+  // ---- the Python environment those models run in ----
+
+  @Test
+  fun `an empty device offers one button and says what is missing`() {
+    renderEnvRow(PythonEnvironment.State.Missing)
+
+    compose.onNodeWithText("No Python environment yet").assertIsDisplayed()
+    compose.onNodeWithText("Setup environment").assertIsDisplayed()
+    compose.onNodeWithText("Cancel").assertDoesNotExist()
+  }
+
+  @Test
+  fun `pressing setup asks for the environment, not for a model`() {
+    var asked = 0
+    renderEnvRow(PythonEnvironment.State.Missing, onSetup = { asked++ })
+
+    compose.onNodeWithTag("btn_setup_local_env").performClick()
+    assertEquals(1, asked)
+  }
+
+  /** Minutes of compiling on a phone has to look like work, and has to be stoppable. */
+  @Test
+  fun `a setup in flight shows the step, what it printed, and how to stop it`() {
+    var cancelled = 0
+    renderEnvRow(
+      PythonEnvironment.State.Installing("llama-cpp-python", listOf("Building wheel for llama-cpp-python")),
+      onCancel = { cancelled++ }
+    )
+
+    compose.onNodeWithText("llama-cpp-python").assertIsDisplayed()
+    compose.onNodeWithText("Building wheel for llama-cpp-python").assertIsDisplayed()
+    compose.onNodeWithText("Setup environment").assertDoesNotExist()
+    compose.onNodeWithTag("btn_cancel_local_env").performClick()
+    assertEquals(1, cancelled)
+  }
+
+  @Test
+  fun `a failed setup says which step failed and offers the attempt again`() {
+    renderEnvRow(
+      PythonEnvironment.State.Failed("pip", "pip failed (exit 1)", listOf("no matching distribution"))
+    )
+
+    compose.onNodeWithText("pip failed (exit 1)").assertIsDisplayed()
+    compose.onNodeWithText("no matching distribution").assertIsDisplayed()
+    compose.onNodeWithText("Setup environment").assertIsDisplayed()
+  }
+
+  /** An environment that is there can still be rebuilt: a rootfs reinstall takes apt's packages. */
+  @Test
+  fun `a ready environment says so and offers a rebuild`() {
+    renderEnvRow(PythonEnvironment.State.Installed())
+
+    compose.onNodeWithText("Python environment ready").assertIsDisplayed()
+    compose.onNodeWithText("Rebuild").assertIsDisplayed()
+  }
+
+  private fun renderEnvRow(
+    state: PythonEnvironment.State,
+    onSetup: () -> Unit = {},
+    onCancel: () -> Unit = {}
+  ) {
+    compose.setContent {
+      AgentiscoTheme { LocalModelEnvironmentRow(state = state, onSetup = onSetup, onCancel = onCancel) }
+    }
   }
 }

@@ -40,6 +40,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -99,6 +100,7 @@ fun LocalModelsSection(
 
   val installedCount = models.count { it.installed }
   val bytesOnDisk = models.filter { it.installed }.sumOf { it.sizeBytes }
+  val envState by viewModel.pythonEnvironmentState.collectAsState()
 
   Column(modifier = modifier.fillMaxWidth()) {
     Row(
@@ -161,6 +163,13 @@ fun LocalModelsSection(
         }
       }
     }
+
+    Spacer(modifier = Modifier.height(8.dp))
+    LocalModelEnvironmentRow(
+      state = envState,
+      onSetup = { viewModel.setupPythonEnvironment() },
+      onCancel = { viewModel.cancelPythonEnvironmentSetup() }
+    )
 
     importError?.let {
       Spacer(modifier = Modifier.height(6.dp))
@@ -267,6 +276,64 @@ fun LocalModelsSection(
         TextButton(onClick = { confirmDelete = null }) { Text("Cancel", color = TextMuted, fontSize = 12.sp) }
       }
     )
+  }
+}
+
+/**
+ * The Python environment the models run in, and the one button that makes it.
+ *
+ * It sits above the list rather than beside a model because it is not a per-model choice:
+ * one virtualenv serves every file in the directory, and the first setup spends minutes
+ * compiling llama.cpp on the phone. What the guest printed is shown as it arrives so a long
+ * step reads as work rather than a hang.
+ */
+@Composable
+internal fun LocalModelEnvironmentRow(
+  state: com.agentisco.local.py.PythonEnvironment.State,
+  onSetup: () -> Unit,
+  onCancel: () -> Unit,
+  modifier: Modifier = Modifier
+) {
+  val installing = state as? com.agentisco.local.py.PythonEnvironment.State.Installing
+  val failed = state as? com.agentisco.local.py.PythonEnvironment.State.Failed
+  val ready = state is com.agentisco.local.py.PythonEnvironment.State.Installed
+
+  Row(
+    modifier = modifier.fillMaxWidth(),
+    horizontalArrangement = Arrangement.spacedBy(8.dp),
+    verticalAlignment = Alignment.CenterVertically
+  ) {
+    Column(modifier = Modifier.weight(1f)) {
+      Text(
+        when {
+          installing != null -> installing.step
+          failed != null -> failed.reason
+          ready -> "Python environment ready"
+          else -> "No Python environment yet"
+        },
+        color = when {
+          failed != null -> DangerRed
+          ready -> TerminalGreen
+          else -> TextSecondary
+        },
+        fontSize = 11.sp,
+        fontWeight = FontWeight.Medium,
+        maxLines = 1,
+        overflow = TextOverflow.Ellipsis
+      )
+      state.log.lastOrNull()?.let {
+        Text(it, color = TextMuted, fontSize = 9.sp, fontFamily = FontFamily.Monospace, maxLines = 1, overflow = TextOverflow.Ellipsis)
+      }
+    }
+    if (installing != null) {
+      MiniAction("Cancel", modifier = Modifier.testTag("btn_cancel_local_env")) { onCancel() }
+    } else {
+      MiniAction(
+        label = if (ready) "Rebuild" else "Setup environment",
+        tint = if (ready) TextSecondary else ElectricBlueGlow,
+        modifier = Modifier.testTag("btn_setup_local_env")
+      ) { onSetup() }
+    }
   }
 }
 
