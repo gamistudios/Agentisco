@@ -238,6 +238,56 @@ class LocalInferenceEngineTest {
         assertEquals("alpha", engine.loadedModelId)
     }
 
+    // ---- loading on purpose ----
+
+    @Test
+    fun `a preload opens the model and asks it nothing`() = runTest {
+        val payload = ggufBytes(4096)
+        val repository = repositoryFor(payload)
+        val installed = install(repository, "alpha", payload)
+        val fake = FakeEngine()
+        val engine = engineFor(repository, fake)
+
+        val info = engine.preload(installed)
+
+        assertEquals(listOf("fake", "lfm2"), listOf(info.publishedName, info.architecture))
+        assertEquals(LocalRuntimeSettings.DEFAULT_CONTEXT, info.contextSize)
+        assertEquals("alpha", engine.loadedModelId)
+        assertEquals("alpha", engine.residentModelId.value)
+        assertTrue("a load decodes nothing", fake.sessions.single().requests.isEmpty())
+        // Asking again when it is already open costs no second load.
+        engine.preload(installed)
+        assertEquals(1, fake.sessions.size)
+    }
+
+    @Test
+    fun `residency names what is in memory and clears when it is given back`() = runTest {
+        val payload = ggufBytes(4096)
+        val repository = repositoryFor(payload)
+        val installed = install(repository, "alpha", payload)
+        val engine = engineFor(repository, FakeEngine())
+
+        assertNull(engine.residentModelId.value)
+        engine.preload(installed)
+        assertEquals("alpha", engine.residentModelId.value)
+        engine.release()
+        assertNull(engine.residentModelId.value)
+    }
+
+    @Test
+    fun `a model that would not open is not reported as resident`() = runTest {
+        val payload = ggufBytes(4096)
+        val repository = repositoryFor(payload)
+        val installed = install(repository, "alpha", payload)
+        val fake = FakeEngine().apply { loadFailure = LocalEngineException("The model file is corrupt") }
+        val engine = engineFor(repository, fake)
+
+        val failure = runCatching { engine.preload(installed) }.exceptionOrNull()
+
+        assertTrue(failure is LocalEngineException)
+        assertNull(engine.residentModelId.value)
+    }
+
     @Test
     fun `a second request reuses the model already in memory`() = runTest {
         val payload = ggufBytes(4096)

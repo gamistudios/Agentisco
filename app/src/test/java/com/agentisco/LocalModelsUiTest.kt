@@ -217,7 +217,10 @@ class LocalModelsUiTest {
     state: LocalModelInstallState?,
     installed: Boolean = state?.status == LocalModelInstallStatus.INSTALLED,
     configuration: LocalModelConfiguration = LocalModelConfiguration.Defaults,
-    selected: Boolean = false
+    selected: Boolean = false,
+    resident: Boolean = false,
+    loading: Boolean = false,
+    loadError: String? = null
   ) {
     val shown = model(installed || state?.status == LocalModelInstallStatus.INSTALLED, configuration)
     compose.setContent {
@@ -226,7 +229,10 @@ class LocalModelsUiTest {
           model = shown,
           state = state,
           selected = selected,
-          onInstall = {}, onCancel = {}, onSettings = {}, onInfo = {}, onUse = {}, onRedownload = {}, onDelete = {}, onForget = {}
+          resident = resident,
+          loading = loading,
+          loadError = loadError,
+          onInstall = {}, onCancel = {}, onSettings = {}, onInfo = {}, onLoad = {}, onRedownload = {}, onDelete = {}, onForget = {}
         )
       }
     }
@@ -286,10 +292,10 @@ class LocalModelsUiTest {
   }
 
   @Test
-  fun `an installed model offers the settings and the file's own facts`() {
+  fun `an installed model offers its settings, its facts and a load`() {
     renderCard(null, installed = true)
     compose.onNodeWithText("Installed").assertExists()
-    compose.onNodeWithText("Select").assertExists()
+    compose.onNodeWithText("Load").assertExists()
     compose.onNodeWithText("Settings").assertExists()
     compose.onNodeWithText("Info").assertExists()
     compose.onNodeWithText("Delete").assertExists()
@@ -297,11 +303,32 @@ class LocalModelsUiTest {
   }
 
   @Test
-  fun `the model in use offers a fresh copy of its bytes, not a second select`() {
+  fun `the model in use offers a fresh copy of its bytes, not a second load`() {
     renderCard(null, installed = true, selected = true)
     compose.onNodeWithText("Installed · in use").assertExists()
     compose.onNodeWithText("Re-download").assertExists()
-    compose.onNodeWithText("Select").assertDoesNotExist()
+    compose.onNodeWithText("Load").assertDoesNotExist()
+  }
+
+  @Test
+  fun `a model already in memory says so and offers no second load`() {
+    renderCard(null, installed = true, resident = true)
+    compose.onNodeWithText("Installed · in memory").assertExists()
+    compose.onNodeWithText("Load").assertDoesNotExist()
+  }
+
+  @Test
+  fun `a load in flight shows the wait instead of a button that would start another`() {
+    renderCard(null, installed = true, loading = true)
+    compose.onNodeWithText("Loading…").assertExists()
+    compose.onNodeWithText("Load").assertDoesNotExist()
+  }
+
+  @Test
+  fun `a load that failed says why on the row it failed on`() {
+    renderCard(null, installed = true, loadError = "The Python environment is not set up yet")
+    compose.onNodeWithText("The Python environment is not set up yet").assertExists()
+    compose.onNodeWithText("Load").assertExists()
   }
 
   @Test
@@ -336,7 +363,10 @@ class LocalModelsUiTest {
           model = shown,
           state = state,
           selected = selected,
-          onInstall = {}, onCancel = {}, onSettings = {}, onInfo = {}, onUse = {}, onRedownload = {}, onDelete = {}, onForget = {}
+          resident = false,
+          loading = false,
+          loadError = null,
+          onInstall = {}, onCancel = {}, onSettings = {}, onInfo = {}, onLoad = {}, onRedownload = {}, onDelete = {}, onForget = {}
         )
       }
     }
@@ -374,7 +404,7 @@ class LocalModelsUiTest {
     renderCardFor(imported(installed = true), LocalModelInstallState(LocalModelInstallStatus.UPDATE_AVAILABLE))
 
     compose.onNodeWithText("Update").assertDoesNotExist()
-    compose.onNodeWithText("Select").assertExists()
+    compose.onNodeWithText("Load").assertExists()
   }
 
   @Test
@@ -408,7 +438,7 @@ class LocalModelsUiTest {
       dispatcher = Dispatchers.Unconfined
     ).also { runtime = it }
     // A cloud model is configured and selected, so the on-device row starts out
-    // installed-but-not-in-use and the Select action below is the thing changing it.
+    // installed-but-not-in-use and the Load action below is the thing changing it.
     val store = ProviderConfigStore().apply {
       upsertProvider(
         AIProvider("cloud", "Cloud AI", "https://cloud.test/v1", LLMProtocol.OPENAI_CHAT_COMPLETIONS, hasApiKey = true),
@@ -439,15 +469,15 @@ class LocalModelsUiTest {
     compose.onNodeWithText("Not installed").assertExists()
     compose.onNodeWithText("Download").assertExists()
 
-    compose.onNodeWithText("Select").performClick()
+    compose.onNodeWithText("Load").performClick()
     assertEquals(
       LocalAiRuntime.recordId("lfm2"),
       viewModel.selectedModel.value?.id
     )
-    // The row admits what it now is: the model the agent will use, with no second
-    // Select action to tap by accident.
-    compose.onNodeWithText("Installed · in use").assertIsDisplayed()
-    compose.onNodeWithText("Select").assertDoesNotExist()
+    // The row admits what it now is: the model the agent will use and the one its
+    // engine is holding, with no second Load action to tap by accident.
+    compose.onNodeWithText("Installed · in use · in memory").assertIsDisplayed()
+    compose.onNodeWithText("Load").assertDoesNotExist()
   }
 
   /** The page Settings opens: the section under a header that returns where it came from. */
@@ -520,7 +550,7 @@ class LocalModelsUiTest {
 
     compose.onNodeWithText("Tools offered").assertDoesNotExist()
 
-    compose.onNodeWithText("Select").performClick()
+    compose.onNodeWithText("Load").performClick()
     compose.onNodeWithText("Tools offered").assertIsDisplayed()
     compose.onNodeWithTag("chip_local_tool_read_file").assertIsDisplayed()
     // Every tool is on the list, including the ones a phone may not be able to afford.
@@ -535,7 +565,7 @@ class LocalModelsUiTest {
     compose.setContent {
       AgentiscoTheme { LocalModelsScreen(viewModel, onNavigate = {}) }
     }
-    compose.onNodeWithText("Select").performClick()
+    compose.onNodeWithText("Load").performClick()
 
     compose.onNodeWithTag("chip_local_tool_read_file").performClick()
     compose.onNodeWithText("Not saved").assertIsDisplayed()

@@ -80,6 +80,9 @@ fun LocalModelsSection(
   val models by viewModel.localModels.collectAsState()
   val states by viewModel.localInstallStates.collectAsState()
   val selectedId by viewModel.selectedModel.collectAsState()
+  val residentId by viewModel.localResidentModelId.collectAsState()
+  val loading by viewModel.localModelLoading.collectAsState()
+  val loadErrors by viewModel.localModelLoadErrors.collectAsState()
 
   var addOpen by remember { mutableStateOf(false) }
   var settingsFor by remember { mutableStateOf<LocalModel?>(null) }
@@ -183,11 +186,20 @@ fun LocalModelsSection(
         model = model,
         state = states[model.id],
         selected = selectedId?.id == LocalAiRuntime.recordId(model.id),
+        resident = residentId == model.id,
+        loading = model.id in loading,
+        loadError = loadErrors[model.id],
         onInstall = { viewModel.installLocalModel(model.id) },
         onCancel = { viewModel.cancelLocalInstall(model.id) },
         onSettings = { settingsFor = model },
         onInfo = { infoFor = model },
-        onUse = { viewModel.localModelSelectable(model.id)?.let(viewModel::selectModel) },
+        // Choosing a model and putting its bytes in memory are one gesture here: the row's
+        // button is the only place a user says "this one", and the first turn on a phone
+        // model that has to load mid-answer reads as a hang.
+        onLoad = {
+          viewModel.localModelSelectable(model.id)?.let(viewModel::selectModel)
+          viewModel.loadLocalModel(model.id)
+        },
         onRedownload = { viewModel.redownloadLocalModel(model.id) },
         onDelete = { confirmDelete = model },
         onForget = { viewModel.forgetLocalModel(model.id) }
@@ -241,6 +253,7 @@ fun LocalModelsSection(
       model = model,
       metadata = viewModel.localModelMetadata(model.id),
       state = states[model.id],
+      resident = residentId == model.id,
       onDismiss = { infoFor = null }
     )
   }
@@ -342,11 +355,14 @@ internal fun LocalModelCard(
   model: LocalModel,
   state: LocalModelInstallState?,
   selected: Boolean,
+  resident: Boolean = false,
+  loading: Boolean = false,
+  loadError: String? = null,
   onInstall: () -> Unit,
   onCancel: () -> Unit,
   onSettings: () -> Unit,
   onInfo: () -> Unit,
-  onUse: () -> Unit,
+  onLoad: () -> Unit,
   onRedownload: () -> Unit,
   onDelete: () -> Unit,
   onForget: () -> Unit
@@ -389,7 +405,12 @@ internal fun LocalModelCard(
           QuantTag(model.quantization)
         }
       }
-      Text(statusLabel(status, selected), color = statusColor(status), fontSize = 10.sp, maxLines = 1)
+      Text(
+        statusLabel(status, selected, resident),
+        color = statusColor(status),
+        fontSize = 10.sp,
+        maxLines = 1
+      )
     }
 
     if (model.description.isNotBlank()) {
@@ -440,7 +461,9 @@ internal fun LocalModelCard(
       }
     }
 
-    state?.error?.let { error ->
+    // One line of red is enough: a row that failed to download has nothing to load, and a
+    // row that failed to load has nothing else to say about itself.
+    (state?.error ?: loadError)?.let { error ->
       Spacer(modifier = Modifier.height(6.dp))
       Text(error, color = DangerRed.copy(alpha = 0.9f), fontSize = 10.sp, maxLines = 3)
     }
@@ -473,11 +496,25 @@ internal fun LocalModelCard(
           modifier = Modifier.testTag("btn_local_update_${model.id}"),
           onClick = onInstall
         )
-        model.installed && !selected -> MiniAction(
-          label = "Select",
+        // Reading the file and allocating the cache takes seconds, and a row that claims
+        // nothing while it does would leave the tap looking like it went nowhere.
+        loading -> Box(
+          modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(DarkSurfaceElevated)
+            .border(1.dp, DarkBorderSubtle, RoundedCornerShape(6.dp))
+            .padding(horizontal = 10.dp, vertical = 4.dp)
+            .testTag("local_model_loading_${model.id}")
+        ) {
+          Text("Loading…", color = WarningAmber, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+        }
+        // Once the bytes are in memory there is nothing left for this button to do, and a
+        // second press would only be a wait with no answer at the end of it.
+        model.installed && !selected && !resident -> MiniAction(
+          label = "Load",
           tint = ElectricBlueGlow,
-          modifier = Modifier.testTag("btn_local_select_${model.id}"),
-          onClick = onUse
+          modifier = Modifier.testTag("btn_local_load_${model.id}"),
+          onClick = onLoad
         )
         model.installed && selected && !model.isImported -> MiniAction(
           label = "Re-download",
@@ -538,8 +575,16 @@ private fun statusColor(status: LocalModelInstallStatus): Color = when (status) 
   LocalModelInstallStatus.NOT_INSTALLED -> TextMuted
 }
 
-private fun statusLabel(status: LocalModelInstallStatus, selected: Boolean): String = when (status) {
-  LocalModelInstallStatus.INSTALLED -> if (selected) "Installed · in use" else "Installed"
+private fun statusLabel(
+  status: LocalModelInstallStatus,
+  selected: Boolean,
+  resident: Boolean
+): String = when (status) {
+  LocalModelInstallStatus.INSTALLED -> buildString {
+    append("Installed")
+    if (selected) append(" · in use")
+    if (resident) append(" · in memory")
+  }
   LocalModelInstallStatus.UPDATE_AVAILABLE -> "Update available"
   LocalModelInstallStatus.DOWNLOADING -> "Downloading"
   LocalModelInstallStatus.IMPORTING -> "Importing"
@@ -677,6 +722,7 @@ private fun LocalModelInfoDialog(
   model: LocalModel,
   metadata: GgufMetadata?,
   state: LocalModelInstallState?,
+  resident: Boolean,
   onDismiss: () -> Unit
 ) {
   AlertDialog(
@@ -705,7 +751,16 @@ private fun LocalModelInfoDialog(
         InfoRow("Source", if (model.isImported) "Copied from this device" else model.sourceUrl)
         if (model.version.isNotBlank()) InfoRow("Version", model.version)
         model.checksum?.let { InfoRow("SHA-256", it) }
-        InfoRow("Status", statusLabel(state?.status ?: if (model.installed) LocalModelInstallStatus.INSTALLED else LocalModelInstallStatus.NOT_INSTALLED, false))
+        // Whether this file is the one the engine is holding in memory now.
+        InfoRow(
+          "Status",
+          statusLabel(
+            state?.status ?: if (model.installed) LocalModelInstallStatus.INSTALLED
+            else LocalModelInstallStatus.NOT_INSTALLED,
+            selected = false,
+            resident = resident
+          )
+        )
       }
     },
     confirmButton = {

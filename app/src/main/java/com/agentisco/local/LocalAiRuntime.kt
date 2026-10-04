@@ -2,6 +2,8 @@ package com.agentisco.local
 
 import com.agentisco.data.repository.LocalModelRepository
 import com.agentisco.local.model.LocalModel
+import com.agentisco.local.runtime.LoadedModelInfo
+import com.agentisco.local.runtime.LocalEngineException
 import com.agentisco.local.runtime.LocalInferenceEngine
 import com.agentisco.local.server.LocalAiApi
 import com.agentisco.local.server.LocalAiEndpoint
@@ -65,6 +67,9 @@ class LocalAiRuntime(
   /** Where the server answers, or null while nothing is being served. */
   val endpoint: StateFlow<LocalAiEndpoint?> = _endpoint.asStateFlow()
 
+  /** The model sitting in memory right now, whether a turn put it there or the user did. */
+  val residentModelId: StateFlow<String?> = engine.residentModelId
+
   private val _provider = MutableStateFlow<AIProvider?>(null)
   private val _models = MutableStateFlow<List<AIModel>>(emptyList())
 
@@ -126,6 +131,18 @@ class LocalAiRuntime(
 
   /** Gives the resident model's memory back; the next request loads it again. */
   suspend fun releaseModel() = engine.release()
+
+  /**
+   * Brings [modelId] into memory on purpose, rather than as the first thing a turn has to
+   * wait for. Says what the file turned out to be so the caller can show a real number —
+   * the context the engine allocated, not the one the catalog promised.
+   */
+  suspend fun loadModel(modelId: String): LoadedModelInfo {
+    val model = repository.model(modelId)
+      ?: throw LocalEngineException("No model called $modelId is known to this device")
+    if (!model.installed) throw LocalEngineException("${model.name} is not installed")
+    return engine.preload(model)
+  }
 
   /** Ends the decode in flight, which is what Stop has to reach on a local model. */
   fun stopGeneration() = engine.stop()

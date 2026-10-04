@@ -102,6 +102,21 @@ class WorkspaceRepository(
   /** Why the on-device models cannot answer right now, or null when they can. */
   val localAiNote: String? get() = localAi?.unavailableReason
 
+  /** The one model sitting in memory, whether a turn put it there or the user asked for it. */
+  val localResidentModelId: kotlinx.coroutines.flow.StateFlow<String?> =
+    localAi?.residentModelId ?: kotlinx.coroutines.flow.MutableStateFlow(null)
+
+  /**
+   * Puts [modelId] into memory now, so its first turn does not begin with a load. The failure
+   * arrives as the sentence the user should read, which is why this reaches through the runtime
+   * rather than asking the screen to guess what went wrong.
+   */
+  suspend fun loadLocalModel(modelId: String): com.agentisco.local.runtime.LoadedModelInfo =
+    localAi?.loadModel(modelId)
+      ?: throw com.agentisco.local.runtime.LocalEngineException(
+        "This build has no on-device model to load."
+      )
+
   /** The registry record for the turn currently running, if any. */
   private var agentTurnWorkId: String? = null
 

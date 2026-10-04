@@ -113,7 +113,7 @@ class LocalModelsScreenshotTest {
             model = model(false),
             state = null,
             selected = false,
-            onInstall = {}, onCancel = {}, onSettings = {}, onInfo = {}, onUse = {},
+            onInstall = {}, onCancel = {}, onSettings = {}, onInfo = {}, onLoad = {},
             onRedownload = {}, onDelete = {}, onForget = {}
           )
           Spacer(modifier = Modifier.height(12.dp))
@@ -128,7 +128,7 @@ class LocalModelsScreenshotTest {
               )
             ),
             selected = false,
-            onInstall = {}, onCancel = {}, onSettings = {}, onInfo = {}, onUse = {},
+            onInstall = {}, onCancel = {}, onSettings = {}, onInfo = {}, onLoad = {},
             onRedownload = {}, onDelete = {}, onForget = {}
           )
           Spacer(modifier = Modifier.height(12.dp))
@@ -136,7 +136,7 @@ class LocalModelsScreenshotTest {
             model = model(true),
             state = LocalModelInstallState(LocalModelInstallStatus.INSTALLED),
             selected = true,
-            onInstall = {}, onCancel = {}, onSettings = {}, onInfo = {}, onUse = {},
+            onInstall = {}, onCancel = {}, onSettings = {}, onInfo = {}, onLoad = {},
             onRedownload = {}, onDelete = {}, onForget = {}
           )
           Spacer(modifier = Modifier.height(12.dp))
@@ -146,7 +146,7 @@ class LocalModelsScreenshotTest {
               LocalModelInstallStatus.UPDATE_AVAILABLE
             ),
             selected = false,
-            onInstall = {}, onCancel = {}, onSettings = {}, onInfo = {}, onUse = {},
+            onInstall = {}, onCancel = {}, onSettings = {}, onInfo = {}, onLoad = {},
             onRedownload = {}, onDelete = {}, onForget = {}
           )
         }
@@ -188,7 +188,7 @@ class LocalModelsScreenshotTest {
             ),
             state = LocalModelInstallState(LocalModelInstallStatus.INSTALLED),
             selected = false,
-            onInstall = {}, onCancel = {}, onSettings = {}, onInfo = {}, onUse = {},
+            onInstall = {}, onCancel = {}, onSettings = {}, onInfo = {}, onLoad = {},
             onRedownload = {}, onDelete = {}, onForget = {}
           )
           Spacer(modifier = Modifier.height(12.dp))
@@ -206,7 +206,7 @@ class LocalModelsScreenshotTest {
               progress = LocalModelProgress(bytesTransferred = 367_001_600L, totalBytes = 0L)
             ),
             selected = false,
-            onInstall = {}, onCancel = {}, onSettings = {}, onInfo = {}, onUse = {},
+            onInstall = {}, onCancel = {}, onSettings = {}, onInfo = {}, onLoad = {},
             onRedownload = {}, onDelete = {}, onForget = {}
           )
         }

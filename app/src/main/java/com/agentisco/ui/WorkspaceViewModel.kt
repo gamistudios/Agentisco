@@ -1404,6 +1404,40 @@ class WorkspaceViewModel(
     }
   }
 
+  private val _localModelLoading = MutableStateFlow<Set<String>>(emptySet())
+
+  /** The models being brought into memory right now, so a row can say so rather than wait. */
+  val localModelLoading: StateFlow<Set<String>> = _localModelLoading.asStateFlow()
+
+  private val _localModelLoadErrors = MutableStateFlow<Map<String, String>>(emptyMap())
+
+  /** Why a load last failed, per model; cleared when that model is asked for again. */
+  val localModelLoadErrors: StateFlow<Map<String, String>> = _localModelLoadErrors.asStateFlow()
+
+  /** The single model in memory, so the list can mark the one it is holding. */
+  val localResidentModelId: StateFlow<String?> = repository.localResidentModelId
+
+  /**
+   * Puts [modelId] into memory now. Opening a model takes seconds on a phone, and a turn that
+   * starts with a load looks exactly like a turn that has stalled, so the list lets the user
+   * pay for it while nothing is being asked of the model.
+   */
+  fun loadLocalModel(modelId: String) {
+    if (modelId in _localModelLoading.value) return
+    _localModelLoading.value = _localModelLoading.value + modelId
+    _localModelLoadErrors.value = _localModelLoadErrors.value - modelId
+    viewModelScope.launch {
+      try {
+        repository.loadLocalModel(modelId)
+      } catch (e: Exception) {
+        _localModelLoadErrors.value = _localModelLoadErrors.value +
+          (modelId to (e.message ?: "The model could not be loaded"))
+      } finally {
+        _localModelLoading.value = _localModelLoading.value - modelId
+      }
+    }
+  }
+
   /**
    * Adds a model from a URL the user typed. The result comes back to the form, because
    * a rejected URL is the form's problem to explain, not the list's.

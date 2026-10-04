@@ -6,6 +6,9 @@ import com.agentisco.local.model.LocalModel
 import com.agentisco.local.model.LocalRuntimeSettings
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -54,6 +57,11 @@ class LocalInferenceEngine(
   @Volatile
   private var resident: Resident? = null
 
+  private val _residentModelId = MutableStateFlow<String?>(null)
+
+  /** The model in memory, updated whatever asked for it: a turn, a check or a deliberate load. */
+  val residentModelId: StateFlow<String?> = _residentModelId.asStateFlow()
+
   /** The model currently in memory, or null when nothing is loaded. */
   val loadedModelId: String? get() = resident?.modelId
 
@@ -97,6 +105,16 @@ class LocalInferenceEngine(
   /** What this model's template can do, loading the model if nothing like it is resident. */
   suspend fun capabilities(model: LocalModel): LocalTemplateCapabilities = withContext(dispatcher) {
     engineMutex.withLock { openLocked(model).capabilities }
+  }
+
+  /**
+   * Puts [model] in memory now and reports what the file turned out to be.
+   *
+   * A turn that arrives at an unloaded model pays for the load inside its own wait time, which
+   * on a phone reads as a hang; this is the same work moved to the moment the user asked for it.
+   */
+  suspend fun preload(model: LocalModel): LoadedModelInfo = withContext(dispatcher) {
+    engineMutex.withLock { openLocked(model).session.info }
   }
 
   /** Capabilities of whatever is resident right now, without touching the engine. */
@@ -146,11 +164,13 @@ class LocalInferenceEngine(
     }
     val residentNow = Resident(model.id, wanted, session, capabilities)
     resident = residentNow
+    _residentModelId.value = model.id
     return residentNow
   }
 
   private fun unloadLocked() {
     resident?.let { runCatching { it.session.close() } }
     resident = null
+    _residentModelId.value = null
   }
 }
