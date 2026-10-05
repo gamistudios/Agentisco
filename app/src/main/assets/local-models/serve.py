@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""The model server Agentisco runs inside its Linux environment.
+"""The model server Awaki runs inside its Linux environment.
 
 Only the standard library plus llama-cpp-python and psutil are used: this file is copied into
 the model directory by the app and run by the virtualenv the app built there, so every import
 below is a package the setup step already installed.
 
-The API is OpenAI's, because that is the shape the rest of Agentisco speaks — and this time it
+The API is OpenAI's, because that is the shape the rest of Awaki speaks — and this time it
 is a real chat API, not a raw text one. That puts the two hard jobs of an on-device runtime
 here, where the model file is within reach:
 
@@ -1119,7 +1119,7 @@ class Handler(BaseHTTPRequestHandler):
                     "id": os.path.basename(self.engine.model_path),
                     "object": "model",
                     "created": int(time.time()),
-                    "owned_by": "agentisco",
+                    "owned_by": "awaki",
                 })
             self._json(200, {"object": "list", "data": data})
         elif path == "/v1/stats":
@@ -1327,7 +1327,7 @@ def watch_stdin():
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="Agentisco OpenAI-compatible model server")
+    parser = argparse.ArgumentParser(description="Awaki OpenAI-compatible model server")
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--token", required=True)
     parser.add_argument("--host", default="127.0.0.1")

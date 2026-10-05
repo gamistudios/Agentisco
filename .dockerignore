@@ -1,0 +1,28 @@
+# Docker builds happen only for the update-api service, and the build context is
+# the repository root. Ship nothing else: the Android app carries a full Linux
+# rootfs inside jniLibs, so a whole-repo context would transfer hundreds of
+# megabytes on every deploy.
+*
+
+!update-api
+update-api/data/
+update-api/tmp-live/
+update-api/tmp-smoke/
+update-api/tmp-*.out
+update-api/bin/
+update-api/scripts/
+update-api/*.db
+update-api/*.db-*
+update-api/*.apk
+update-api/*.exe
+update-api/*.out
+update-api/.env
+update-api/.env.*
+update-api/Dockerfile
+update-api/.dockerignore
+update-api/*.md
+
+# Re-included because the landing page reads it, and the module needs its deps.
+!update-api/.env.example
+!update-api/go.mod
+!update-api/go.sum

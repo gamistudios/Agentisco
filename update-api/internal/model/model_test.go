@@ -26,7 +26,7 @@ func TestParseChannel(t *testing.T) {
 }
 
 // TestMatchesAssetUsesThePublishedNamingConvention: ci.yml uploads
-// Agentisco-<tag>-debug.apk, Agentisco-<tag>-release.apk and a .aab. The .aab is
+// Awaki-<tag>-debug.apk, Awaki-<tag>-release.apk and a .aab. The .aab is
 // not installable and must never be chosen for a channel.
 func TestMatchesAssetUsesThePublishedNamingConvention(t *testing.T) {
 	cases := []struct {
@@ -34,19 +34,19 @@ func TestMatchesAssetUsesThePublishedNamingConvention(t *testing.T) {
 		asset     string
 		wantMatch bool
 	}{
-		{ChannelDebug, "Agentisco-v1.5.0-debug.apk", true},
-		{ChannelRelease, "Agentisco-v1.5.0-release.apk", true},
-		{ChannelDebug, "Agentisco-v1.5.0-release.apk", false},
-		{ChannelRelease, "Agentisco-v1.5.0-debug.apk", false},
-		{ChannelDebug, "Agentisco-v1.5.0-release.aab", false},
-		{ChannelRelease, "Agentisco-v1.5.0-release.aab", false},
+		{ChannelDebug, "Awaki-v1.5.0-debug.apk", true},
+		{ChannelRelease, "Awaki-v1.5.0-release.apk", true},
+		{ChannelDebug, "Awaki-v1.5.0-release.apk", false},
+		{ChannelRelease, "Awaki-v1.5.0-debug.apk", false},
+		{ChannelDebug, "Awaki-v1.5.0-release.aab", false},
+		{ChannelRelease, "Awaki-v1.5.0-release.aab", false},
 		{ChannelDebug, "mapping.txt", false},
 		// Older releases that only carry the channel word stay resolvable.
-		{ChannelDebug, "agentisco-debug.apk", true},
+		{ChannelDebug, "awaki-debug.apk", true},
 		{ChannelRelease, "app-release.apk", true},
 		{ChannelDebug, "app-release.apk", false},
 		{ChannelRelease, "app-release.apk", true},
-		{ChannelDebug, "Agentisco-v1.5.0-DEBUG.APK", true},
+		{ChannelDebug, "Awaki-v1.5.0-DEBUG.APK", true},
 		// An APK for a different product must not be picked up.
 		{ChannelRelease, "OtherApp-release.apk", true},
 	}

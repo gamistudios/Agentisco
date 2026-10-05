@@ -1,6 +1,6 @@
 {
-  "name": "Agentisco",
-  "description": "Agentisco - Mobile-first AI Agentic IDE and operating environment for Android.",
+  "name": "Awaki",
+  "description": "Awaki - Mobile-first AI Agentic IDE and operating environment for Android.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

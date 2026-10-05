@@ -4,12 +4,16 @@
 FROM golang:1.27-alpine AS build
 WORKDIR /src
 
-COPY go.mod go.sum ./
+# The build context is the repository root (Render always sends the whole repo;
+# only the Dockerfile location is configurable), so every source path here is
+# root-relative. `.dockerignore` at the root keeps the shipped context down to
+# this module — the Android app carries the Linux rootfs in jniLibs.
+COPY update-api/go.mod update-api/go.sum ./
 RUN go mod download
 
-COPY cmd ./cmd
-COPY internal ./internal
-COPY web ./web
+COPY update-api/cmd ./cmd
+COPY update-api/internal ./internal
+COPY update-api/web ./web
 
 ARG TARGETOS
 ARG TARGETARCH

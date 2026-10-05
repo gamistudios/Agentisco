@@ -1,6 +1,6 @@
-import com.agentisco.ui.WorkspaceViewModel
-import com.agentisco.data.model.Project
-import com.agentisco.data.model.ProjectFile
+import com.awaki.ui.WorkspaceViewModel
+import com.awaki.data.model.Project
+import com.awaki.data.model.ProjectFile
 
 // Simple test to debug the save issue
 fun main() {

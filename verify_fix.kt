@@ -1,6 +1,6 @@
 import org.junit.Test
 import org.junit.Assert.*
-import com.agentisco.ui.WorkspaceViewModel
+import com.awaki.ui.WorkspaceViewModel
 
 class VerifyFix {
     

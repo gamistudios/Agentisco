@@ -11,11 +11,11 @@ import (
 	"testing"
 	"time"
 
-	"agentisco/updateapi/internal/ghfake"
-	"agentisco/updateapi/internal/metastore"
-	"agentisco/updateapi/internal/model"
-	"agentisco/updateapi/internal/ratelimit"
-	"agentisco/updateapi/web"
+	"awaki/updateapi/internal/ghfake"
+	"awaki/updateapi/internal/metastore"
+	"awaki/updateapi/internal/model"
+	"awaki/updateapi/internal/ratelimit"
+	"awaki/updateapi/web"
 )
 
 func TestPinnedVersionAndUnknownVersion(t *testing.T) {
@@ -262,8 +262,8 @@ func TestLandingPageCarriesNoRepositoryTrace(t *testing.T) {
 	if bytes.Contains(body, []byte(">A</span>")) {
 		t.Fatal("the placeholder letter must be gone from the wordmark")
 	}
-	// versionName is the release title ("Agentisco v2.0.23"); prefixing it with a
-	// version marker is how the page ended up showing "vAgentisco v2.0.23".
+	// versionName is the release title ("Awaki v2.0.23"); prefixing it with a
+	// version marker is how the page ended up showing "vAwaki v2.0.23".
 	if bytes.Contains(body, []byte(`'v' + info.versionName`)) {
 		t.Fatal("the page must take its displayed version from the tag, not the title")
 	}

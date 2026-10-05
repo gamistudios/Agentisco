@@ -1,6 +1,6 @@
-// Command server runs the Agentisco Update API.
+// Command server runs the Awaki Update API.
 //
-// It is the only public interface between Agentisco clients and the private
+// It is the only public interface between Awaki clients and the private
 // GitHub repository: clients see channels and downloads, never a repository.
 package main
 
@@ -17,15 +17,15 @@ import (
 	"syscall"
 	"time"
 
-	"agentisco/updateapi/internal/api"
-	"agentisco/updateapi/internal/config"
-	"agentisco/updateapi/internal/ghapi"
-	"agentisco/updateapi/internal/metastore"
-	"agentisco/updateapi/internal/notes"
-	"agentisco/updateapi/internal/objectstore"
-	"agentisco/updateapi/internal/ratelimit"
-	"agentisco/updateapi/internal/syncsvc"
-	"agentisco/updateapi/web"
+	"awaki/updateapi/internal/api"
+	"awaki/updateapi/internal/config"
+	"awaki/updateapi/internal/ghapi"
+	"awaki/updateapi/internal/metastore"
+	"awaki/updateapi/internal/notes"
+	"awaki/updateapi/internal/objectstore"
+	"awaki/updateapi/internal/ratelimit"
+	"awaki/updateapi/internal/syncsvc"
+	"awaki/updateapi/web"
 )
 
 func main() {
@@ -33,7 +33,7 @@ func main() {
 	flag.Parse()
 
 	if *showVersion {
-		fmt.Println("agentisco-update-api")
+		fmt.Println("awaki-update-api")
 		return
 	}
 
@@ -53,7 +53,7 @@ func run() error {
 
 	// Fail loudly before binding a port: a half-configured service that cannot
 	// reach GitHub would otherwise look alive while serving nothing.
-	logger.Info("starting agentisco update api",
+	logger.Info("starting awaki update api",
 		"port", cfg.Port,
 		"storage_path", cfg.StoragePath,
 		"sync_interval_seconds", int(cfg.SyncInterval.Seconds()),
@@ -92,7 +92,7 @@ func run() error {
 		Token:     cfg.GitHubToken,
 		Timeout:   cfg.GitHubTimeout,
 		MaxItems:  cfg.ReleasesPerSync,
-		UserAgent: "agentisco-update-api",
+		UserAgent: "awaki-update-api",
 		Logger:    logger,
 	})
 

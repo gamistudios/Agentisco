@@ -1,9 +1,9 @@
 openapi: 3.1.0
 info:
-  title: Agentisco Update API
+  title: Awaki Update API
   version: 1.0.0
   description: |
-    The only public interface between Agentisco clients and the artifact source.
+    The only public interface between Awaki clients and the artifact source.
     Clients address channels and versions; they never name a repository, an owner
     or an upstream host, and no response carries one.
 
@@ -15,7 +15,7 @@ info:
     One channel is published here. Other channels may be served to builds that
     already know their name, but they are not advertised.
 servers:
-  - url: https://updates.agentisco.test
+  - url: https://updates.awaki.test
     description: production
   - url: http://127.0.0.1:8080
     description: local development
@@ -45,7 +45,7 @@ paths:
                 properties:
                   service:
                     type: string
-                    examples: ["agentisco-update-api"]
+                    examples: ["awaki-update-api"]
                   endpoints:
                     type: array
                     items:
@@ -193,7 +193,7 @@ paths:
             Content-Disposition:
               schema:
                 type: string
-                examples: ['attachment; filename="Agentisco-v1.4.0-release.apk"']
+                examples: ['attachment; filename="Awaki-v1.4.0-release.apk"']
             Cache-Control:
               schema:
                 type: string
@@ -423,7 +423,7 @@ components:
           examples: ["v1.4.0"]
         apkName:
           type: string
-          examples: ["Agentisco-v1.4.0-release.apk"]
+          examples: ["Awaki-v1.4.0-release.apk"]
         size:
           type: integer
           format: int64

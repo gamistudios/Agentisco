@@ -1,4 +1,4 @@
-// Package web serves the public Agentisco landing page.
+// Package web serves the public Awaki landing page.
 //
 // It is a separate concern from the update API and only happens to be deployed
 // with it: the page reads the API for everything it shows, so it carries no

@@ -1,0 +1,1027 @@
+package com.awaki.workspace.git
+
+import com.awaki.data.model.DiffLine
+import com.awaki.data.model.DiffLineType
+import com.awaki.data.model.FileDiff
+import com.awaki.data.model.GitCommit
+import com.awaki.data.model.Project
+import com.awaki.ui.components.computeLineDiff
+import com.awaki.ui.components.isDiffable
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
+/** Result of one `git` invocation inside the project workspace. */
+data class GitRunResult(val exitCode: Int, val output: String, val truncated: Boolean = false) {
+  val success: Boolean get() = exitCode == 0
+}
+
+/** Result of a commit attempt: either the new commit, or git's failure output. */
+data class GitCommitResult(val commit: GitCommit?, val errorOutput: String?)
+
+/** Largest working file the diff pass will read into memory (it is a phone heap). */
+private const val MAX_DIFF_BYTES = 1_000_000L
+
+/** Upper bound on files described by one diff pass, so a flood of changes stays cheap. */
+private const val MAX_DIFFED_FILES = 250
+
+/**
+ * Real git manager, executed in the workspace context.
+ * Provides complete VS Code-grade Source Control and Git operations.
+ */
+class GitRepositoryManager(
+  private val fileSystem: com.awaki.workspace.filesystem.ProjectFileSystem,
+  /** Runs a git command with the project as working directory. */
+  private val runGit: suspend (projectPath: String, args: String) -> GitRunResult
+) {
+
+  private var gitEnvConfigured = false
+
+  /** One-time identity/safety config inside the git environment. */
+  private suspend fun ensureGitEnv(projectPath: String) {
+    if (gitEnvConfigured) return
+    val result = runGit(
+      projectPath,
+      "git config --global --add safe.directory '*' 2>/dev/null; " +
+        "git config --global user.name 'Awaki Developer' 2>/dev/null; " +
+        "git config --global user.email 'awaki@localhost' 2>/dev/null; true"
+    )
+    if (result.exitCode == 0) gitEnvConfigured = true
+  }
+
+  suspend fun git(project: Project, args: String): GitRunResult {
+    ensureGitEnv(project.path)
+    return runGit(project.path, args)
+  }
+
+  suspend fun isGitRepository(project: Project): Boolean {
+    if (project.path.isBlank() || !File(project.path).isDirectory) return false
+    val gitDir = File(project.path, ".git")
+    if (gitDir.exists() && (gitDir.isDirectory || gitDir.isFile)) {
+      return true
+    }
+    return git(project, "git rev-parse --is-inside-work-tree 2>/dev/null").output.trim() == "true"
+  }
+
+  /** Creates a real git repository (VS Code-style Initialize Repository). */
+  suspend fun initRepository(project: Project): Boolean {
+    ensureGitEnv(project.path)
+    val res = git(project, "git init")
+    if (res.success) {
+      git(project, "git config core.fileMode false")
+    }
+    return res.success
+  }
+
+  /** Comprehensive repository overview: branch, upstream, ahead/behind, operations, changed files. */
+  suspend fun getRepoStatus(project: Project): GitRepoStatus {
+    if (!isGitRepository(project)) {
+      return GitRepoStatus(isRepo = false)
+    }
+
+    val projectDir = File(project.path)
+
+    // Current Branch & Detached HEAD detection
+    val branchOut = git(project, "git branch --show-current 2>/dev/null").output.trim()
+    val isDetached = branchOut.isBlank()
+    val currentBranch = if (isDetached) {
+      val headSha = git(project, "git rev-parse --short HEAD 2>/dev/null").output.trim()
+      if (headSha.isNotBlank()) "detached ($headSha)" else "main"
+    } else {
+      branchOut
+    }
+
+    // Upstream branch & Ahead/Behind
+    val upstream = git(project, "git rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null").output.trim().ifBlank { null }
+    var ahead = 0
+    var behind = 0
+    if (upstream != null) {
+      val counts = git(project, "git rev-list --left-right --count HEAD...@{u} 2>/dev/null").output.trim()
+      val parts = counts.split(Regex("\\s+"))
+      ahead = parts.getOrNull(0)?.toIntOrNull() ?: 0
+      behind = parts.getOrNull(1)?.toIntOrNull() ?: 0
+    }
+
+    // Active Git Operation
+    val dotGit = File(projectDir, ".git")
+    val activeOp = when {
+      File(dotGit, "MERGE_HEAD").exists() -> GitActiveOperation.MERGE
+      File(dotGit, "rebase-apply").exists() || File(dotGit, "rebase-merge").exists() -> GitActiveOperation.REBASE
+      File(dotGit, "CHERRY_PICK_HEAD").exists() -> GitActiveOperation.CHERRY_PICK
+      File(dotGit, "REVERT_HEAD").exists() -> GitActiveOperation.REVERT
+      else -> GitActiveOperation.NONE
+    }
+
+    // HEAD commit info (format quoted: '|' would otherwise act as a shell pipe)
+    val headLog = git(project, "git log -1 --pretty=${shellQuote("format:%h|%s")} 2>/dev/null").output.trim()
+    val headParts = if (headLog.contains("|")) headLog.split("|", limit = 2) else emptyList()
+    val headSha = headParts.getOrNull(0)
+    val headMsg = headParts.getOrNull(1)
+
+    // Status porcelain (staged, unstaged, untracked, conflicted)
+    val statusOutput = git(project, "git status --porcelain=v1 -uall").output
+    val parsedStatuses = parsePorcelain(statusOutput)
+
+    val staged = mutableListOf<GitFileStatus>()
+    val unstaged = mutableListOf<GitFileStatus>()
+    val untracked = mutableListOf<GitFileStatus>()
+    val conflicts = mutableListOf<GitFileStatus>()
+
+    for (item in parsedStatuses) {
+      if (item.isConflicted) {
+        conflicts.add(item)
+      } else if (item.isUntracked) {
+        untracked.add(item)
+      } else {
+        if (item.isStaged) staged.add(item)
+        else unstaged.add(item)
+      }
+    }
+
+    val remotes = getRemotes(project)
+    val tags = getTags(project)
+
+    return GitRepoStatus(
+      isRepo = true,
+      currentBranch = currentBranch,
+      upstreamBranch = upstream,
+      aheadCount = ahead,
+      behindCount = behind,
+      isClean = statusOutput.isBlank(),
+      isDetachedHead = isDetached,
+      headCommitHash = headSha,
+      headCommitMessage = headMsg,
+      activeOperation = activeOp,
+      conflictedFiles = conflicts,
+      stagedFiles = staged,
+      unstagedFiles = unstaged,
+      untrackedFiles = untracked,
+      totalChangedFiles = parsedStatuses.map { it.path }.distinct().size,
+      remotes = remotes,
+      tags = tags
+    )
+  }
+
+  /** Parses git status --porcelain=v1 into rich GitFileStatus objects. */
+  private fun parsePorcelain(output: String): List<GitFileStatus> {
+    val result = mutableListOf<GitFileStatus>()
+    for (line in output.lines()) {
+      if (line.length < 3) continue
+      val x = line[0]
+      val y = line[1]
+      var path = line.substring(3).trim()
+      if (path.isEmpty()) continue
+
+      var oldPath: String? = null
+      if (path.contains(" -> ")) {
+        val parts = path.split(" -> ")
+        oldPath = cleanPath(parts[0])
+        path = cleanPath(parts[1])
+      } else {
+        path = cleanPath(path)
+      }
+
+      val isConflict = x == 'U' || y == 'U' || (x == 'A' && y == 'A') || (x == 'D' && y == 'D')
+      val isUntracked = x == '?' && y == '?'
+
+      if (isConflict) {
+        result.add(
+          GitFileStatus(
+            path = path,
+            status = GitStatusCode.CONFLICTED,
+            isStaged = false,
+            isConflicted = true,
+            oldPath = oldPath
+          )
+        )
+        continue
+      }
+
+      if (isUntracked) {
+        result.add(
+          GitFileStatus(
+            path = path,
+            status = GitStatusCode.UNTRACKED,
+            isStaged = false,
+            isUntracked = true,
+            oldPath = oldPath
+          )
+        )
+        continue
+      }
+
+      // Staged entry (X != ' ' and X != '?')
+      if (x != ' ') {
+        result.add(
+          GitFileStatus(
+            path = path,
+            status = GitStatusCode.fromPorcelainChar(x),
+            isStaged = true,
+            oldPath = oldPath
+          )
+        )
+      }
+
+      // Unstaged entry (Y != ' ' and Y != '?')
+      if (y != ' ') {
+        result.add(
+          GitFileStatus(
+            path = path,
+            status = GitStatusCode.fromPorcelainChar(y),
+            isStaged = false,
+            oldPath = oldPath
+          )
+        )
+      }
+    }
+    return result
+  }
+
+  private fun cleanPath(raw: String): String {
+    var p = raw.trim()
+    if (p.startsWith("\"") && p.endsWith("\"")) {
+      p = p.drop(1).dropLast(1).replace("\\\\", "\\").replace("\\\"", "\"")
+    }
+    return p
+  }
+
+  /** Paths currently in the index (staged). */
+  suspend fun getStagedFiles(project: Project): List<String> =
+    parsePorcelain(git(project, "git status --porcelain=v1 -uall").output)
+      .filter { it.isStaged }
+      .map { it.path }
+      .distinct()
+
+  /** All changed paths (staged + unstaged + untracked + conflicts). */
+  suspend fun getChangedFiles(project: Project): List<String> =
+    parsePorcelain(git(project, "git status --porcelain=v1 -uall").output)
+      .map { it.path }
+      .distinct()
+
+  /** Raw staged diff (`git diff --cached`). */
+  suspend fun stagedDiff(project: Project): String =
+    git(project, "git diff --cached").output
+
+  /** Raw unstaged diff (`git diff`). */
+  suspend fun unstagedDiff(project: Project): String =
+    git(project, "git diff").output
+
+  /** Full working-tree diff against HEAD, or combination of diffs. */
+  suspend fun fullDiff(project: Project): String {
+    val headCheck = git(project, "git rev-parse --verify HEAD 2>/dev/null")
+    return if (headCheck.success) {
+      git(project, "git diff HEAD").output
+    } else {
+      val staged = stagedDiff(project)
+      val unstaged = unstagedDiff(project)
+      when {
+        staged.isNotBlank() && unstaged.isNotBlank() -> "$staged\n$unstaged"
+        staged.isNotBlank() -> staged
+        else -> unstaged
+      }
+    }
+  }
+
+  /** Diff for one specific file. */
+  suspend fun fileDiff(project: Project, relativePath: String, stagedOnly: Boolean? = null): String {
+    return when (stagedOnly) {
+      true -> git(project, "git diff --cached -- ${shellQuote(relativePath)}").output
+      false -> git(project, "git diff -- ${shellQuote(relativePath)}").output
+      null -> {
+        val headCheck = git(project, "git rev-parse --verify HEAD 2>/dev/null")
+        if (headCheck.success) {
+          git(project, "git diff HEAD -- ${shellQuote(relativePath)}").output
+        } else {
+          val s = git(project, "git diff --cached -- ${shellQuote(relativePath)}").output
+          val u = git(project, "git diff -- ${shellQuote(relativePath)}").output
+          if (s.isNotBlank() && u.isNotBlank()) "$s\n$u" else s.ifBlank { u }
+        }
+      }
+    }
+  }
+
+  /**
+   * Unified structured diffs computed from git and disk contents.
+   *
+   * Every file in a working tree can be a generated bundle or a lockfile, so the
+   * work is bounded three ways: nothing bigger than [MAX_DIFF_BYTES] is read into
+   * memory, only [MAX_DIFFED_FILES] files are described, and the diff itself is
+   * skipped for binary or oversized content - git's own line counts still report
+   * the change. It runs off the main thread: this is a heap-and-CPU pass over the
+   * whole repo, not a UI calculation.
+   */
+  suspend fun computeAllDiffs(project: Project, stagedOnly: Boolean? = null): List<FileDiff> =
+    withContext(Dispatchers.Default) {
+      if (!isGitRepository(project)) return@withContext emptyList()
+
+      val porcelain = parsePorcelain(git(project, "git status --porcelain=v1 -uall").output)
+      val filtered = when (stagedOnly) {
+        true -> porcelain.filter { it.isStaged }
+        false -> porcelain.filter { !it.isStaged }
+        null -> porcelain
+      }
+      val lineStats = changedLineStats(project)
+
+      val diffs = mutableListOf<FileDiff>()
+      val processedPaths = mutableSetOf<String>()
+
+      for (item in filtered) {
+        if (processedPaths.contains(item.path)) continue
+        processedPaths.add(item.path)
+        if (diffs.size >= MAX_DIFFED_FILES) break
+
+        val stats = lineStats[item.path] ?: (0 to 0)
+        val currentFile = File(project.path, item.path)
+        if (currentFile.length() > MAX_DIFF_BYTES) {
+          diffs.add(undiffed(item.path, stats, "File too large to diff"))
+          continue
+        }
+        // An asset the workspace refuses to decode as text would diff as garbage,
+        // and the git side of it would be decoded anyway.
+        if (currentFile.isFile && com.awaki.editor.model.FileViewer.mustNotDecodeAsText(currentFile.name)) {
+          diffs.add(undiffed(item.path, stats, "Binary file"))
+          continue
+        }
+
+        val oldResult: GitRunResult? = if (item.isUntracked) null else {
+          if (item.isStaged) {
+            git(project, "git show HEAD:${shellQuote(item.path)} 2>/dev/null")
+          } else {
+            git(project, "git show :${shellQuote(item.path)} 2>/dev/null")
+              .takeIf { it.success } ?: git(project, "git show HEAD:${shellQuote(item.path)} 2>/dev/null")
+          }
+        }
+        val newResult: GitRunResult? = if (item.isStaged) {
+          git(project, "git show :${shellQuote(item.path)} 2>/dev/null")
+        } else {
+          null
+        }
+        // A read that hit the output cap holds half a file; diffing that would
+        // invent changes, so the file is described instead.
+        if (oldResult?.truncated == true || newResult?.truncated == true) {
+          diffs.add(undiffed(item.path, stats, "File too large to diff"))
+          continue
+        }
+
+        val oldContent = if (item.isUntracked) {
+          ""
+        } else if (oldResult?.success == true) {
+          oldResult.output
+        } else {
+          ""
+        }
+
+        val newContent = if (item.isStaged) {
+          if (newResult?.success == true) newResult.output
+          else if (currentFile.isFile) fileSystem.readFile(project, item.path)
+          else ""
+        } else {
+          if (currentFile.isFile) fileSystem.readFile(project, item.path) else ""
+        }
+
+        if (looksBinary(oldContent) || looksBinary(newContent)) {
+          diffs.add(undiffed(item.path, stats, "Binary file"))
+          continue
+        }
+        if (!isDiffable(oldContent, newContent)) {
+          diffs.add(undiffed(item.path, stats, "Too many lines to diff"))
+          continue
+        }
+
+        val diffLines = computeLineDiff(oldContent, newContent)
+        val adds = diffLines.count { it.kind == com.awaki.ui.components.DiffKind.ADDED }
+        val dels = diffLines.count { it.kind == com.awaki.ui.components.DiffKind.REMOVED }
+
+        val convertedLines = diffLines.map { dl ->
+          DiffLine(
+            type = when (dl.kind) {
+              com.awaki.ui.components.DiffKind.ADDED -> DiffLineType.ADDED
+              com.awaki.ui.components.DiffKind.REMOVED -> DiffLineType.REMOVED
+              com.awaki.ui.components.DiffKind.CONTEXT -> DiffLineType.UNCHANGED
+              com.awaki.ui.components.DiffKind.ELIDED -> DiffLineType.UNCHANGED
+            },
+            oldLineNo = dl.oldNo,
+            newLineNo = dl.newNo,
+            text = dl.text
+          )
+        }
+
+        diffs.add(
+          FileDiff(
+            filePath = item.path,
+            additionsCount = adds,
+            deletionsCount = dels,
+            lines = convertedLines,
+            originalContent = oldContent,
+            newContent = newContent
+          )
+        )
+      }
+      diffs
+    }
+
+  /**
+   * A file the pass refuses to expand line by line, described instead: git's own
+   * counts stay accurate and the note says why there is no body.
+   */
+  private fun undiffed(path: String, stats: Pair<Int, Int>, reason: String): FileDiff = FileDiff(
+    filePath = path,
+    additionsCount = stats.first,
+    deletionsCount = stats.second,
+    lines = listOf(DiffLine(DiffLineType.UNCHANGED, null, null, reason))
+  )
+
+  /**
+   * Per-file added/removed line counts straight from git, which costs a couple of
+   * small outputs instead of two copies of every file.
+   */
+  private suspend fun changedLineStats(project: Project): Map<String, Pair<Int, Int>> {
+    val stats = mutableMapOf<String, Pair<Int, Int>>()
+    for (args in listOf("git diff --numstat", "git diff --cached --numstat")) {
+      val result = git(project, "$args 2>/dev/null")
+      if (!result.success || result.truncated) continue
+      result.output.lineSequence().forEach { line ->
+        val parts = line.split("\t")
+        if (parts.size < 3) return@forEach
+        val adds = parts[0].toIntOrNull() ?: return@forEach
+        val dels = parts[1].toIntOrNull() ?: return@forEach
+        stats[parts[2].trim().removePrefix("a/").removePrefix("b/")] = adds to dels
+      }
+    }
+    return stats
+  }
+
+  /** A NUL byte near the start is how git itself decides a file is not text. */
+  private fun looksBinary(content: String): Boolean = content.take(8000).indexOf('\u0000') >= 0
+
+  // ---- Staging Operations ----
+
+  suspend fun stageFile(project: Project, relativePath: String): Boolean =
+    git(project, "git add -A -- ${shellQuote(relativePath)}").success
+
+  suspend fun unstageFile(project: Project, relativePath: String): Boolean =
+    git(project, "git restore --staged -- ${shellQuote(relativePath)} 2>/dev/null").success ||
+      git(project, "git reset HEAD -- ${shellQuote(relativePath)} 2>/dev/null").success
+
+  suspend fun stageAll(project: Project): Boolean =
+    git(project, "git add -A").success
+
+  suspend fun unstageAll(project: Project): Boolean =
+    git(project, "git reset").success
+
+  suspend fun stageFiles(project: Project, paths: Collection<String>): Boolean {
+    if (paths.isEmpty()) return true
+    val quoted = paths.joinToString(" ") { shellQuote(it) }
+    return git(project, "git add -A -- $quoted").success
+  }
+
+  // ---- Discard Operations ----
+
+  suspend fun revertFile(project: Project, relativePath: String): Boolean {
+    val tracked = git(project, "git ls-files -- ${shellQuote(relativePath)}").output.isNotBlank()
+    return if (tracked) {
+      git(project, "git restore -- ${shellQuote(relativePath)} 2>/dev/null").success ||
+        git(project, "git checkout HEAD -- ${shellQuote(relativePath)} 2>/dev/null").success
+    } else {
+      fileSystem.deleteFile(project, relativePath)
+    }
+  }
+
+  suspend fun revertAllFiles(project: Project): Boolean {
+    val r1 = git(project, "git restore . 2>/dev/null").success || git(project, "git checkout HEAD -- . 2>/dev/null").success
+    val r2 = git(project, "git clean -fd").success
+    return r1 && r2
+  }
+
+  suspend fun deleteUntrackedFile(project: Project, relativePath: String): Boolean {
+    val file = File(project.path, relativePath)
+    return if (file.exists()) file.deleteRecursively() else true
+  }
+
+  // ---- Committing & Undo ----
+
+  suspend fun commit(
+    project: Project,
+    stagedFiles: Set<String>,
+    message: String,
+    amend: Boolean = false
+  ): GitCommitResult {
+    if (message.isBlank()) return GitCommitResult(null, "Commit message is empty.")
+    if (stagedFiles.isNotEmpty()) {
+      stageFiles(project, stagedFiles)
+    }
+
+    val lines = message.trim().lines()
+    val subject = lines.firstOrNull { it.isNotBlank() }?.take(72) ?: return GitCommitResult(null, "Commit message is empty.")
+    val body = lines.dropWhile { it.isBlank() }.drop(1)
+      .dropWhile { it.isBlank() }.joinToString("\n").trim()
+
+    val amendFlag = if (amend) "--amend" else ""
+    val commitResult = if (body.isNotBlank()) {
+      git(project, "git commit $amendFlag -m ${shellQuote(subject)} -m ${shellQuote(body)}")
+    } else {
+      git(project, "git commit $amendFlag -m ${shellQuote(subject)}")
+    }
+
+    if (!commitResult.success && !commitResult.output.contains("nothing to commit")) {
+      return GitCommitResult(
+        null,
+        commitResult.output.ifBlank { "git commit failed (exit ${commitResult.exitCode})" }
+      )
+    }
+
+    val hash = git(project, "git rev-parse --short HEAD").output.trim().ifBlank { "unknown" }
+    val fullHash = git(project, "git rev-parse HEAD").output.trim()
+
+    return GitCommitResult(
+      GitCommit(
+        hash = hash,
+        message = subject,
+        author = "Awaki Developer",
+        date = SimpleDateFormat("MMM d, yyyy HH:mm", Locale.getDefault()).format(Date()),
+        filesChanged = stagedFiles.toList(),
+        relativeDate = "just now",
+        fullHash = fullHash,
+        body = body
+      ),
+      null
+    )
+  }
+
+  suspend fun undoLastCommit(project: Project, mode: UndoCommitMode): GitRunResult {
+    return when (mode) {
+      UndoCommitMode.KEEP_STAGED -> git(project, "git reset --soft HEAD~1")
+      UndoCommitMode.KEEP_UNSTAGED -> git(project, "git reset HEAD~1")
+      UndoCommitMode.REVERT_COMMIT -> git(project, "git revert --no-edit HEAD")
+    }
+  }
+
+  // ---- Commit History & Details ----
+
+  /**
+   * Loads commit history. Returns null when the history could not be determined
+   * (transient git failure — callers should keep their previous list), and an
+   * empty list when the repository genuinely has no commits yet.
+   */
+  suspend fun getCommitHistory(project: Project, limit: Int = 30, offset: Int = 0): List<GitCommit>? {
+    if (!isGitRepository(project)) return null
+
+    val checkHead = git(project, "git rev-parse --verify HEAD")
+    if (!checkHead.success) {
+      val noCommits = checkHead.output.contains("ambiguous argument 'HEAD'") ||
+        checkHead.output.contains("bad revision") ||
+        checkHead.output.contains("does not have any commits")
+      return if (noCommits) emptyList() else null
+    }
+
+    // Log format: %h | %H | %an | %ae | %ci | %cr | %d | %s
+    // The format must be shell-quoted — unquoted '|' turns into shell pipes.
+    val logCmd = "git log --pretty=${shellQuote("format:%h|%H|%an|%ae|%ci|%cr|%d|%s")} -n $limit --skip $offset"
+    val logRes = git(project, logCmd)
+    if (!logRes.success) return null
+    val out = logRes.output
+    if (out.isBlank()) return emptyList()
+
+    return out.lines().filter { it.contains("|") }.map { line ->
+      val parts = line.split("|", limit = 8)
+      val hash = parts.getOrNull(0)?.trim() ?: "unknown"
+      val fullHash = parts.getOrNull(1)?.trim() ?: ""
+      val author = parts.getOrNull(2)?.trim() ?: ""
+      val email = parts.getOrNull(3)?.trim() ?: ""
+      val date = parts.getOrNull(4)?.trim()?.take(16)?.replace("T", " ") ?: ""
+      val relativeDate = parts.getOrNull(5)?.trim() ?: ""
+      val rawRefs = parts.getOrNull(6)?.trim()?.removePrefix("(")?.removeSuffix(")") ?: ""
+      val refs = if (rawRefs.isNotBlank()) rawRefs.split(",").map { it.trim() } else emptyList()
+      val subject = parts.getOrNull(7)?.trim() ?: ""
+
+      GitCommit(
+        hash = hash,
+        message = subject,
+        author = author,
+        date = date,
+        filesChanged = emptyList(),
+        relativeDate = relativeDate,
+        fullHash = fullHash,
+        authorEmail = email,
+        refs = refs
+      )
+    }.filter { it.message.isNotBlank() }
+  }
+
+  suspend fun getCommitDetail(project: Project, hash: String): GitCommitDetail? {
+    if (!isGitRepository(project)) return null
+
+    // Get metadata and body
+    val meta = git(
+      project,
+      "git show -s --pretty=format:\"%h|%H|%an|%ae|%ci|%cr|%P|%s%n%b---END-COMMIT-BODY---\" $hash"
+    ).output
+
+    if (meta.isBlank() || !meta.contains("|")) return null
+
+    val headerLine = meta.lines().firstOrNull() ?: return null
+    val headerParts = headerLine.split("|", limit = 8)
+    val shortHash = headerParts.getOrNull(0)?.trim() ?: hash
+    val fullHash = headerParts.getOrNull(1)?.trim() ?: hash
+    val author = headerParts.getOrNull(2)?.trim() ?: ""
+    val email = headerParts.getOrNull(3)?.trim() ?: ""
+    val date = headerParts.getOrNull(4)?.trim() ?: ""
+    val relativeDate = headerParts.getOrNull(5)?.trim() ?: ""
+    val parents = headerParts.getOrNull(6)?.trim()?.split(Regex("\\s+"))?.filter { it.isNotBlank() } ?: emptyList()
+    val subject = headerParts.getOrNull(7)?.trim() ?: ""
+
+    val bodyContent = meta.substringAfter("\n").substringBefore("---END-COMMIT-BODY---").trim()
+
+    // Numstat of changed files
+    val statOut = git(project, "git show --numstat --format=\"\" $hash").output
+    val changedFiles = mutableListOf<GitCommitFileChange>()
+    var totalAdds = 0
+    var totalDels = 0
+
+    for (line in statOut.lines()) {
+      val p = line.split(Regex("\\t+"))
+      if (p.size >= 3) {
+        val adds = p[0].toIntOrNull() ?: 0
+        val dels = p[1].toIntOrNull() ?: 0
+        val path = p[2].trim()
+        totalAdds += adds
+        totalDels += dels
+        changedFiles.add(
+          GitCommitFileChange(
+            path = path,
+            status = if (adds > 0 && dels == 0) GitStatusCode.ADDED else if (adds == 0 && dels > 0) GitStatusCode.DELETED else GitStatusCode.MODIFIED,
+            additions = adds,
+            deletions = dels
+          )
+        )
+      }
+    }
+
+    // Full commit diff
+    val diffOut = git(project, "git show --format=\"\" $hash").output
+
+    return GitCommitDetail(
+      hash = shortHash,
+      fullHash = fullHash,
+      author = author,
+      authorEmail = email,
+      date = date,
+      relativeDate = relativeDate,
+      subject = subject,
+      body = bodyContent,
+      parents = parents,
+      filesChanged = changedFiles,
+      diff = diffOut,
+      totalAdditions = totalAdds,
+      totalDeletions = totalDels
+    )
+  }
+
+  suspend fun revertCommit(project: Project, hash: String): GitRunResult =
+    git(project, "git revert --no-edit $hash")
+
+  suspend fun cherryPick(project: Project, hash: String): GitRunResult =
+    git(project, "git cherry-pick $hash")
+
+  suspend fun abortCherryPick(project: Project): GitRunResult =
+    git(project, "git cherry-pick --abort")
+
+  suspend fun continueCherryPick(project: Project): GitRunResult =
+    git(project, "git cherry-pick --continue")
+
+  /**
+   * Moves the current branch to [hash] in the requested mode.
+   *
+   * The result is verified against `git rev-parse HEAD` before and after, and
+   * the message always names the commit that was actually targeted — so a reset
+   * that did not move the branch can never be reported as an unqualified
+   * success, and a wrong target is visible in the UI instead of silent.
+   */
+  suspend fun resetToCommit(project: Project, hash: String, mode: ResetMode): GitRunResult {
+    val flag = when (mode) {
+      ResetMode.SOFT -> "--soft"
+      ResetMode.MIXED -> "--mixed"
+      ResetMode.HARD -> "--hard"
+    }
+    val target = hash.trim()
+    if (target.isBlank()) return GitRunResult(1, "Reset needs a commit hash.")
+
+    val headBefore = git(project, "git rev-parse --verify HEAD 2>/dev/null")
+      .output.trim().lineSequence().firstOrNull().orEmpty()
+    val resolved = git(project, "git rev-parse --verify ${shellQuote("$target^{commit}")} 2>/dev/null")
+      .output.trim().lineSequence().firstOrNull().orEmpty()
+    if (resolved.isBlank()) {
+      return GitRunResult(1, "Cannot resolve '$target' to a commit in this repository.")
+    }
+
+    val res = git(project, "git reset $flag ${shellQuote(target)}")
+    if (!res.success) return res
+
+    val headAfter = git(project, "git rev-parse --verify HEAD 2>/dev/null")
+      .output.trim().lineSequence().firstOrNull().orEmpty()
+    val subject = git(project, "git log -1 --pretty=%s ${shellQuote(resolved)} 2>/dev/null")
+      .output.trim().lineSequence().firstOrNull().orEmpty()
+    val targetLabel = "${resolved.take(7)}${if (subject.isBlank()) "" else " \"$subject\""}"
+    // The hash as the UI handed it over, so a mismatch between the tapped row
+    // and the targeted commit is visible instead of silently resetting HEAD.
+    val requestedLabel = target.take(12)
+    val detail = res.output.trim().takeIf { it.isNotBlank() }?.let { "\n$it" }.orEmpty()
+
+    return when {
+      headBefore == resolved ->
+        // Resetting onto HEAD is a legitimate no-op for --hard (discard local
+        // changes), but calling it "HEAD is now at X (was X)" is misleading.
+        GitRunResult(
+          0,
+          "Reset requested $requestedLabel, which resolves to $targetLabel — that is already HEAD, " +
+            "so the branch was not moved.$detail"
+        )
+
+      headAfter == resolved ->
+        GitRunResult(
+          0,
+          "HEAD moved to $targetLabel (was ${headBefore.take(7).ifBlank { "unknown" }}); requested $requestedLabel$detail"
+        )
+
+      else ->
+        GitRunResult(
+          1,
+          "git reset $flag exited 0 but HEAD did not move: still ${headAfter.take(7).ifBlank { "unknown" }}, " +
+            "expected $targetLabel (requested $requestedLabel)$detail"
+        )
+    }
+  }
+
+  suspend fun compareCommits(project: Project, baseHash: String, targetHash: String): String =
+    git(project, "git diff $baseHash..$targetHash").output
+
+  // ---- Branches ----
+
+  suspend fun getBranches(project: Project): List<GitBranch> {
+    if (!isGitRepository(project)) return emptyList()
+    val out = git(project, "git branch -a -vv --sort=-committerdate").output
+    val branches = mutableListOf<GitBranch>()
+
+    for (line in out.lines()) {
+      val trimmed = line.trim()
+      if (trimmed.isBlank()) continue
+      val isCurrent = line.startsWith("*")
+      val withoutPrefix = trimmed.removePrefix("*").trim()
+
+      val name = withoutPrefix.substringBefore(" ")
+      if (name.contains("->")) continue // skip origin/HEAD -> origin/main symref
+
+      val isRemote = name.startsWith("remotes/") || name.startsWith("origin/")
+
+      // Extract upstream and ahead/behind: e.g. [origin/main: ahead 1, behind 2]
+      var upstream: String? = null
+      var ahead = 0
+      var behind = 0
+      if (withoutPrefix.contains("[") && withoutPrefix.contains("]")) {
+        val tracking = withoutPrefix.substringAfter("[").substringBefore("]")
+        upstream = tracking.substringBefore(":").trim()
+        if (tracking.contains("ahead ")) {
+          ahead = tracking.substringAfter("ahead ").substringBefore(",").substringBefore("]").trim().toIntOrNull() ?: 0
+        }
+        if (tracking.contains("behind ")) {
+          behind = tracking.substringAfter("behind ").substringBefore(",").substringBefore("]").trim().toIntOrNull() ?: 0
+        }
+      }
+
+      val cleanName = name.removePrefix("remotes/")
+      branches.add(
+        GitBranch(
+          name = cleanName,
+          isCurrent = isCurrent,
+          isRemote = isRemote,
+          upstream = upstream,
+          ahead = ahead,
+          behind = behind
+        )
+      )
+    }
+    return branches.distinctBy { it.name }
+  }
+
+  suspend fun createBranch(project: Project, branchName: String, checkout: Boolean = true): GitRunResult {
+    val clean = branchName.trim()
+    return if (checkout) {
+      git(project, "git checkout -b ${shellQuote(clean)} 2>/dev/null || git switch -c ${shellQuote(clean)}")
+    } else {
+      git(project, "git branch ${shellQuote(clean)}")
+    }
+  }
+
+  suspend fun checkoutBranch(project: Project, branchName: String): GitRunResult {
+    val clean = branchName.trim()
+    return git(project, "git checkout ${shellQuote(clean)} 2>/dev/null || git switch ${shellQuote(clean)}")
+  }
+
+  suspend fun renameBranch(project: Project, oldName: String, newName: String): GitRunResult =
+    git(project, "git branch -m ${shellQuote(oldName.trim())} ${shellQuote(newName.trim())}")
+
+  suspend fun deleteBranch(project: Project, branchName: String, force: Boolean = false): GitRunResult {
+    val flag = if (force) "-D" else "-d"
+    return git(project, "git branch $flag ${shellQuote(branchName.trim())}")
+  }
+
+  suspend fun mergeBranch(project: Project, branchName: String): GitRunResult =
+    git(project, "git merge ${shellQuote(branchName.trim())}")
+
+  suspend fun abortMerge(project: Project): GitRunResult =
+    git(project, "git merge --abort")
+
+  suspend fun continueMerge(project: Project): GitRunResult =
+    git(project, "git merge --continue")
+
+  suspend fun rebaseBranch(project: Project, branchName: String): GitRunResult =
+    git(project, "git rebase ${shellQuote(branchName.trim())}")
+
+  suspend fun abortRebase(project: Project): GitRunResult =
+    git(project, "git rebase --abort")
+
+  suspend fun continueRebase(project: Project): GitRunResult =
+    git(project, "git rebase --continue")
+
+  // ---- Remotes & Sync ----
+
+  suspend fun fetch(project: Project, remote: String = "origin", prune: Boolean = false): GitRunResult {
+    val pruneFlag = if (prune) "--prune" else ""
+    return git(project, "git fetch $pruneFlag $remote")
+  }
+
+  suspend fun pull(
+    project: Project,
+    remote: String = "origin",
+    branch: String? = null,
+    rebase: Boolean = false
+  ): GitRunResult {
+    val rebaseFlag = if (rebase) "--rebase" else ""
+    val branchArg = if (branch.isNullOrBlank()) "" else shellQuote(branch)
+    return git(project, "git pull $rebaseFlag $remote $branchArg")
+  }
+
+  suspend fun push(
+    project: Project,
+    remote: String = "origin",
+    branch: String? = null,
+    setUpstream: Boolean = false,
+    force: Boolean = false
+  ): GitRunResult {
+    val uFlag = if (setUpstream) "-u" else ""
+    val forceFlag = if (force) "--force" else ""
+    val branchArg = if (branch.isNullOrBlank()) "" else shellQuote(branch)
+    return git(project, "git push $uFlag $forceFlag $remote $branchArg")
+  }
+
+  suspend fun getRemotes(project: Project): List<GitRemote> {
+    if (!isGitRepository(project)) return emptyList()
+    val out = git(project, "git remote -v").output
+    val map = mutableMapOf<String, Pair<String, String>>() // name -> (fetch, push)
+
+    for (line in out.lines()) {
+      val parts = line.split(Regex("\\s+"))
+      if (parts.size >= 3) {
+        val name = parts[0]
+        val url = parts[1]
+        val type = parts[2] // (fetch) or (push)
+        val current = map[name] ?: ("" to "")
+        if (type.contains("fetch")) {
+          map[name] = url to current.second
+        } else if (type.contains("push")) {
+          map[name] = current.first to url
+        }
+      }
+    }
+
+    return map.map { (name, urls) ->
+      GitRemote(name, urls.first.ifBlank { urls.second }, urls.second.ifBlank { urls.first })
+    }
+  }
+
+  suspend fun addRemote(project: Project, name: String, url: String): GitRunResult =
+    git(project, "git remote add ${shellQuote(name.trim())} ${shellQuote(url.trim())}")
+
+  suspend fun removeRemote(project: Project, name: String): GitRunResult =
+    git(project, "git remote remove ${shellQuote(name.trim())}")
+
+  suspend fun setRemoteUrl(project: Project, name: String, url: String): GitRunResult =
+    git(project, "git remote set-url ${shellQuote(name.trim())} ${shellQuote(url.trim())}")
+
+  suspend fun pruneRemotes(project: Project, remote: String = "origin"): GitRunResult =
+    git(project, "git remote prune $remote")
+
+  // ---- Tags ----
+
+  suspend fun getTags(project: Project): List<String> {
+    if (!isGitRepository(project)) return emptyList()
+    val out = git(project, "git tag -l --sort=-creatordate").output
+    return out.lines().map { it.trim() }.filter { it.isNotBlank() }
+  }
+
+  suspend fun createTag(
+    project: Project,
+    tagName: String,
+    message: String = "",
+    commitHash: String? = null
+  ): GitRunResult {
+    val clean = tagName.trim()
+    val target = if (commitHash.isNullOrBlank()) "" else commitHash
+    return if (message.isNotBlank()) {
+      git(project, "git tag -a ${shellQuote(clean)} -m ${shellQuote(message)} $target")
+    } else {
+      git(project, "git tag ${shellQuote(clean)} $target")
+    }
+  }
+
+  suspend fun deleteTag(project: Project, tagName: String): GitRunResult =
+    git(project, "git tag -d ${shellQuote(tagName.trim())}")
+
+  suspend fun pushTags(project: Project, remote: String = "origin"): GitRunResult =
+    git(project, "git push $remote --tags")
+
+  // ---- Stashes ----
+
+  suspend fun getStashes(project: Project): List<GitStash> {
+    if (!isGitRepository(project)) return emptyList()
+    val out = git(project, "git stash list --pretty=format:\"%gd|%cr|%gs\"").output
+    return out.lines().filter { it.contains("|") }.mapIndexed { idx, line ->
+      val parts = line.split("|", limit = 3)
+      val ref = parts.getOrNull(0)?.trim() ?: "stash@{$idx}"
+      val date = parts.getOrNull(1)?.trim() ?: ""
+      val desc = parts.getOrNull(2)?.trim() ?: ""
+      val branch = if (desc.contains(":")) desc.substringBefore(":").removePrefix("WIP on ").removePrefix("On ").trim() else "main"
+      val msg = if (desc.contains(":")) desc.substringAfter(":").trim() else desc
+
+      GitStash(
+        index = idx,
+        ref = ref,
+        branch = branch,
+        message = msg.ifBlank { "Stash #$idx" },
+        date = date
+      )
+    }
+  }
+
+  suspend fun stashChanges(
+    project: Project,
+    message: String = "",
+    includeUntracked: Boolean = false
+  ): GitRunResult {
+    val uFlag = if (includeUntracked) "-u" else ""
+    val mArg = if (message.isNotBlank()) "-m ${shellQuote(message.trim())}" else ""
+    return git(project, "git stash push $uFlag $mArg")
+  }
+
+  suspend fun stashApply(project: Project, index: Int = 0): GitRunResult =
+    git(project, "git stash apply stash@{$index}")
+
+  suspend fun stashPop(project: Project, index: Int = 0): GitRunResult =
+    git(project, "git stash pop stash@{$index}")
+
+  suspend fun stashDrop(project: Project, index: Int = 0): GitRunResult =
+    git(project, "git stash drop stash@{$index}")
+
+  // ---- index.lock recovery ----
+
+  /** Resolves the real `.git` directory, following gitfiles (worktrees/submodules). */
+  private fun gitDirFor(projectPath: String): File? {
+    val dotGit = File(projectPath, ".git")
+    return when {
+      dotGit.isDirectory -> dotGit
+      dotGit.isFile -> runCatching {
+        val raw = dotGit.readText().trim().removePrefix("gitdir:").trim()
+        if (raw.isBlank()) null
+        else {
+          val dir = if (File(raw).isAbsolute) File(raw) else File(dotGit.parentFile, raw)
+          dir.takeIf { it.isDirectory }
+        }
+      }.getOrNull()
+      else -> null
+    }
+  }
+
+  fun indexLockFile(projectPath: String): File? =
+    gitDirFor(projectPath)?.let { File(it, "index.lock") }
+
+  fun hasIndexLock(projectPath: String): Boolean =
+    indexLockFile(projectPath)?.exists() == true
+
+  /** Deletes a stale `.git/index.lock`. True when no lock remains afterwards. */
+  fun removeIndexLock(projectPath: String): Boolean {
+    val lock = indexLockFile(projectPath) ?: return false
+    return !lock.exists() || lock.delete()
+  }
+
+  private fun shellQuote(text: String): String =
+    "'" + text.replace("'", "'\\''") + "'"
+
+  companion object {
+    /** True when git output indicates an index.lock conflict (live or crashed process). */
+    fun isIndexLockError(output: String): Boolean =
+      output.contains("index.lock", ignoreCase = true)
+  }
+}

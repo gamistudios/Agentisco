@@ -42,7 +42,7 @@ MOCK_PID=$!
 
 log "== service on $BASE =="
 GITHUB_API_BASE_URL="$MOCK_BASE" GITHUB_TOKEN=mock-github-token GITHUB_OWNER=gamistudios \
-  GITHUB_REPOSITORY=Agentisco PORT="$PORT" STORAGE_PATH="$WORK/data" \
+  GITHUB_REPOSITORY=Awaki PORT="$PORT" STORAGE_PATH="$WORK/data" \
   SYNC_INTERVAL_SECONDS=15 LOG_FORMAT=text LOG_LEVEL=info \
   "$WORK/update-api.exe" > "$WORK/server.log" 2>&1 &
 SERVER_PID=$!

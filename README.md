@@ -1,8 +1,8 @@
-# Agentisco
+# Awaki
 
-A full AI coding agent, developer workspace, and code editor running entirely on Android. Agentisco ships a Debian Linux userland inside the app via `proot` (no root required), drives it with an LLM agent that has 21 real tools, and gives you an IDE-grade editor and Git client over the results — all offline-capable except for the LLM calls themselves.
+A full AI coding agent, developer workspace, and code editor running entirely on Android. Awaki ships a Debian Linux userland inside the app via `proot` (no root required), drives it with an LLM agent that has 21 real tools, and gives you an IDE-grade editor and Git client over the results — all offline-capable except for the LLM calls themselves.
 
-- **Package:** `com.agentisco` · **Current version:** 2.2.14 (versionCode 20214; CI assigns release versions from git tags)
+- **Package:** `com.awaki` · **Current version:** 2.2.14 (versionCode 20214; CI assigns release versions from git tags)
 - **Platforms:** Android 7.0+ (minSdk 24), `arm64-v8a` and `armeabi-v7a`
 - **UI:** Jetpack Compose, dark-only custom theme
 
@@ -27,7 +27,7 @@ Navigation has no Jetpack Navigation: an `AppDestination` enum is held in a `Sta
 ## Architecture
 
 ```
-app/src/main/java/com/agentisco/
+app/src/main/java/com/awaki/
 ├── MainActivity.kt              # Entry point; single Activity, edge-to-edge Compose host
 ├── agent/                       # AI agent subsystem
 │   ├── runtime/AgentRuntime.kt  # Agentic loop (plan → stream → tools → repeat)
@@ -93,19 +93,19 @@ Safety: `DestructiveCommandGuard` flags patterns (`rm -rf`, `git reset --hard`, 
 
 The engine (`editor/`) is headless and unit-tested; the UI (`ui/editor/`) wires it into Compose.
 
-- `SyntaxHighlighter`: line-based tokenizer producing per-line `AnnotatedString`s memoized in a concurrent cache for 60fps typing; handles multi-line block comments and Python docstrings. 26 languages via `Language.kt`; 5 themes (Agentisco Dark, GitHub Dark, Monokai Pro, One Dark Pro, Tokyo Night).
+- `SyntaxHighlighter`: line-based tokenizer producing per-line `AnnotatedString`s memoized in a concurrent cache for 60fps typing; handles multi-line block comments and Python docstrings. 26 languages via `Language.kt`; 5 themes (Awaki Dark, GitHub Dark, Monokai Pro, One Dark Pro, Tokyo Night).
 - `SymbolExtractor`: regex-based outline (classes, functions, enums, headings…) backing the symbols sheet and go-to-line.
 - `EditorModels`: tabs with full-content undo/redo stacks (cap 200), dirty tracking, auto-save/format-on-save settings, find & replace with match-case/whole-word.
 
 ### Data layer
 
-- **Room** (`agentisco_chat.db`, version 5): `project → session → message → block` with FK cascades; blocks carry `kind = text | tool | approval`, exit codes and call IDs. Migrations are non-destructive and incremental (1→5), including a snapshot-rebuild at 4→5 to preserve cascaded children.
-- **Project registry** (`projects.json` + `last_project.txt`) caches per-project config; the authoritative config is `.agentisco.json` inside each project root.
+- **Room** (`awaki_chat.db`, version 5): `project → session → message → block` with FK cascades; blocks carry `kind = text | tool | approval`, exit codes and call IDs. Migrations are non-destructive and incremental (1→5), including a snapshot-rebuild at 4→5 to preserve cascaded children.
+- **Project registry** (`projects.json` + `last_project.txt`) caches per-project config; the authoritative config is `.awaki.json` inside each project root.
 - `ProjectMetadataScanner` measures real size / newest mtime / icon / `ProjectKind` (from marker files such as `build.gradle`, `package.json`, `Cargo.toml`, …) off the main thread, with a TTL + root-mtime cache and hard walk bounds (depth 32, 200k entries) so a pathological tree can't hang a refresh.
 
 ### Self-update
 
-`UpdateRepository` checks `api.github.com/repos/gamistudios/Agentisco/releases/latest`, compares `versionCode` parsed from the tag, and downloads with HTTP-Range resume (5 attempts, linear backoff) with progress measured against GitHub's reported asset size. A downloaded APK is only trusted after: exact byte-size match, SHA-256 `assetDigest` check when available, ZIP magic validation, and package-name verification via `PackageArchiveInfo`; a completion marker gates reuse of partial downloads. Install launches the system installer on a `FileProvider` URI.
+`UpdateRepository` checks `api.github.com/repos/gamistudios/Awaki/releases/latest`, compares `versionCode` parsed from the tag, and downloads with HTTP-Range resume (5 attempts, linear backoff) with progress measured against GitHub's reported asset size. A downloaded APK is only trusted after: exact byte-size match, SHA-256 `assetDigest` check when available, ZIP magic validation, and package-name verification via `PackageArchiveInfo`; a completion marker gates reuse of partial downloads. Install launches the system installer on a `FileProvider` URI.
 
 ---
 
@@ -148,7 +148,7 @@ git clone <url>
 ./gradlew :app:testDebugUnitTest
 
 # Release build — requires keystore env/`.env` entries:
-#   AGENTISCO_KEYSTORE_PATH / _PASSWORD / _KEY_ALIAS / _KEY_PASSWORD
+#   AWAKI_KEYSTORE_PATH / _PASSWORD / _KEY_ALIAS / _KEY_PASSWORD
 # See KEYSTORE_SETUP.md and generate-keystore.sh.
 ./gradlew :app:assembleRelease
 ```

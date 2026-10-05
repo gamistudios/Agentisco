@@ -34,7 +34,7 @@ func TestLoadAppliesEnvFileAndRepoAlias(t *testing.T) {
 # local development secrets
 GITHUB_TOKEN=file-token
 GITHUB_OWNER=gamistudios
-GITHUB_REPO=Agentisco
+GITHUB_REPO=Awaki
 SYNC_INTERVAL_SECONDS=90
 `)
 	cfg, err := Load()
@@ -44,7 +44,7 @@ SYNC_INTERVAL_SECONDS=90
 	if cfg.GitHubToken != "file-token" || cfg.GitHubOwner != "gamistudios" {
 		t.Fatalf("env file not applied: %+v", cfg)
 	}
-	if cfg.GitHubRepo != "Agentisco" {
+	if cfg.GitHubRepo != "Awaki" {
 		t.Fatalf("GITHUB_REPO alias ignored: %q", cfg.GitHubRepo)
 	}
 	if cfg.SyncInterval != 90*time.Second {
@@ -90,12 +90,12 @@ PUBLIC_BASE_URL=https://updates.example.com/
 }
 
 func TestLoadRequiresEveryCredentialPiece(t *testing.T) {
-	writtenEnvFile(t, "GITHUB_OWNER=gamistudios\nGITHUB_REPOSITORY=Agentisco\n")
+	writtenEnvFile(t, "GITHUB_OWNER=gamistudios\nGITHUB_REPOSITORY=Awaki\n")
 	if _, err := Load(); err == nil {
 		t.Fatal("a missing token must refuse to start")
 	}
 
-	writtenEnvFile(t, "GITHUB_TOKEN=t\nGITHUB_REPOSITORY=Agentisco\n")
+	writtenEnvFile(t, "GITHUB_TOKEN=t\nGITHUB_REPOSITORY=Awaki\n")
 	if _, err := Load(); err == nil {
 		t.Fatal("a missing owner must refuse to start")
 	}

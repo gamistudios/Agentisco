@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"agentisco/updateapi/internal/ghfake"
+	"awaki/updateapi/internal/ghfake"
 )
 
 const testToken = "super-secret-token"
@@ -23,7 +23,7 @@ func newTestClient(t *testing.T, fake *ghfake.Server) *Client {
 	client := New(Options{
 		APIBase:  server.URL,
 		Owner:    "gamistudios",
-		Repo:     "Agentisco",
+		Repo:     "Awaki",
 		Token:    testToken,
 		Timeout:  5 * time.Second,
 		MaxItems: 30,
@@ -35,10 +35,10 @@ func newTestClient(t *testing.T, fake *ghfake.Server) *Client {
 
 func TestListReleasesFiltersDraftsAndPrereleases(t *testing.T) {
 	fake := ghfake.New(testToken)
-	fake.AddRelease("v1.5.0", "Agentisco v1.5.0", "notes", time.Now().Add(-time.Hour),
-		ghfake.AssetInput{Name: "Agentisco-v1.5.0-debug.apk", Bytes: []byte("apk")})
+	fake.AddRelease("v1.5.0", "Awaki v1.5.0", "notes", time.Now().Add(-time.Hour),
+		ghfake.AssetInput{Name: "Awaki-v1.5.0-debug.apk", Bytes: []byte("apk")})
 	prerelease := fake.AddRelease("v1.6.0-rc1", "RC", "notes", time.Now(),
-		ghfake.AssetInput{Name: "Agentisco-v1.6.0-rc1-debug.apk", Bytes: []byte("apk")})
+		ghfake.AssetInput{Name: "Awaki-v1.6.0-rc1-debug.apk", Bytes: []byte("apk")})
 	prerelease.PreRelease = true
 	draft := fake.AddRelease("v1.7.0", "Draft", "notes", time.Now())
 	draft.Draft = true
@@ -58,9 +58,9 @@ func TestListReleasesFiltersDraftsAndPrereleases(t *testing.T) {
 func TestListReleasesIsNewestFirst(t *testing.T) {
 	fake := ghfake.New(testToken)
 	fake.AddRelease("v1.0.0", "old", "notes", time.Now().Add(-72*time.Hour),
-		ghfake.AssetInput{Name: "Agentisco-v1.0.0-debug.apk", Bytes: []byte("a")})
+		ghfake.AssetInput{Name: "Awaki-v1.0.0-debug.apk", Bytes: []byte("a")})
 	fake.AddRelease("v1.2.0", "new", "notes", time.Now(),
-		ghfake.AssetInput{Name: "Agentisco-v1.2.0-debug.apk", Bytes: []byte("b")})
+		ghfake.AssetInput{Name: "Awaki-v1.2.0-debug.apk", Bytes: []byte("b")})
 
 	releases, err := newTestClient(t, fake).ListReleases(context.Background())
 	if err != nil {
@@ -76,7 +76,7 @@ func TestListReleasesPaginatesAndHonoursMaxItems(t *testing.T) {
 	for i := 0; i < 45; i++ {
 		tag := "v2." + itoa(i) + ".0"
 		fake.AddRelease(tag, tag, "notes", time.Now().Add(-time.Duration(i)*time.Hour),
-			ghfake.AssetInput{Name: "Agentisco-" + tag + "-debug.apk", Bytes: []byte("x")})
+			ghfake.AssetInput{Name: "Awaki-" + tag + "-debug.apk", Bytes: []byte("x")})
 	}
 
 	client := newTestClient(t, fake)
@@ -93,7 +93,7 @@ func TestListReleasesPaginatesAndHonoursMaxItems(t *testing.T) {
 func TestListReleasesRetriesTransientFailures(t *testing.T) {
 	fake := ghfake.New(testToken)
 	fake.AddRelease("v1.0.0", "v1.0.0", "notes", time.Now(),
-		ghfake.AssetInput{Name: "Agentisco-v1.0.0-debug.apk", Bytes: []byte("x")})
+		ghfake.AssetInput{Name: "Awaki-v1.0.0-debug.apk", Bytes: []byte("x")})
 	fake.QueueFault(http.StatusServiceUnavailable, http.StatusTooManyRequests, http.StatusServiceUnavailable)
 
 	releases, err := newTestClient(t, fake).ListReleases(context.Background())
@@ -123,7 +123,7 @@ func TestUnauthorizedCredential(t *testing.T) {
 	client := New(Options{
 		APIBase: server.URL,
 		Owner:   "gamistudios",
-		Repo:    "Agentisco",
+		Repo:    "Awaki",
 		Token:   "wrong-token",
 		Timeout: 5 * time.Second,
 	})
@@ -140,7 +140,7 @@ func TestUnauthorizedCredential(t *testing.T) {
 func TestErrorsNeverLeakCredentialsOrRepository(t *testing.T) {
 	fake := ghfake.New(testToken)
 	fake.AddRelease("v1.0.0", "v1.0.0", "notes", time.Now(),
-		ghfake.AssetInput{Name: "Agentisco-v1.0.0-debug.apk", Bytes: []byte("x")})
+		ghfake.AssetInput{Name: "Awaki-v1.0.0-debug.apk", Bytes: []byte("x")})
 	client := newTestClient(t, fake)
 
 	cases := []struct {
@@ -148,7 +148,7 @@ func TestErrorsNeverLeakCredentialsOrRepository(t *testing.T) {
 		err  error
 	}{
 		{"wrong token", func() error {
-			bad := New(Options{APIBase: client.apiBase, Owner: "gamistudios", Repo: "Agentisco", Token: "nope", Timeout: time.Second})
+			bad := New(Options{APIBase: client.apiBase, Owner: "gamistudios", Repo: "Awaki", Token: "nope", Timeout: time.Second})
 			bad.sleep = func(ctx context.Context, _ time.Duration) error { return ctx.Err() }
 			_, err := bad.ListReleases(context.Background())
 			return err
@@ -158,7 +158,7 @@ func TestErrorsNeverLeakCredentialsOrRepository(t *testing.T) {
 			return err
 		}()},
 		{"dead endpoint", func() error {
-			dead := New(Options{APIBase: "http://127.0.0.1:1", Owner: "gamistudios", Repo: "Agentisco", Token: testToken, Timeout: time.Second})
+			dead := New(Options{APIBase: "http://127.0.0.1:1", Owner: "gamistudios", Repo: "Awaki", Token: testToken, Timeout: time.Second})
 			dead.sleep = func(ctx context.Context, _ time.Duration) error { return ctx.Err() }
 			_, err := dead.ListReleases(context.Background())
 			return err
@@ -170,7 +170,7 @@ func TestErrorsNeverLeakCredentialsOrRepository(t *testing.T) {
 			t.Fatalf("%s: expected an error", testCase.name)
 		}
 		message := testCase.err.Error()
-		for _, forbidden := range []string{testToken, "gamistudios", "Agentisco", "github", "api.github.com", "/repos/"} {
+		for _, forbidden := range []string{testToken, "gamistudios", "Awaki", "github", "api.github.com", "/repos/"} {
 			if strings.Contains(strings.ToLower(message), strings.ToLower(forbidden)) && forbidden != "github" {
 				t.Errorf("%s: error leaks %q: %s", testCase.name, forbidden, message)
 			}
@@ -181,7 +181,7 @@ func TestErrorsNeverLeakCredentialsOrRepository(t *testing.T) {
 func TestOpenAssetStreamsBytes(t *testing.T) {
 	fake := ghfake.New(testToken)
 	release := fake.AddRelease("v1.0.0", "v1.0.0", "notes", time.Now(),
-		ghfake.AssetInput{Name: "Agentisco-v1.0.0-release.apk", Bytes: []byte("PK\x03\x04 payload")})
+		ghfake.AssetInput{Name: "Awaki-v1.0.0-release.apk", Bytes: []byte("PK\x03\x04 payload")})
 	client := newTestClient(t, fake)
 
 	asset := release.Assets[0]
@@ -210,7 +210,7 @@ func TestOpenAssetStreamsBytes(t *testing.T) {
 func TestOpenAssetRequiresCredential(t *testing.T) {
 	fake := ghfake.New(testToken)
 	release := fake.AddRelease("v1.0.0", "v1.0.0", "notes", time.Now(),
-		ghfake.AssetInput{Name: "Agentisco-v1.0.0-release.apk", Bytes: []byte("x")})
+		ghfake.AssetInput{Name: "Awaki-v1.0.0-release.apk", Bytes: []byte("x")})
 
 	server := httptest.NewServer(fake)
 	defer server.Close()
@@ -268,11 +268,11 @@ func TestSlowAssetBodyOutlivesRequestTimeout(t *testing.T) {
 	client := New(Options{
 		APIBase: server.URL,
 		Owner:   "gamistudios",
-		Repo:    "Agentisco",
+		Repo:    "Awaki",
 		Token:   testToken,
 		Timeout: 100 * time.Millisecond,
 	})
-	body, _, err := client.OpenAsset(context.Background(), Asset{ID: 1, Name: "Agentisco-v1.0.0-release.apk"})
+	body, _, err := client.OpenAsset(context.Background(), Asset{ID: 1, Name: "Awaki-v1.0.0-release.apk"})
 	if err != nil {
 		t.Fatalf("OpenAsset with a slow body: %v", err)
 	}

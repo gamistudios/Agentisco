@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"agentisco/updateapi/internal/metastore"
-	"agentisco/updateapi/internal/model"
-	"agentisco/updateapi/internal/objectstore"
+	"awaki/updateapi/internal/metastore"
+	"awaki/updateapi/internal/model"
+	"awaki/updateapi/internal/objectstore"
 )
 
 // apkContentType is what the Android package installer expects to see.
@@ -194,7 +194,7 @@ func contentDisposition(name string) string {
 			cleaned = append(cleaned, r)
 		}
 	}
-	fallback := "agentisco.apk"
+	fallback := "awaki.apk"
 	value := strings.TrimSpace(string(cleaned))
 	if value == "" {
 		value = fallback

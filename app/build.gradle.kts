@@ -11,11 +11,11 @@ plugins {
 }
 
 android {
-  namespace = "com.agentisco"
+  namespace = "com.awaki"
   compileSdk { version = release(36) { minorApiLevel = 1 } }
 
   defaultConfig {
-    applicationId = "com.agentisco"
+    applicationId = "com.awaki"
     minSdk = 24
     // targetSdk must stay < 29: Android SELinux denies execve of binaries in
     // app-writable storage for apps targeting SDK 29+, which the proot Debian
@@ -40,12 +40,12 @@ android {
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-    // Self-updates are checked against the Agentisco Update API, never against a
+    // Self-updates are checked against the Awaki Update API, never against a
     // repository. Render serves the update-api module.
     buildConfigField(
       "String",
       "UPDATE_API_BASE_URL",
-      "\"${System.getenv("UPDATE_API_BASE_URL") ?: "https://agentisco.onrender.com"}\""
+      "\"${System.getenv("UPDATE_API_BASE_URL") ?: "https://awakiai.onrender.com"}\""
     )
   }
 

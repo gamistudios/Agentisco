@@ -268,7 +268,7 @@ func (s *Server) handleAsset(w http.ResponseWriter, r *http.Request, path string
 }
 
 func assetPath(id int64) string {
-	return "/repos/fake/agentisco/releases/assets/" + strconv.FormatInt(id, 10)
+	return "/repos/fake/awaki/releases/assets/" + strconv.FormatInt(id, 10)
 }
 
 // SyntheticAPK builds deterministic bytes that begin with the ZIP local-file

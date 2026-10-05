@@ -1,4 +1,4 @@
-name: Agentisco CI/CD
+name: Awaki CI/CD
 
 # One unified pipeline, ONE job, ONE environment setup:
 #   - Always: set up toolchain, run unit tests, build the debug APK.
@@ -234,7 +234,7 @@ jobs:
           if [ -n "${DISPATCH_TITLE:-}" ]; then
             TITLE="$DISPATCH_TITLE"
           else
-            TITLE="Agentisco $TAG"
+            TITLE="Awaki $TAG"
           fi
 
           # Previous tag (before this run's tag is created) for the changelog range.
@@ -343,7 +343,7 @@ jobs:
             exit 1
           fi
 
-          KEYSTORE_PATH="${RUNNER_TEMP}/agentisco-release.jks"
+          KEYSTORE_PATH="${RUNNER_TEMP}/awaki-release.jks"
           printf '%s' "$AGENTISCO_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
           chmod 600 "$KEYSTORE_PATH"
           if [ ! -s "$KEYSTORE_PATH" ]; then
@@ -364,7 +364,7 @@ jobs:
 
       - name: Remove Release Keystore
         if: always()
-        run: rm -f "${RUNNER_TEMP}/agentisco-release.jks"
+        run: rm -f "${RUNNER_TEMP}/awaki-release.jks"
 
       # ---------- Publish (push to main / manual dispatch only) ----------
       - name: Organize Release Artifacts
@@ -376,20 +376,20 @@ jobs:
 
           # Debug APK — always published.
           if compgen -G "app/build/outputs/apk/debug/*.apk" > /dev/null; then
-            cp app/build/outputs/apk/debug/*.apk "release-artifacts/Agentisco-${TAG}-debug.apk"
+            cp app/build/outputs/apk/debug/*.apk "release-artifacts/Awaki-${TAG}-debug.apk"
           fi
 
           # Release APK / AAB — only present on release runs.
           if compgen -G "app/build/outputs/apk/release/*.apk" > /dev/null; then
-            cp app/build/outputs/apk/release/*.apk "release-artifacts/Agentisco-${TAG}-release.apk"
+            cp app/build/outputs/apk/release/*.apk "release-artifacts/Awaki-${TAG}-release.apk"
           fi
           if compgen -G "app/build/outputs/bundle/release/*.aab" > /dev/null; then
-            cp app/build/outputs/bundle/release/*.aab "release-artifacts/Agentisco-${TAG}-release.aab"
+            cp app/build/outputs/bundle/release/*.aab "release-artifacts/Awaki-${TAG}-release.aab"
           fi
 
           if [ "${{ steps.vars.outputs.is_release }}" = "true" ]; then
-            if [ ! -f "release-artifacts/Agentisco-${TAG}-release.apk" ] || \
-               [ ! -f "release-artifacts/Agentisco-${TAG}-release.aab" ]; then
+            if [ ! -f "release-artifacts/Awaki-${TAG}-release.apk" ] || \
+               [ ! -f "release-artifacts/Awaki-${TAG}-release.aab" ]; then
               echo "::error::Release was requested but the signed APK/AAB is missing."
               exit 1
             fi
@@ -401,7 +401,7 @@ jobs:
         if: env.IS_PUBLISH_RUN == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: agentisco-build-${{ steps.vars.outputs.tag }}
+          name: awaki-build-${{ steps.vars.outputs.tag }}
           path: release-artifacts/*
           if-no-files-found: error
 
@@ -413,7 +413,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           TAG="${{ steps.vars.outputs.tag }}"
           if ! git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null 2>&1; then
-            git tag -a "$TAG" -m "Agentisco Release $TAG"
+            git tag -a "$TAG" -m "Awaki Release $TAG"
             git push origin "$TAG"
           fi
 

@@ -15,7 +15,7 @@ import android.widget.PopupMenu;
 
 import com.termux.terminal.TerminalBuffer;
 import com.termux.terminal.WcWidth;
-import com.agentisco.R;
+import com.awaki.R;
 import com.termux.view.TerminalView;
 
 public class TextSelectionCursorController implements CursorController {

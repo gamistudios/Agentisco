@@ -1,7 +1,7 @@
-import com.agentisco.ui.WorkspaceViewModel
-import com.agentisco.data.repository.WorkspaceRepository
-import com.agentisco.workspace.filesystem.ProjectFileSystem
-import com.agentisco.data.model.Project
+import com.awaki.ui.WorkspaceViewModel
+import com.awaki.data.repository.WorkspaceRepository
+import com.awaki.workspace.filesystem.ProjectFileSystem
+import com.awaki.data.model.Project
 import java.io.File
 
 // Debug test to understand the save issue

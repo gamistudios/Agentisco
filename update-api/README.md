@@ -1,6 +1,6 @@
-# Agentisco Update API
+# Awaki Update API
 
-The public face of Agentisco's self-update pipeline. Android clients ask this
+The public face of Awaki's self-update pipeline. Android clients ask this
 service for the newest build of their channel and download the APK from it; they
 never learn — and can never be told — where the artifacts actually come from.
 
@@ -12,7 +12,7 @@ thing about it that is public:
 - Nothing a client can read — a JSON document, a log line, an error message, a
   redirect, a cached metadata row or the landing page — can carry an upstream
   address, a repository coordinate, an upstream field name or the token.
-- Clients get one stable origin: `https://agentisco.onrender.com`.
+- Clients get one stable origin: `https://awakiai.onrender.com`.
 
 The module is deliberately separate from the Android app: it is a standalone Go
 program with its own `go.mod`, so it is never part of the APK build and deploys on
@@ -57,8 +57,8 @@ GitHub releases (private)                    this service                     ap
 
 | Channel  | Resolved as                                                   | Who uses it |
 |----------|---------------------------------------------------------------|-------------|
-| `release`| Newest valid release carrying `Agentisco-<tag>-release.apk`    | Everyone    |
-| `debug`  | Newest valid release carrying `Agentisco-<tag>-debug.apk`      | Team builds only |
+| `release`| Newest valid release carrying `Awaki-<tag>-release.apk`    | Everyone    |
+| `debug`  | Newest valid release carrying `Awaki-<tag>-debug.apk`      | Team builds only |
 
 Both channels are routed and served identically. The difference is visibility:
 `debug` is **never announced** on a public surface. `/` , `/health`, `/ready`, the
@@ -85,15 +85,15 @@ the team.
 {
   "channel": "release",
   "versionCode": 20023,
-  "versionName": "Agentisco v2.0.23",
+  "versionName": "Awaki v2.0.23",
   "tagName": "v2.0.23",
-  "apkName": "Agentisco-v2.0.23-release.apk",
+  "apkName": "Awaki-v2.0.23-release.apk",
   "size": 70161981,
   "sha256": "82a6e7bc…",
   "releaseNotes": "## What's Changed\n…",
   "publishedAt": "2026-09-22T08:45:19Z",
   "syncedAt": "2026-09-29T15:07:33Z",
-  "downloadUrl": "https://agentisco.onrender.com/v1/download/release/v2.0.23",
+  "downloadUrl": "https://awakiai.onrender.com/v1/download/release/v2.0.23",
   "cached": true
 }
 ```
@@ -193,12 +193,15 @@ go vet ./... && go test ./...          # unit + in-process integration
 is ever compiled into the APK.
 
 ```bash
-cd update-api
-docker build -t agentisco-update-api .
+# Build from the repository root. The Dockerfile's COPY paths are root-relative
+# because the root is the build context a hosted builder always sends: Render
+# lets you pick the Dockerfile path but not the context, so the whole repo is the
+# context and `.dockerignore` at the root narrows it down to this module.
+docker build -f update-api/Dockerfile -t awaki-update-api .
 docker run --rm -p 8080:8080 \
   -e GITHUB_TOKEN=… -e GITHUB_OWNER=… -e GITHUB_REPOSITORY=… \
-  -v "$PWD/data:/data" \
-  agentisco-update-api
+  -v "$PWD/update-api/data:/data" \
+  awaki-update-api
 ```
 
 The image is multi-stage: a static `CGO_ENABLED=0` binary, then
@@ -207,7 +210,7 @@ No shell, no package manager, nothing listening but the API, running as uid 6553
 
 ### Render
 
-Live at `https://agentisco.onrender.com`, which is the origin the app is built against
+Live at `https://awakiai.onrender.com`, which is the origin the app is built against
 (`app/build.gradle.kts` → `BuildConfig.UPDATE_API_BASE_URL`, overridable with the
 `UPDATE_API_BASE_URL` environment variable at build time).
 

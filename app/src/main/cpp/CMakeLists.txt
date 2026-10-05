@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(agentisco_native C CXX)
+project(awaki_native C CXX)
 
 add_library(termux SHARED termux.c)
 target_link_libraries(termux log)

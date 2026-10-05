@@ -22,6 +22,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "Agentisco"
+rootProject.name = "Awaki"
 
 include(":app")

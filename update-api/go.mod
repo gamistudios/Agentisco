@@ -1,4 +1,4 @@
-module agentisco/updateapi
+module awaki/updateapi
 
 go 1.27.1
 

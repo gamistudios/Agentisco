@@ -17,7 +17,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"agentisco/updateapi/internal/model"
+	"awaki/updateapi/internal/model"
 )
 
 // CacheState describes whether this server holds the APK bytes.

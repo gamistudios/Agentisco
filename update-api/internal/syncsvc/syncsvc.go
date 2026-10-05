@@ -19,12 +19,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"agentisco/updateapi/internal/ghapi"
-	"agentisco/updateapi/internal/metastore"
-	"agentisco/updateapi/internal/model"
-	"agentisco/updateapi/internal/notes"
-	"agentisco/updateapi/internal/objectstore"
-	"agentisco/updateapi/internal/version"
+	"awaki/updateapi/internal/ghapi"
+	"awaki/updateapi/internal/metastore"
+	"awaki/updateapi/internal/model"
+	"awaki/updateapi/internal/notes"
+	"awaki/updateapi/internal/objectstore"
+	"awaki/updateapi/internal/version"
 )
 
 // Channels may hold several generations of release rows; only the newest few

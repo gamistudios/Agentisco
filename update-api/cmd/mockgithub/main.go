@@ -19,7 +19,7 @@ import (
 	"syscall"
 	"time"
 
-	"agentisco/updateapi/internal/ghfake"
+	"awaki/updateapi/internal/ghfake"
 )
 
 func main() {
@@ -34,15 +34,15 @@ func main() {
 	if *seed {
 		// The release channel's newest build is older than the debug channel's:
 		// a single "latest release" answer cannot serve both.
-		server.AddRelease("v1.4.0", "Agentisco v1.4.0", ciStyleNotes("v1.3.0", "v1.4.0"),
+		server.AddRelease("v1.4.0", "Awaki v1.4.0", ciStyleNotes("v1.3.0", "v1.4.0"),
 			time.Now().Add(-48*time.Hour),
-			ghfake.AssetInput{Name: "Agentisco-v1.4.0-release.apk", Bytes: ghfake.SyntheticAPK("v1.4.0-release", 3<<20)},
-			ghfake.AssetInput{Name: "Agentisco-v1.4.0-debug.apk", Bytes: ghfake.SyntheticAPK("v1.4.0-debug", 3<<20)},
-			ghfake.AssetInput{Name: "Agentisco-v1.4.0-release.aab", Bytes: ghfake.SyntheticAPK("v1.4.0-aab", 1<<10)},
+			ghfake.AssetInput{Name: "Awaki-v1.4.0-release.apk", Bytes: ghfake.SyntheticAPK("v1.4.0-release", 3<<20)},
+			ghfake.AssetInput{Name: "Awaki-v1.4.0-debug.apk", Bytes: ghfake.SyntheticAPK("v1.4.0-debug", 3<<20)},
+			ghfake.AssetInput{Name: "Awaki-v1.4.0-release.aab", Bytes: ghfake.SyntheticAPK("v1.4.0-aab", 1<<10)},
 		)
-		server.AddRelease("v1.5.0", "Agentisco v1.5.0", ciStyleNotes("v1.4.0", "v1.5.0"),
+		server.AddRelease("v1.5.0", "Awaki v1.5.0", ciStyleNotes("v1.4.0", "v1.5.0"),
 			time.Now().Add(-1*time.Hour),
-			ghfake.AssetInput{Name: "Agentisco-v1.5.0-debug.apk", Bytes: ghfake.SyntheticAPK("v1.5.0-debug", 2<<20)},
+			ghfake.AssetInput{Name: "Awaki-v1.5.0-debug.apk", Bytes: ghfake.SyntheticAPK("v1.5.0-debug", 2<<20)},
 		)
 	}
 
@@ -82,7 +82,7 @@ func ciStyleNotes(previous, current string) string {
 * fix: resume downloads without a stale offset by @dev in #%d
 * feat: per-channel update API client by @dev in #%d
 
-**Full Changelog**: https://github.com/gamistudios/Agentisco/compare/%s...%s`,
+**Full Changelog**: https://github.com/gamistudios/Awaki/compare/%s...%s`,
 		120+hashOf(current), 121+hashOf(current), previous, current)
 }
 

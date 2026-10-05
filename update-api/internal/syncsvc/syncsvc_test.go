@@ -16,12 +16,12 @@ import (
 	"testing"
 	"time"
 
-	"agentisco/updateapi/internal/ghapi"
-	"agentisco/updateapi/internal/ghfake"
-	"agentisco/updateapi/internal/metastore"
-	"agentisco/updateapi/internal/model"
-	"agentisco/updateapi/internal/notes"
-	"agentisco/updateapi/internal/objectstore"
+	"awaki/updateapi/internal/ghapi"
+	"awaki/updateapi/internal/ghfake"
+	"awaki/updateapi/internal/metastore"
+	"awaki/updateapi/internal/model"
+	"awaki/updateapi/internal/notes"
+	"awaki/updateapi/internal/objectstore"
 )
 
 const harnessToken = "super-secret-harness-token"
@@ -41,7 +41,7 @@ func newHarness(t *testing.T, handler http.Handler) *harness {
 	client := ghapi.New(ghapi.Options{
 		APIBase:  startFake(t, handler),
 		Owner:    "gamistudios",
-		Repo:     "Agentisco",
+		Repo:     "Awaki",
 		Token:    harnessToken,
 		Timeout:  5 * time.Second,
 		MaxItems: 30,
@@ -62,7 +62,7 @@ func newHarness(t *testing.T, handler http.Handler) *harness {
 		Client:      client,
 		Meta:        meta,
 		Objects:     objects,
-		Sanitizer:   notes.NewSanitizer("gamistudios", "Agentisco"),
+		Sanitizer:   notes.NewSanitizer("gamistudios", "Awaki"),
 		Logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Interval:    time.Minute,
 		PassTimeout: 20 * time.Second,
@@ -88,19 +88,19 @@ func digestOf(content []byte) string {
 }
 
 func ciNotes(tag, previous string) string {
-	return "## What's Changed\n\n* first change\n\n**Full Changelog**: https://github.com/gamistudios/Agentisco/compare/" +
+	return "## What's Changed\n\n* first change\n\n**Full Changelog**: https://github.com/gamistudios/Awaki/compare/" +
 		previous + "..." + tag
 }
 
 func TestSyncResolvesEachChannelToItsOwnRelease(t *testing.T) {
 	fake := ghfake.New(harnessToken)
 	fake.AddRelease("v1.4.0", "v1.4.0", ciNotes("v1.4.0", "v1.3.0"), time.Now().Add(-48*time.Hour),
-		ghfake.AssetInput{Name: "Agentisco-v1.4.0-debug.apk", Bytes: ghfake.SyntheticAPK("1.4.0-debug", 512)},
-		ghfake.AssetInput{Name: "Agentisco-v1.4.0-release.apk", Bytes: ghfake.SyntheticAPK("1.4.0-release", 640)},
-		ghfake.AssetInput{Name: "Agentisco-v1.4.0-release.aab", Bytes: []byte("bundle")},
+		ghfake.AssetInput{Name: "Awaki-v1.4.0-debug.apk", Bytes: ghfake.SyntheticAPK("1.4.0-debug", 512)},
+		ghfake.AssetInput{Name: "Awaki-v1.4.0-release.apk", Bytes: ghfake.SyntheticAPK("1.4.0-release", 640)},
+		ghfake.AssetInput{Name: "Awaki-v1.4.0-release.aab", Bytes: []byte("bundle")},
 	)
 	fake.AddRelease("v1.5.0", "v1.5.0", ciNotes("v1.5.0", "v1.4.0"), time.Now(),
-		ghfake.AssetInput{Name: "Agentisco-v1.5.0-debug.apk", Bytes: ghfake.SyntheticAPK("1.5.0-debug", 768)},
+		ghfake.AssetInput{Name: "Awaki-v1.5.0-debug.apk", Bytes: ghfake.SyntheticAPK("1.5.0-debug", 768)},
 	)
 
 	h := newHarness(t, fake)
@@ -143,8 +143,8 @@ func TestSyncResolvesEachChannelToItsOwnRelease(t *testing.T) {
 func TestSyncDownloadsEachApkExactlyOnce(t *testing.T) {
 	fake := ghfake.New(harnessToken)
 	fake.AddRelease("v1.4.0", "v1.4.0", "notes", time.Now(),
-		ghfake.AssetInput{Name: "Agentisco-v1.4.0-debug.apk", Bytes: ghfake.SyntheticAPK("debug", 256)},
-		ghfake.AssetInput{Name: "Agentisco-v1.4.0-release.apk", Bytes: ghfake.SyntheticAPK("release", 256)},
+		ghfake.AssetInput{Name: "Awaki-v1.4.0-debug.apk", Bytes: ghfake.SyntheticAPK("debug", 256)},
+		ghfake.AssetInput{Name: "Awaki-v1.4.0-release.apk", Bytes: ghfake.SyntheticAPK("release", 256)},
 	)
 	h := newHarness(t, fake)
 
@@ -169,8 +169,8 @@ func TestSyncDownloadsEachApkExactlyOnce(t *testing.T) {
 func TestPassListsReleasesOnceForBothChannels(t *testing.T) {
 	fake := ghfake.New(harnessToken)
 	fake.AddRelease("v1.4.0", "v1.4.0", "notes", time.Now().Add(-time.Hour),
-		ghfake.AssetInput{Name: "Agentisco-v1.4.0-debug.apk", Bytes: ghfake.SyntheticAPK("debug", 256)},
-		ghfake.AssetInput{Name: "Agentisco-v1.4.0-release.apk", Bytes: ghfake.SyntheticAPK("release", 256)},
+		ghfake.AssetInput{Name: "Awaki-v1.4.0-debug.apk", Bytes: ghfake.SyntheticAPK("debug", 256)},
+		ghfake.AssetInput{Name: "Awaki-v1.4.0-release.apk", Bytes: ghfake.SyntheticAPK("release", 256)},
 	)
 	h := newHarness(t, fake)
 
@@ -192,7 +192,7 @@ func TestPassListsReleasesOnceForBothChannels(t *testing.T) {
 func TestSyncReplacesCachedObjectAndRetiresTheOldOne(t *testing.T) {
 	fake := ghfake.New(harnessToken)
 	fake.AddRelease("v1.0.0", "v1.0.0", "notes", time.Now().Add(-time.Hour),
-		ghfake.AssetInput{Name: "Agentisco-v1.0.0-debug.apk", Bytes: ghfake.SyntheticAPK("one", 256)},
+		ghfake.AssetInput{Name: "Awaki-v1.0.0-debug.apk", Bytes: ghfake.SyntheticAPK("one", 256)},
 	)
 	h := newHarness(t, fake)
 	h.sync(model.ChannelDebug)
@@ -202,7 +202,7 @@ func TestSyncReplacesCachedObjectAndRetiresTheOldOne(t *testing.T) {
 	}
 
 	fake.AddRelease("v1.1.0", "v1.1.0", "notes", time.Now(),
-		ghfake.AssetInput{Name: "Agentisco-v1.1.0-debug.apk", Bytes: ghfake.SyntheticAPK("two", 320)},
+		ghfake.AssetInput{Name: "Awaki-v1.1.0-debug.apk", Bytes: ghfake.SyntheticAPK("two", 320)},
 	)
 	h.sync(model.ChannelDebug)
 
@@ -235,7 +235,7 @@ func TestIdenticalApkBytesAreStoredOnce(t *testing.T) {
 	shared := ghfake.SyntheticAPK("shared-bytes", 400)
 	fake := ghfake.New(harnessToken)
 	fake.AddRelease("v1.0.0", "v1.0.0", "notes", time.Now().Add(-time.Hour),
-		ghfake.AssetInput{Name: "Agentisco-v1.0.0-debug.apk", Bytes: shared})
+		ghfake.AssetInput{Name: "Awaki-v1.0.0-debug.apk", Bytes: shared})
 	h := newHarness(t, fake)
 	h.sync(model.ChannelDebug)
 	first, _, _ := h.meta.CurrentRelease(context.Background(), model.ChannelDebug)
@@ -243,7 +243,7 @@ func TestIdenticalApkBytesAreStoredOnce(t *testing.T) {
 	// A republish under a new tag with byte-identical content must not transfer
 	// again, and its object must survive the retirement of the old release.
 	fake.AddRelease("v1.0.1", "v1.0.1", "notes", time.Now(),
-		ghfake.AssetInput{Name: "Agentisco-v1.0.1-debug.apk", Bytes: append([]byte(nil), shared...)})
+		ghfake.AssetInput{Name: "Awaki-v1.0.1-debug.apk", Bytes: append([]byte(nil), shared...)})
 	h.sync(model.ChannelDebug)
 
 	second, _, _ := h.meta.CurrentRelease(context.Background(), model.ChannelDebug)
@@ -262,7 +262,7 @@ func TestIdenticalApkBytesAreStoredOnce(t *testing.T) {
 func TestSyncRefusesArtifactWhoseBytesDoNotMatchThePublishedDigest(t *testing.T) {
 	fake := ghfake.New(harnessToken)
 	release := fake.AddRelease("v1.2.0", "v1.2.0", "notes", time.Now(),
-		ghfake.AssetInput{Name: "Agentisco-v1.2.0-debug.apk", Bytes: ghfake.SyntheticAPK("original", 256)})
+		ghfake.AssetInput{Name: "Awaki-v1.2.0-debug.apk", Bytes: ghfake.SyntheticAPK("original", 256)})
 	// The published metadata still advertises the original digest while the
 	// stored asset has been replaced: the transfer must be rejected.
 	release.Assets[0].Bytes = ghfake.SyntheticAPK("tampered", 256)
@@ -296,7 +296,7 @@ func TestFetchRejectsSizeMismatchAndLeavesNoScratch(t *testing.T) {
 	content := ghfake.SyntheticAPK("payload", 300)
 	fake := ghfake.New(harnessToken)
 	release := fake.AddRelease("v1.3.0", "v1.3.0", "notes", time.Now(),
-		ghfake.AssetInput{Name: "Agentisco-v1.3.0-debug.apk", Bytes: content})
+		ghfake.AssetInput{Name: "Awaki-v1.3.0-debug.apk", Bytes: content})
 	h := newHarness(t, fake)
 
 	asset := release.Assets[0]
@@ -322,8 +322,8 @@ func TestFetchRejectsSizeMismatchAndLeavesNoScratch(t *testing.T) {
 func TestGitHubOutageKeepsLastKnownGoodVersion(t *testing.T) {
 	fake := ghfake.New(harnessToken)
 	fake.AddRelease("v1.4.0", "v1.4.0", "notes", time.Now(),
-		ghfake.AssetInput{Name: "Agentisco-v1.4.0-debug.apk", Bytes: ghfake.SyntheticAPK("debug", 256)},
-		ghfake.AssetInput{Name: "Agentisco-v1.4.0-release.apk", Bytes: ghfake.SyntheticAPK("release", 256)},
+		ghfake.AssetInput{Name: "Awaki-v1.4.0-debug.apk", Bytes: ghfake.SyntheticAPK("debug", 256)},
+		ghfake.AssetInput{Name: "Awaki-v1.4.0-release.apk", Bytes: ghfake.SyntheticAPK("release", 256)},
 	)
 	h := newHarness(t, fake)
 	h.syncer.pass(context.Background())
@@ -349,7 +349,7 @@ func TestGitHubOutageKeepsLastKnownGoodVersion(t *testing.T) {
 		if snapshot.Status != metastore.SyncUnavailable {
 			t.Fatalf("%s: outage must be visible in the status, got %q", channel, snapshot.Status)
 		}
-		for _, forbidden := range []string{harnessToken, "gamistudios", "Agentisco", "github.com", "/repos/"} {
+		for _, forbidden := range []string{harnessToken, "gamistudios", "Awaki", "github.com", "/repos/"} {
 			if strings.Contains(strings.ToLower(snapshot.LastError), strings.ToLower(forbidden)) {
 				t.Fatalf("%s: stored status text leaks %q: %s", channel, forbidden, snapshot.LastError)
 			}
@@ -378,13 +378,13 @@ func TestUnreachableGitHubWithNoHistoryDoesNotPanic(t *testing.T) {
 func TestReleaseDisappearingFromAChannelKeepsTheLastKnownGood(t *testing.T) {
 	fake := ghfake.New(harnessToken)
 	fake.AddRelease("v1.4.0", "v1.4.0", "notes", time.Now().Add(-time.Hour),
-		ghfake.AssetInput{Name: "Agentisco-v1.4.0-release.apk", Bytes: ghfake.SyntheticAPK("release", 256)})
+		ghfake.AssetInput{Name: "Awaki-v1.4.0-release.apk", Bytes: ghfake.SyntheticAPK("release", 256)})
 	h := newHarness(t, fake)
 	h.sync(model.ChannelRelease)
 
 	// A debug-only publish follows: the release channel keeps advertising v1.4.0.
 	fake.AddRelease("v1.5.0", "v1.5.0", "notes", time.Now(),
-		ghfake.AssetInput{Name: "Agentisco-v1.5.0-debug.apk", Bytes: ghfake.SyntheticAPK("debug", 256)})
+		ghfake.AssetInput{Name: "Awaki-v1.5.0-debug.apk", Bytes: ghfake.SyntheticAPK("debug", 256)})
 	h.sync(model.ChannelRelease)
 
 	current, ok, err := h.meta.CurrentRelease(context.Background(), model.ChannelRelease)
@@ -412,7 +412,7 @@ func (g *gate) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func TestConcurrentFillsShareOneTransfer(t *testing.T) {
 	fake := ghfake.New(harnessToken)
 	release := fake.AddRelease("v1.0.0", "v1.0.0", "notes", time.Now(),
-		ghfake.AssetInput{Name: "Agentisco-v1.0.0-debug.apk", Bytes: ghfake.SyntheticAPK("debug", 256)})
+		ghfake.AssetInput{Name: "Awaki-v1.0.0-debug.apk", Bytes: ghfake.SyntheticAPK("debug", 256)})
 	gated := &gate{inner: fake, entered: make(chan struct{}), release: make(chan struct{})}
 
 	h := newHarness(t, gated)
@@ -474,7 +474,7 @@ func (f *failingAssets) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func TestMetadataIsPublishedWhileTheBytesFailToArrive(t *testing.T) {
 	fake := ghfake.New(harnessToken)
 	fake.AddRelease("v2.0.42", "v2.0.42", "notes", time.Now(),
-		ghfake.AssetInput{Name: "Agentisco-v2.0.42-debug.apk", Bytes: ghfake.SyntheticAPK("debug", 1<<10)})
+		ghfake.AssetInput{Name: "Awaki-v2.0.42-debug.apk", Bytes: ghfake.SyntheticAPK("debug", 1<<10)})
 	link := &failingAssets{inner: fake, failing: atomic.Bool{}}
 	link.failing.Store(true)
 	h := newHarness(t, link)
@@ -531,7 +531,7 @@ func TestPruneForgetsReleasesBeyondRetention(t *testing.T) {
 	tags := []string{"v2.0.0", "v2.1.0", "v2.2.0", "v2.3.0", "v2.4.0", "v2.5.0", "v2.6.0", "v2.7.0", "v2.8.0"}
 	for i, tag := range tags {
 		fake.AddRelease(tag, tag, "notes", time.Now().Add(-time.Duration(len(tags)-i)*time.Hour),
-			ghfake.AssetInput{Name: "Agentisco-" + tag + "-debug.apk", Bytes: ghfake.SyntheticAPK(tag, 64)})
+			ghfake.AssetInput{Name: "Awaki-" + tag + "-debug.apk", Bytes: ghfake.SyntheticAPK(tag, 64)})
 	}
 	h := newHarness(t, fake)
 	h.sync(model.ChannelDebug)

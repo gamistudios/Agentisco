@@ -120,7 +120,7 @@ func New(opts Options) *Client {
 		token:     opts.Token,
 		maxItems:  max(1, opts.MaxItems),
 		perPage:   100,
-		userAgent: valueOr(opts.UserAgent, "agentisco-update-api"),
+		userAgent: valueOr(opts.UserAgent, "awaki-update-api"),
 		logger:    opts.Logger,
 		sleep:     sleepCtx,
 	}

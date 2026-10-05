@@ -35,10 +35,10 @@ func (c Channel) String() string { return string(c) }
 // MatchesAsset reports whether a release asset belongs to this channel.
 //
 // The naming convention comes from .github/workflows/ci.yml, which publishes
-// Agentisco-<tag>-debug.apk and Agentisco-<tag>-release.apk (plus the .aab,
+// Awaki-<tag>-debug.apk and Awaki-<tag>-release.apk (plus the .aab,
 // which is never an installable update). The suffix rules are the primary
 // match; the fallbacks keep older releases whose assets only carry the channel
-// word (for example agentisco-debug.apk) resolvable, so previously published
+// word (for example awaki-debug.apk) resolvable, so previously published
 // releases remain servable.
 func (c Channel) MatchesAsset(name string) bool {
 	lower := strings.ToLower(strings.TrimSpace(name))

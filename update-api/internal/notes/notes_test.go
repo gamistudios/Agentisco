@@ -11,10 +11,10 @@ const ciBody = `## What's Changed
 * feat: build center runs the project by @dev in #122
   
 
-**Full Changelog**: https://github.com/gamistudios/Agentisco/compare/v1.4.0...v1.5.0`
+**Full Changelog**: https://github.com/gamistudios/Awaki/compare/v1.4.0...v1.5.0`
 
 func TestProcessKeepsFormatAndDropsPrivateURL(t *testing.T) {
-	sanitizer := NewSanitizer("gamistudios", "Agentisco")
+	sanitizer := NewSanitizer("gamistudios", "Awaki")
 	got := sanitizer.Process(ciBody)
 
 	for _, want := range []string{
@@ -31,13 +31,13 @@ func TestProcessKeepsFormatAndDropsPrivateURL(t *testing.T) {
 }
 
 func TestProcessHandlesEveryShapeOfRepositoryURL(t *testing.T) {
-	sanitizer := NewSanitizer("gamistudios", "Agentisco")
+	sanitizer := NewSanitizer("gamistudios", "Awaki")
 	cases := map[string]string{
-		"api host":         `see https://api.github.com/repos/gamistudios/Agentisco/releases/latest for details`,
-		"release tag link": `**Full Changelog**: https://github.com/gamistudios/Agentisco/releases/tag/v1.5.0`,
-		"markdown link":    `Read the [release](https://github.com/gamistudios/Agentisco/compare/v1.4.0...v1.5.0).`,
-		"download link":    `Download from https://github.com/gamistudios/Agentisco/releases/download/v1.5.0/Agentisco-v1.5.0-debug.apk now`,
-		"uppercase owner":  `MIRROR https://GITHUB.COM/GAMISTUDIOS/AGENTISCO/compare/v1...v2`,
+		"api host":         `see https://api.github.com/repos/gamistudios/Awaki/releases/latest for details`,
+		"release tag link": `**Full Changelog**: https://github.com/gamistudios/Awaki/releases/tag/v1.5.0`,
+		"markdown link":    `Read the [release](https://github.com/gamistudios/Awaki/compare/v1.4.0...v1.5.0).`,
+		"download link":    `Download from https://github.com/gamistudios/Awaki/releases/download/v1.5.0/Awaki-v1.5.0-debug.apk now`,
+		"uppercase owner":  `MIRROR https://GITHUB.COM/GAMISTUDIOS/AWAKI/compare/v1...v2`,
 	}
 	for name, body := range cases {
 		got := sanitizer.Process(body)
@@ -51,7 +51,7 @@ func TestProcessHandlesEveryShapeOfRepositoryURL(t *testing.T) {
 // TestProcessPreservesUnrelatedLinks: notes legitimately reference other
 // projects; only the configured repository is private.
 func TestProcessPreservesUnrelatedLinks(t *testing.T) {
-	sanitizer := NewSanitizer("gamistudios", "Agentisco")
+	sanitizer := NewSanitizer("gamistudios", "Awaki")
 	body := "Upstream: https://github.com/termux/termux-app/compare/v1...v2"
 	got := sanitizer.Process(body)
 	if got != body {
@@ -60,7 +60,7 @@ func TestProcessPreservesUnrelatedLinks(t *testing.T) {
 }
 
 func TestProcessNormalizesLineEndingsAndTrims(t *testing.T) {
-	sanitizer := NewSanitizer("gamistudios", "Agentisco")
+	sanitizer := NewSanitizer("gamistudios", "Awaki")
 	got := sanitizer.Process("line one\r\nline two\r\n\r\n\r\n")
 	if got != "line one\nline two" {
 		t.Fatalf("normalization produced %q", got)
@@ -68,7 +68,7 @@ func TestProcessNormalizesLineEndingsAndTrims(t *testing.T) {
 }
 
 func TestProcessTruncatesOversizedNotes(t *testing.T) {
-	sanitizer := NewSanitizer("gamistudios", "Agentisco")
+	sanitizer := NewSanitizer("gamistudios", "Awaki")
 	body := strings.Repeat("- a long line of commit subject text\n", 20000)
 	got := sanitizer.Process(body)
 	if len(got) <= MaxBytes {
@@ -80,7 +80,7 @@ func TestProcessTruncatesOversizedNotes(t *testing.T) {
 }
 
 func TestProcessEmptyBody(t *testing.T) {
-	sanitizer := NewSanitizer("gamistudios", "Agentisco")
+	sanitizer := NewSanitizer("gamistudios", "Awaki")
 	if got := sanitizer.Process(""); got != "" {
 		t.Fatalf("empty body must stay empty, got %q", got)
 	}

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"agentisco/updateapi/internal/model"
+	"awaki/updateapi/internal/model"
 )
 
 func openDB(t *testing.T) *DB {
@@ -25,7 +25,7 @@ func sample(channel model.Channel, tag string, code int64) Release {
 		Tag:          tag,
 		VersionName:  tag,
 		VersionCode:  code,
-		ApkName:      "Agentisco-" + tag + "-" + channel.String() + ".apk",
+		ApkName:      "Awaki-" + tag + "-" + channel.String() + ".apk",
 		AssetID:      code,
 		Size:         1024,
 		SHA256:       "digest-" + tag,
@@ -59,7 +59,7 @@ func TestUpsertAndCurrentRoundTrip(t *testing.T) {
 	if err != nil || !found {
 		t.Fatalf("CurrentRelease found=%v err=%v", found, err)
 	}
-	if current.Tag != "v1.4.0" || current.VersionCode != 10400 || current.ApkName != "Agentisco-v1.4.0-release.apk" {
+	if current.Tag != "v1.4.0" || current.VersionCode != 10400 || current.ApkName != "Awaki-v1.4.0-release.apk" {
 		t.Fatalf("unexpected current release: %+v", current)
 	}
 	if current.CacheState != CachePending || current.ObjectKey != "" {

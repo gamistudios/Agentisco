@@ -16,11 +16,11 @@ import (
 	"strings"
 	"time"
 
-	"agentisco/updateapi/internal/metastore"
-	"agentisco/updateapi/internal/model"
-	"agentisco/updateapi/internal/objectstore"
-	"agentisco/updateapi/internal/ratelimit"
-	"agentisco/updateapi/internal/syncsvc"
+	"awaki/updateapi/internal/metastore"
+	"awaki/updateapi/internal/model"
+	"awaki/updateapi/internal/objectstore"
+	"awaki/updateapi/internal/ratelimit"
+	"awaki/updateapi/internal/syncsvc"
 )
 
 // publicChannel is the channel announced on public surfaces. The other channel
@@ -88,7 +88,7 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.writeJSON(w, http.StatusOK, map[string]any{
-		"service": "agentisco-update-api",
+		"service": "awaki-update-api",
 		"endpoints": []string{
 			"/v1/updates/release/latest",
 			"/v1/download/release/latest",

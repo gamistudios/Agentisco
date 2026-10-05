@@ -17,14 +17,14 @@ import (
 	"testing"
 	"time"
 
-	"agentisco/updateapi/internal/ghapi"
-	"agentisco/updateapi/internal/ghfake"
-	"agentisco/updateapi/internal/metastore"
-	"agentisco/updateapi/internal/model"
-	"agentisco/updateapi/internal/notes"
-	"agentisco/updateapi/internal/objectstore"
-	"agentisco/updateapi/internal/ratelimit"
-	"agentisco/updateapi/internal/syncsvc"
+	"awaki/updateapi/internal/ghapi"
+	"awaki/updateapi/internal/ghfake"
+	"awaki/updateapi/internal/metastore"
+	"awaki/updateapi/internal/model"
+	"awaki/updateapi/internal/notes"
+	"awaki/updateapi/internal/objectstore"
+	"awaki/updateapi/internal/ratelimit"
+	"awaki/updateapi/internal/syncsvc"
 )
 
 const e2eToken = "super-secret-e2e-token"
@@ -72,7 +72,7 @@ func newStackWith(t *testing.T, fake *ghfake.Server, configure func(*Config)) *s
 	client := ghapi.New(ghapi.Options{
 		APIBase:  fakeServer.URL,
 		Owner:    "gamistudios",
-		Repo:     "Agentisco",
+		Repo:     "Awaki",
 		Token:    e2eToken,
 		Timeout:  5 * time.Second,
 		MaxItems: 30,
@@ -82,7 +82,7 @@ func newStackWith(t *testing.T, fake *ghfake.Server, configure func(*Config)) *s
 		Client:      client,
 		Meta:        meta,
 		Objects:     objects,
-		Sanitizer:   notes.NewSanitizer("gamistudios", "Agentisco"),
+		Sanitizer:   notes.NewSanitizer("gamistudios", "Awaki"),
 		Logger:      logger,
 		Interval:    time.Hour,
 		PassTimeout: 20 * time.Second,
@@ -95,7 +95,7 @@ func newStackWith(t *testing.T, fake *ghfake.Server, configure func(*Config)) *s
 		objects:  objects,
 		syncer:   syncer,
 		root:     root,
-		public:   "https://updates.agentisco.test",
+		public:   "https://updates.awaki.test",
 		settings: &Config{},
 	}
 	s.limiter = ratelimit.NewLimiter(1000, 1000)
@@ -209,18 +209,18 @@ func (s *stack) seedCIRelease(tag string, published time.Time, channels ...model
 		content := ghfake.SyntheticAPK(tag+"/"+channel.String(), 2048+len(tag))
 		payloads[channel] = content
 		assets = append(assets, ghfake.AssetInput{
-			Name:  fmt.Sprintf("Agentisco-%s-%s.apk", tag, channel.String()),
+			Name:  fmt.Sprintf("Awaki-%s-%s.apk", tag, channel.String()),
 			Bytes: content,
 		})
 	}
 	if len(channels) > 0 {
 		assets = append(assets, ghfake.AssetInput{
-			Name:  fmt.Sprintf("Agentisco-%s-release.aab", tag),
+			Name:  fmt.Sprintf("Awaki-%s-release.aab", tag),
 			Bytes: []byte("play store bundle"),
 		})
 	}
 	s.fake.AddRelease(tag, tag, fmt.Sprintf(
-		"## What's Changed\n\n* change for %s\n\n**Full Changelog**: https://github.com/gamistudios/Agentisco/compare/v0.0.0...%s",
+		"## What's Changed\n\n* change for %s\n\n**Full Changelog**: https://github.com/gamistudios/Awaki/compare/v0.0.0...%s",
 		tag, tag), published, assets...)
 	return payloads
 }
@@ -424,7 +424,7 @@ func TestDownloadStreamsTheCachedApkAndHonoursRanges(t *testing.T) {
 	if etag != `"`+digestOf(expected)+`"` {
 		t.Fatalf("etag %q must be the content address", etag)
 	}
-	if got := full.Header.Get("Content-Disposition"); !strings.Contains(got, "Agentisco-v1.4.0-debug.apk") {
+	if got := full.Header.Get("Content-Disposition"); !strings.Contains(got, "Awaki-v1.4.0-debug.apk") {
 		t.Fatalf("content disposition %q", got)
 	}
 	if got := full.Header.Get("Cache-Control"); !strings.Contains(got, "immutable") {
