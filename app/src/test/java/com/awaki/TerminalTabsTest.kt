@@ -2,6 +2,7 @@ package com.awaki
 
 import com.awaki.data.model.Project
 import com.awaki.data.repository.WorkspaceRepository
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -18,7 +19,16 @@ import org.robolectric.annotation.Config
 @Config(sdk = [34])
 class TerminalTabsTest {
 
-  private fun repository() = WorkspaceRepository(context = null)
+  private val held = HeldWork()
+
+  private fun repository() = held.hold(WorkspaceRepository(context = null))
+
+  @After
+  fun tearDown() {
+    // A repository left running keeps resuming on the global Main dispatcher, which the
+    // next class to set or reset Main then collides with. See HeldWork.
+    held.closeAll()
+  }
 
   @Test
   fun `a tab exists with no project chosen`() {

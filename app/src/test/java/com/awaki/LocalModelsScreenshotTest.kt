@@ -84,9 +84,15 @@ class LocalModelsScreenshotTest {
 
   @After
   fun tearDown() {
+    // Not because this class installs a Main dispatcher — it does not — but because a
+    // repository left running here keeps resuming on the global one, which the next
+    // class to set or reset Main then collides with.
+    held.closeAll()
     runtime?.shutdown()
     runtime = null
   }
+
+  private val held = HeldWork()
 
   private fun model(installed: Boolean) = LocalModel(
     id = "lfm2",
@@ -241,7 +247,7 @@ class LocalModelsScreenshotTest {
       upsertModel(AIModel("cloud-model", "cloud", "big-model", "Big Model", capabilities = ModelCapabilities(tools = true)))
       selectModel("cloud-model")
     }
-    val viewModel = WorkspaceViewModel(WorkspaceRepository(context = null, providerStore = store, localAi = local))
+    val viewModel = held.hold(WorkspaceViewModel(WorkspaceRepository(context = null, providerStore = store, localAi = local)))
 
     compose.setContent {
       AwakiTheme {
@@ -271,7 +277,7 @@ class LocalModelsScreenshotTest {
       )
       upsertModel(AIModel("cloud-model", "cloud", "big-model", "Big Model", capabilities = ModelCapabilities(tools = true)))
     }
-    val viewModel = WorkspaceViewModel(WorkspaceRepository(context = null, providerStore = store, localAi = local))
+    val viewModel = held.hold(WorkspaceViewModel(WorkspaceRepository(context = null, providerStore = store, localAi = local)))
     viewModel.localModelSelectable("lfm2")?.let(viewModel::selectModel)
 
     compose.setContent {

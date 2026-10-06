@@ -78,10 +78,13 @@ class LocalTaskModelTest {
 
   @After
   fun tearDown() {
+    held.closeAll()
     runtime?.shutdown()
     runtime = null
     Dispatchers.resetMain()
   }
+
+  private val held = HeldWork()
 
   // ---- harness ----
 
@@ -119,12 +122,12 @@ class LocalTaskModelTest {
       cloud.firstOrNull()?.let { selectModel(it.id) }
     }
     val llm = RecordingLlm()
-    val repo = WorkspaceRepository(
+    val repo = held.hold(WorkspaceRepository(
       context = null,
       providerStore = store,
       llmService = llm,
       localAi = localRuntime("lfm2")
-    )
+    ))
     return repo to llm
   }
 
@@ -167,12 +170,12 @@ class LocalTaskModelTest {
       selectModel("cloud-model")
     }
     val llm = RecordingLlm()
-    val repo = WorkspaceRepository(
+    val repo = held.hold(WorkspaceRepository(
       context = null,
       providerStore = store,
       llmService = llm,
       localAi = localRuntime("lfm2")
-    )
+    ))
 
     assertEquals("Title", repo.explain())
 
@@ -183,12 +186,12 @@ class LocalTaskModelTest {
   fun `a chore is refused when the only model is on-device`() = runTest {
     val store = ProviderConfigStore().apply { upsertProvider(cloudProvider(), "sk-cloud-key") }
     val llm = RecordingLlm()
-    val repo = WorkspaceRepository(
+    val repo = held.hold(WorkspaceRepository(
       context = null,
       providerStore = store,
       llmService = llm,
       localAi = localRuntime("lfm2")
-    )
+    ))
     repo.selectModel("local:lfm2")
 
     val answer = repo.explain()

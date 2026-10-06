@@ -69,10 +69,14 @@ class LocalProviderIntegrationTest {
 
   @After
   fun tearDown() {
+    held.closeAll()
     runtime?.shutdown()
     runtime = null
     Dispatchers.resetMain()
   }
+
+  private val held = HeldWork()
+
 
   // ---- harness ----
 
@@ -102,12 +106,12 @@ class LocalProviderIntegrationTest {
 
   @Test
   fun `stored providers and on-device models arrive as one selectable list`() = runTest {
-    val repo = WorkspaceRepository(
+    val repo = held.hold(WorkspaceRepository(
       context = null,
       providerStore = storedStore(),
       llmService = RecordingLlm(),
       localAi = localRuntime("lfm2")
-    )
+    ))
 
     assertEquals(listOf("cloud", LocalAiRuntime.PROVIDER_ID), repo.providers.value.map { it.id })
     assertEquals(listOf("cloud-model", "local:lfm2"), repo.aiModels.value.map { it.id })
@@ -119,7 +123,7 @@ class LocalProviderIntegrationTest {
   fun `the on-device provider is asked for its models with this run's address and token`() = runTest {
     val local = localRuntime("lfm2")
     val llm = RecordingLlm()
-    val repo = WorkspaceRepository(context = null, providerStore = storedStore(), llmService = llm, localAi = local)
+    val repo = held.hold(WorkspaceRepository(context = null, providerStore = storedStore(), llmService = llm, localAi = local))
 
     // The catalog gate refuses to ask a provider that has no key; passing it with a
     // derived token is what makes the on-device provider an ordinary one.
@@ -137,7 +141,7 @@ class LocalProviderIntegrationTest {
   @Test
   fun `an on-device model is not editable through the cloud provider forms`() = runTest {
     val local = localRuntime("lfm2")
-    val repo = WorkspaceRepository(context = null, providerStore = storedStore(), llmService = RecordingLlm(), localAi = local)
+    val repo = held.hold(WorkspaceRepository(context = null, providerStore = storedStore(), llmService = RecordingLlm(), localAi = local))
 
     assertNull(repo.saveModel(LocalAiRuntime.PROVIDER_ID, "extra", "Extra", 1024, 64, ModelCapabilities(), null))
     repo.deleteProvider(LocalAiRuntime.PROVIDER_ID)
@@ -153,12 +157,12 @@ class LocalProviderIntegrationTest {
   @Test
   fun `a selected on-device model is still selected after a restart`() = runTest {
     val store = ProviderConfigStore(context)
-    val first = WorkspaceRepository(
+    val first = held.hold(WorkspaceRepository(
       context = null,
       providerStore = store,
       llmService = RecordingLlm(),
       localAi = localRuntime("lfm2")
-    )
+    ))
     first.selectModel("local:lfm2")
     assertEquals("local:lfm2", first.selectedModel.value?.id)
     assertEquals("local:lfm2", store.getSelectedModelId())
@@ -166,12 +170,12 @@ class LocalProviderIntegrationTest {
     // A new process, so a new server run: the record id is the model's own, which is what
     // lets a selection made against one port be answered by the next one.
     val restartedRuntime = localRuntime("lfm2")
-    val restarted = WorkspaceRepository(
+    val restarted = held.hold(WorkspaceRepository(
       context = null,
       providerStore = ProviderConfigStore(context),
       llmService = RecordingLlm(),
       localAi = restartedRuntime
-    )
+    ))
     assertEquals("local:lfm2", restarted.selectedModel.value?.id)
     // The record points at the server that is live now, not at whatever port was remembered.
     assertEquals(
@@ -182,12 +186,12 @@ class LocalProviderIntegrationTest {
 
   @Test
   fun `deleting the last cloud provider leaves the on-device model selectable`() = runTest {
-    val repo = WorkspaceRepository(
+    val repo = held.hold(WorkspaceRepository(
       context = null,
       providerStore = storedStore(),
       llmService = RecordingLlm(),
       localAi = localRuntime("lfm2")
-    )
+    ))
 
     repo.deleteProvider("cloud")
 
@@ -197,12 +201,12 @@ class LocalProviderIntegrationTest {
 
   @Test
   fun `with nothing installed the list is exactly what the store holds`() = runTest {
-    val repo = WorkspaceRepository(
+    val repo = held.hold(WorkspaceRepository(
       context = null,
       providerStore = storedStore(),
       llmService = RecordingLlm(),
       localAi = localRuntime()
-    )
+    ))
 
     assertEquals(listOf("cloud"), repo.providers.value.map { it.id })
     assertEquals(listOf("cloud-model"), repo.aiModels.value.map { it.id })

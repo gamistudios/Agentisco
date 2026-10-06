@@ -70,6 +70,9 @@ class ModelCatalogFetchTest {
 
   @After
   fun tearDown() {
+    // Ends the repository's scope before Main is handed back. See HeldWork for what
+    // happens when a resume from a worker thread crosses the reset.
+    repo.dispose()
     Dispatchers.resetMain()
   }
 

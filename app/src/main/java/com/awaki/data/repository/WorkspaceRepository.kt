@@ -44,6 +44,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -80,6 +81,18 @@ class WorkspaceRepository(
 
   private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
   private val appContext: Context? = context?.applicationContext
+
+  /**
+   * Stops the work this repository set in motion. [repositoryScope] is the one thing
+   * here that outlives any single call, so whoever holds the last reference — a view
+   * model being cleared, a test class finishing — cancels through this instead of
+   * leaving scans, git reads and web probes to resume on a Main dispatcher its owner
+   * has already let go of.
+   */
+  fun dispose() {
+    fileWatcher.stop()
+    repositoryScope.cancel()
+  }
 
   /**
    * What this process is busy with, when an application owns it. Registering here is

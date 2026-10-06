@@ -69,14 +69,17 @@ class SettingsScreenTest {
 
   @After
   fun tearDown() {
+    held.closeAll()
     Dispatchers.resetMain()
   }
+
+  private val held = HeldWork()
 
   private fun showSettings(): WorkspaceViewModel {
     // No application for the workspace repository: every store it owns stays in
     // memory, so a settings test cannot write into a real device's preferences.
-    val viewModel = WorkspaceViewModel(WorkspaceRepository(context = null))
-    val updateViewModel = UpdateViewModel(UpdateRepository(context), UserPreferencesStore(context))
+    val viewModel = held.hold(WorkspaceViewModel(WorkspaceRepository(context = null)))
+    val updateViewModel = held.hold(UpdateViewModel(UpdateRepository(context), UserPreferencesStore(context)))
     compose.setContent {
       // The same way the activity wears a theme, so a test that changes it sees the page
       // change rather than only the state behind it.

@@ -2004,6 +2004,16 @@ class WorkspaceViewModel(
   fun resetBuildRunCommands() = repository.resetBuildRunCommands()
 
   fun autoConfigureBuildRun() = repository.autoConfigureBuildRun()
+
+  /**
+   * This view model holds the only reference to the repository, and that repository owns
+   * a scope of its own: scans, git reads, build runs and web probes that resume on
+   * Main. Clearing without ending it leaves that work running against a UI nobody is
+   * looking at any more.
+   */
+  override fun onCleared() {
+    repository.dispose()
+  }
 }
 
 /** Encodes a question's choices for the block's `optionsJson` column. */

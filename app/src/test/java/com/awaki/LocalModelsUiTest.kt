@@ -88,10 +88,13 @@ class LocalModelsUiTest {
 
   @After
   fun tearDown() {
+    held.closeAll()
     runtime?.shutdown()
     runtime = null
     Dispatchers.resetMain()
   }
+
+  private val held = HeldWork()
 
   // ---- settings form ----
 
@@ -449,7 +452,7 @@ class LocalModelsUiTest {
       )
       selectModel("cloud-model")
     }
-    return WorkspaceViewModel(WorkspaceRepository(context = null, providerStore = store, localAi = local))
+    return held.hold(WorkspaceViewModel(WorkspaceRepository(context = null, providerStore = store, localAi = local)))
   }
 
   @Test
@@ -527,8 +530,10 @@ class LocalModelsUiTest {
 
   @Test
   fun `a repository that owns no files has no models to manage`() {
-    val viewModel = WorkspaceViewModel(
-      WorkspaceRepository(context = null, providerStore = ProviderConfigStore())
+    val viewModel = held.hold(
+      WorkspaceViewModel(
+        WorkspaceRepository(context = null, providerStore = ProviderConfigStore())
+      )
     )
     compose.setContent {
       AwakiTheme { LocalModelsSection(viewModel) }

@@ -8,6 +8,7 @@ import com.awaki.data.repository.WorkspaceRepository
 import com.awaki.workspace.git.GitRepositoryManager
 import com.awaki.workspace.filesystem.ProjectFileSystem
 import com.awaki.ui.WorkspaceViewModel
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -23,6 +24,15 @@ import java.io.File
 @Config(sdk = [34])
 class ExampleRobolectricTest {
 
+  private val held = HeldWork()
+
+  @After
+  fun tearDown() {
+    // A repository left running keeps resuming on the global Main dispatcher, which the
+    // next class to set or reset Main then collides with. See HeldWork.
+    held.closeAll()
+  }
+
   @Test
   fun `read string from context`() {
     val context = ApplicationProvider.getApplicationContext<Context>()
@@ -32,7 +42,7 @@ class ExampleRobolectricTest {
 
   @Test
   fun `workspace view model initial state`() {
-    val viewModel = WorkspaceViewModel()
+    val viewModel = held.hold(WorkspaceViewModel())
     // Fresh installs start with no projects (static demo data was removed)
     assertEquals("No project", viewModel.activeProject.value.name)
     assertEquals(com.awaki.core.model.AppDestination.AGENT, viewModel.currentDestination.value)
@@ -281,7 +291,7 @@ class ExampleRobolectricTest {
 
   @Test
   fun `workspace view model saves active file and detects dirty state`() {
-    val viewModel = WorkspaceViewModel()
+    val viewModel = held.hold(WorkspaceViewModel())
     
     // Create a temporary project directory for testing
     val tempDir = File(System.getProperty("java.io.tmpdir"), "test_project_${System.currentTimeMillis()}")
@@ -322,7 +332,7 @@ class ExampleRobolectricTest {
     // Store carries the real context; the repository keeps its null context so
     // the test never touches Room or the proot rootfs (see other tests here).
     val store = com.awaki.data.local.ProviderConfigStore(context)
-    val repo = WorkspaceRepository(providerStore = store)
+    val repo = held.hold(WorkspaceRepository(providerStore = store))
 
     repo.saveProvider("KeyProvider", "https://keyed/v1", LLMProtocol.OPENAI_CHAT_COMPLETIONS, "sk-live-key")
     // A provider saved with a key reads the key back through the repository.

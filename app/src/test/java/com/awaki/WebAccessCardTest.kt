@@ -62,8 +62,11 @@ class WebAccessCardTest {
 
   @After
   fun tearDown() {
+    held.closeAll()
     Dispatchers.resetMain()
   }
+
+  private val held = HeldWork()
 
   /**
    * A repository over a scripted gateway. The build's own keys are left out, because the
@@ -79,7 +82,8 @@ class WebAccessCardTest {
       settings = { WebAccessSettings(preferJina = preferJina) },
       appKeys = { emptyList() }
     )
-    return WorkspaceViewModel(WorkspaceRepository(context = null, web = gateway)) to sent
+    val viewModel = held.hold(WorkspaceViewModel(WorkspaceRepository(context = null, web = gateway)))
+    return viewModel to sent
   }
 
   @Test

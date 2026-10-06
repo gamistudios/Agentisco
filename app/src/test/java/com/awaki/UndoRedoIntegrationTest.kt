@@ -6,6 +6,7 @@ import com.awaki.data.model.ProjectFile
 import com.awaki.data.repository.WorkspaceRepository
 import com.awaki.editor.model.EditorTab
 import com.awaki.ui.WorkspaceViewModel
+import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
@@ -25,6 +26,13 @@ class UndoRedoIntegrationTest {
   fun setUp() {
     repository = WorkspaceRepository(context = null)
     viewModel = WorkspaceViewModel(repository)
+  }
+
+  @After
+  fun tearDown() {
+    // A repository left running keeps resuming on the global Main dispatcher, which the
+    // next class to set or reset Main then collides with. See HeldWork.
+    repository.dispose()
   }
 
   @Test
