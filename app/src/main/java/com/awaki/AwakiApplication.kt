@@ -116,6 +116,7 @@ class AwakiApplication : Application() {
    * which beats the whole app being killed mid-conversation. Releasing is serialized
    * against the decode, so a turn in flight finishes before the model leaves.
    */
+  @Suppress("DEPRECATION") // these two levels are deprecated but still the only signal for "about to be killed"
   override fun onTrimMemory(level: Int) {
     super.onTrimMemory(level)
     if (!localAiDelegate.isInitialized()) return

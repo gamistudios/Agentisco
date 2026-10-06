@@ -1,3 +1,7 @@
+@file:Suppress("DEPRECATION")
+// Robolectric's document fakes (RoboCursor, ShadowContentResolver.setCursor) are the
+// only way to answer a content query in a test; the newer replacement needs a real
+// provider per query, which is more machinery than two columns are worth.
 package com.awaki
 
 import android.content.Context
