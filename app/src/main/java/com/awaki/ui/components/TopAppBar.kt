@@ -22,6 +22,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -52,6 +54,8 @@ fun AgentIDETopAppBar(
   updateState: UpdateRepository.UpdateState? = null,
   updateProgress: Float = 0f,
   hasNewUpdate: Boolean = false,
+  /** True while the update service is being asked; the button spins instead of a window. */
+  updateChecking: Boolean = false,
   onUpdateClick: (() -> Unit)? = null,
   /** Local branches of [activeProject]; empty until Git has scanned the repo. */
   branches: List<GitBranch> = emptyList(),
@@ -232,13 +236,29 @@ fun AgentIDETopAppBar(
                   .testTag("top_update")
               ) {
                 Box {
-                  Icon(
-                    imageVector = Icons.Outlined.FileDownload,
-                    contentDescription = if (hasNewUpdate) "Update available" else "Check for updates",
-                    tint = if (hasNewUpdate) AwakiTheme.extra.warning else MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(19.dp)
-                  )
-                  if (hasNewUpdate) {
+                  if (updateChecking) {
+                    // The check can take tens of seconds while the update service wakes
+                    // up. It used to own a modal window for exactly that long, leaving
+                    // the whole app untouchable; this spinner says the same thing
+                    // without taking the screen away.
+                    CircularProgressIndicator(
+                      modifier = Modifier
+                        .size(18.dp)
+                        .testTag("top_update_checking")
+                        .semantics { contentDescription = "Checking for updates" },
+                      strokeWidth = 2.dp,
+                      color = MaterialTheme.colorScheme.primary,
+                      trackColor = Color.Transparent
+                    )
+                  } else {
+                    Icon(
+                      imageVector = Icons.Outlined.FileDownload,
+                      contentDescription = if (hasNewUpdate) "Update available" else "Check for updates",
+                      tint = if (hasNewUpdate) AwakiTheme.extra.warning else MaterialTheme.colorScheme.onSurfaceVariant,
+                      modifier = Modifier.size(19.dp)
+                    )
+                  }
+                  if (hasNewUpdate && !updateChecking) {
                     Box(
                       modifier = Modifier
                         .size(6.dp)

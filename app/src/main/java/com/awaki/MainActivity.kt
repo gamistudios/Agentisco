@@ -221,16 +221,17 @@ fun AgentIDEApp(
         updateState = updateUiState.updateState,
         updateProgress = updateUiState.downloadProgress,
         hasNewUpdate = updateUiState.availableUpdate != null,
+        updateChecking = updateUiState.updateState == UpdateRepository.UpdateState.CHECKING,
         branches = gitBranches,
         onCheckoutBranch = { name -> viewModel.checkoutBranch(name) },
         onUpdateClick = {
-          when {
-            // A known update (even mid-download) reopens the dialog so the
-            // user can peek at progress / install / cancel at will.
-            updateUiState.availableUpdate != null -> updateViewModel.showDialog()
-            updateUiState.updateState == UpdateRepository.UpdateState.CHECKING -> Unit
-            else -> updateViewModel.checkForUpdates(isAuto = false)
-          }
+          // A known update (even mid-download) reopens the dialog so the user can
+          // peek at progress / install / cancel at will. With nothing known yet the
+          // button is simply "check again" — including while a check is already in
+          // flight, because a check no longer takes the screen away and the tap is
+          // the only feedback that anything is happening at all.
+          if (updateUiState.availableUpdate != null) updateViewModel.showDialog()
+          else updateViewModel.checkForUpdates(isAuto = false)
         },
         onShowCrashLog = if (BuildConfig.DEBUG && hasCrashLog) {
           { isCrashLogVisible = true }
@@ -306,11 +307,10 @@ fun AgentIDEApp(
     }
 
     // ——— Update overlays ———
-    if (updateUiState.updateState == UpdateRepository.UpdateState.CHECKING &&
-        updateUiState.availableUpdate == null
-    ) {
-      UpdateCheckingDialog()
-    }
+    // A check announces itself where it was asked for — the spinner in the update button,
+    // the status line in Settings — and never as a window over the app. The update
+    // service can take tens of seconds to wake up, and a modal "Checking…" used to leave
+    // the whole UI untouchable for exactly that long, with no way to dismiss it.
 
     updateUiState.availableUpdate?.let { update ->
       if (
