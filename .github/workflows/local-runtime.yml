@@ -1,0 +1,187 @@
+name: Awaki Local AI Runtime
+
+# Builds the prebuilt Python runtime the app unpacks on a phone
+# (tools/local-runtime/build-awaki-runtime.sh).
+#
+# It is a separate workflow because it needs a native ARM64 runner: PyPI publishes no wheel for
+# llama-cpp-python, so ggml has to be compiled, and compiling it for aarch64 on an x86_64 box
+# would produce bytes that crash on every phone. Nothing here runs on the CI job for ordinary
+# commits - the runtime belongs to a release, not to a pull request.
+#
+# The build script is invoked with `bash <script>`: the executable bit is not carried by every
+# development machine in this project, and the recipe does not depend on it.
+
+on:
+  workflow_dispatch:
+    inputs:
+      arch:
+        description: 'Runtime architecture to build'
+        type: choice
+        required: true
+        default: aarch64
+        options:
+          - aarch64
+          - armv7
+      commit_to_repo:
+        description: 'Commit the archive and catalog to app/src/main/assets/local-runtime on a branch'
+        type: boolean
+        required: true
+        default: false
+  # Syntax-checked only. The paths filter means a change to the recipe gets a `bash -n` without
+  # ever paying for a compile, and the build itself stays behind the explicit dispatch.
+  pull_request:
+    branches: ["main"]
+    paths:
+      - 'tools/local-runtime/**'
+      - '.github/workflows/local-runtime.yml'
+  push:
+    branches: ["main"]
+    paths:
+      - 'tools/local-runtime/**'
+      - '.github/workflows/local-runtime.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: local-runtime-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Syntax check the recipe
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: bash -n
+        run: |
+          set -euo pipefail
+          if ! bash -n tools/local-runtime/build-awaki-runtime.sh; then
+            echo "::error::tools/local-runtime/build-awaki-runtime.sh does not parse."
+            exit 1
+          fi
+          echo "recipe parses"
+
+      # Catches a catalog that no longer parses before a device ever tries to read it.
+      - name: YAML syntax
+        run: python3 -c "import yaml,sys; yaml.safe_load(open('.github/workflows/local-runtime.yml')); print('workflow parses')"
+
+  build:
+    name: Build the ${{ inputs.arch }} runtime
+    needs: lint
+    # Never on a plain push or a pull request: those only want the syntax check above.
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    env:
+      ARCH: ${{ inputs.arch }}
+      # Where the build script keeps the interpreter tarball between runs.
+      AWAKI_DOWNLOAD_CACHE: ${{ github.workspace }}/.cache/awaki/local-runtime
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # The whole reason this job exists: a runner that is the architecture being produced.
+      # armv7 needs a 32-bit host, which ubuntu-24.04-arm is not, and the script refuses to
+      # cross-produce a bundle it cannot run.
+      - name: Check the runner matches the requested architecture
+        run: |
+          set -euo pipefail
+          machine="$(uname -m)"
+          echo "runner architecture: $machine"
+          if [ "$ARCH" = "aarch64" ] && [ "$machine" != "aarch64" ]; then
+            echo "::error::arch=aarch64 must build on an aarch64 runner; this one is $machine. Use ubuntu-24.04-arm."
+            exit 1
+          fi
+          if [ "$ARCH" = "armv7" ] && [ "$machine" = "aarch64" ]; then
+            echo "::error::arch=armv7 needs a native 32-bit ARM host (uname -m armv7l): the armhf bundle is compiled by the host compiler, and an aarch64 runner cannot emit it. Build it on an armv7 machine with 'bash tools/local-runtime/build-awaki-runtime.sh --target armv7 --install-into-repo'."
+            exit 1
+          fi
+
+      - name: Cache the interpreter archive
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.AWAKI_DOWNLOAD_CACHE }}
+          key: awaki-python-${{ hashFiles('tools/local-runtime/build-awaki-runtime.sh') }}
+          restore-keys: |
+            awaki-python-
+
+      # No apt-get here on purpose: cmake, g++ and the rest of the build toolchain are already
+      # on the runner image, and the build never uses the runner's python - the interpreter it
+      # is packaging runs pip itself. When the runtime is to be committed, the same single build
+      # places it into the assets directory; nothing is compiled twice.
+      - name: Build the runtime
+        run: >-
+          bash tools/local-runtime/build-awaki-runtime.sh
+          --target "$ARCH"
+          --output-dir dist
+          ${{ inputs.commit_to_repo && '--install-into-repo' || '' }}
+
+      # Defense in depth against a truncated or mis-staged asset: the archive that will be
+      # committed is unpacked by the same reader the phone uses and re-checked, so a bundle that
+      # only worked inside the build tree never reaches the APK.
+      - name: Verify the archive that was produced
+        run: |
+          set -euo pipefail
+          archive="dist/awaki-runtime-${ARCH}.tar.gz"
+          if [ ! -s "$archive" ]; then
+            echo "::error::${archive} was not produced."
+            exit 1
+          fi
+          sha256sum "$archive"
+          ls -l dist/
+          bash tools/local-runtime/build-awaki-runtime.sh --verify-archive "$archive"
+
+      - name: Upload runtime bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: awaki-runtime-${{ inputs.arch }}
+          path: |
+            dist/awaki-runtime-*.tar.gz
+            dist/bundles-*.json
+          if-no-files-found: error
+          retention-days: 30
+
+      # Gated behind an explicit input, and pushed to its own branch: main is never written by
+      # CI, because a 50 MB binary landing under a merge button is a decision a person makes.
+      # The files it commits are the ones the build step already placed and verified.
+      - name: Commit the runtime into the repository
+        if: ${{ inputs.commit_to_repo }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          BRANCH="local-runtime-${ARCH}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          if [ ! -f "app/src/main/assets/local-runtime/awaki-runtime-${ARCH}.tar.gz" ]; then
+            echo "::error::the build did not place the runtime under app/src/main/assets/local-runtime."
+            exit 1
+          fi
+          git add app/src/main/assets/local-runtime
+          if git diff --cached --quiet; then
+            echo "The runtime already in the repository is current - nothing to commit."
+            exit 0
+          fi
+          git commit -m "chore(runtime): rebuild the ${ARCH} model runtime bundle [skip ci]"
+          git push origin "HEAD:refs/heads/${BRANCH}"
+
+          {
+            echo "### Runtime bundle published"
+            echo
+            echo "- branch: \`${BRANCH}\`"
+            echo "- archive: \`app/src/main/assets/local-runtime/awaki-runtime-${ARCH}.tar.gz\`"
+            echo "- sha256: \`$(sha256sum "dist/awaki-runtime-${ARCH}.tar.gz" | cut -d' ' -f1)\`"
+            echo
+            echo "Merge it with:"
+            echo
+            echo '```'
+            echo "gh pr create --base main --head ${BRANCH} --title \"${ARCH} model runtime bundle\" --body \"\""
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

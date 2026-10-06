@@ -33,3 +33,6 @@ generate-keystore.sh
 debug.keystore.base64
 # Section files staged into the Python model server; never part of the app.
 .scratch/
+# Built model runtimes: artifacts until --install-into-repo puts them in the app's assets.
+/tools/local-runtime/out/
+/tools/local-runtime/cache/
