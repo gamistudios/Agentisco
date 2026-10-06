@@ -293,7 +293,9 @@ class UpdateRepository(
      * finished file passes [UpdateDownloadVerifier]: exactly the expected size, the
      * SHA-256 the release reports when it publishes one (so every byte of a
      * multi-part/resumed transfer is proven present), and really our APK. Anything
-     * else surfaces an error through [updateError] and removes the unusable file.
+     * else surfaces an error through [updateError]; the bytes a timed-out transfer
+     * did receive stay on disk for the next [downloadUpdate] call, and only a file
+     * that cannot be a prefix of the asset is thrown away.
      *
      * The transfer itself is [ResumableFileTransfer], shared with local model
      * installation; this method supplies the APK-specific content rules and maps the
@@ -352,6 +354,10 @@ class UpdateRepository(
             is ResumableFileTransfer.Outcome.Failed -> {
                 _downloadedApkPath.value = null
                 _updateError.value = outcome.reason
+                // Out of attempts is usually the network, not the bytes: the partial
+                // is still on disk, so the bar stays where the transfer got to rather
+                // than dropping to zero and pretending the work never happened.
+                _updateProgress.value = UpdateDownloadVerifier.progress(outcome.bytesKept, update.assetSize)
                 _updateState.value = UpdateState.ERROR
                 false
             }

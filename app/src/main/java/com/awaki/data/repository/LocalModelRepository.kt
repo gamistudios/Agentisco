@@ -595,7 +595,17 @@ class LocalModelRepository(
         false
       }
       is ResumableFileTransfer.Outcome.Failed -> {
-        setState(model.id, LocalModelInstallState(LocalModelInstallStatus.FAILED, error = outcome.reason))
+        // A transfer that ran out of attempts keeps its bytes on disk, so the card
+        // offers them back: giving up on the network is not a reason to tell the
+        // user their 4 GB start-over is waiting at zero.
+        setState(
+          model.id,
+          LocalModelInstallState(
+            LocalModelInstallStatus.FAILED,
+            error = outcome.reason,
+            resumableBytes = outcome.bytesKept
+          )
+        )
         false
       }
     }

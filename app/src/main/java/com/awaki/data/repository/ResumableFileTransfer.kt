@@ -14,14 +14,16 @@ import java.io.RandomAccessFile
  *
  * This is the update APK's download loop, lifted out of [UpdateRepository] so
  * local model files are installed under exactly the same rules rather than a
- * second implementation that can drift. Two properties carry over because they
+ * second implementation that can drift. Three properties carry over because they
  * were hard-won:
  *
  *  - completion is decided by [UpdateDownloadVerifier.decide] against the
  *    expected size and digest, never by this loop's own byte counter;
  *  - a partial file is only ever resumed if it can plausibly be a prefix of the
- *    asset, and anything left after every attempt fails is deleted, so no
- *    truncated file survives to be mistaken for a finished one.
+ *    asset, and a file that cannot be one is deleted, so nothing foreign or
+ *    oversized survives to be mistaken for a finished download;
+ *  - a transfer that runs out of attempts keeps the bytes it did get, because
+ *    giving up on the network is not the same as the bytes being wrong.
  *
  * What differs per artifact is passed in: [Spec.acceptedContents] decides whether
  * the bytes are the right *kind* of file (an APK's ZIP header and package, a
@@ -65,7 +67,12 @@ class ResumableFileTransfer(
     data class Completed(val bytesOnDisk: Long, val expectedSize: Long) : Outcome()
     /** Cancelled by the caller; the partial file stays put for a later resume. */
     data class Cancelled(val bytesOnDisk: Long) : Outcome()
-    data class Failed(val reason: String) : Outcome()
+    /**
+     * Every attempt failed. [bytesKept] is what is left on disk for the next run to
+     * resume from: the whole transfer's length when the file cannot be a prefix of the
+     * asset (wrong size, wrong signature), and the partial's length when it can.
+     */
+    data class Failed(val reason: String, val bytesKept: Long = 0L) : Outcome()
   }
 
   private class AbortedException : Exception("Transfer cancelled")
@@ -161,10 +168,18 @@ class ResumableFileTransfer(
       if (attempt < maxAttempts) delay(attempt * retryDelayMs)
     }
 
-    // Every attempt failed: remove the partial so a truncated or foreign file can
-    // never be adopted later, and the next run starts from scratch.
-    file.delete()
-    Outcome.Failed(lastError ?: "Download failed")
+    // Running out of attempts is normally the network giving up, not the bytes being
+    // wrong, so the transfer's work is kept: dropping it here made every fresh press
+    // start from zero again, which on a slow link meant an APK larger than one run's
+    // patience never arrived. Only a file that could still be a prefix of the asset is
+    // kept — one that already has the full expected length failed on contents, not on
+    // time, and resuming from its end could only answer 416 and fail the same way.
+    val bytesOnDisk = file.length()
+    val resumable = expectedSize > 0L &&
+      bytesOnDisk in 1L until expectedSize &&
+      spec.assetSignaturePresent(file)
+    if (!resumable) file.delete()
+    Outcome.Failed(lastError ?: "Download failed", if (resumable) bytesOnDisk else 0L)
   }
 
   companion object {

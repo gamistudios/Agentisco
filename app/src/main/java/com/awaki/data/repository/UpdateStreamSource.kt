@@ -4,6 +4,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.Closeable
 import java.io.InputStream
+import java.util.concurrent.TimeUnit
 
 /**
  * Supplies the APK bytes for one download attempt.
@@ -38,7 +39,17 @@ class UpdateStream(
 }
 
 /** Reads the release APK over HTTP, resuming with a Range header when asked to. */
-class HttpUpdateStreamSource(private val client: OkHttpClient) : UpdateStreamSource {
+class HttpUpdateStreamSource(client: OkHttpClient) : UpdateStreamSource {
+
+    /**
+     * A bulk transfer on a phone connection goes quiet often enough that OkHttp's
+     * ten-second read budget cuts it off mid-download, so the shared client is
+     * re-cut with one that only gives up once a whole minute passes without a
+     * single byte. Per-read, not per-call: a slow-but-live download keeps running.
+     */
+    private val client = client.newBuilder()
+        .readTimeout(READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .build()
 
     override fun open(url: String, offset: Long): UpdateStream {
         val request = Request.Builder()
@@ -80,5 +91,9 @@ class HttpUpdateStreamSource(private val client: OkHttpClient) : UpdateStreamSou
             totalSizeHint = totalSizeHint,
             rangeIgnored = offset > 0L && !rangeHonoured
         )
+    }
+
+    private companion object {
+        const val READ_TIMEOUT_SECONDS = 60L
     }
 }

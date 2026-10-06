@@ -83,7 +83,11 @@ class UpdateDownloadVerificationTest {
             repository.updateError.value!!.contains("expected ${payload.size} bytes")
         )
         assertNull("no install path may be exposed", repository.downloadedApkPath.value)
-        assertFalse("the unusable partial must be removed", updateFile.exists())
+        // The bytes that did arrive are kept: they are a plausible prefix of the asset,
+        // and the next press resumes from them. Kept is not finished — 16 bytes of a
+        // 4 KB APK may not offer install, and may not claim to be anywhere near done.
+        assertTrue("a resumable partial must survive a failed run", updateFile.exists())
+        assertTrue("must still be short of the asset", updateFile.length() < payload.size)
         assertTrue(repository.updateProgress.value < 1f)
     }
 
@@ -250,6 +254,34 @@ class UpdateDownloadVerificationTest {
     }
 
     @Test
+    fun `a download that ran out of attempts resumes on the next press`() = runTest {
+        val payload = apkPayload(8192)
+        // One kilobyte per response, which is what a dying connection looks like to
+        // the reader: the run burns all five of its attempts and still lands a
+        // 5 KB short of the asset.
+        val stalling = InMemoryStreamSource(payload, bytesAvailable = 1024)
+        val first = repository(stalling)
+        first.adoptAvailableUpdate(update(assetSize = payload.size.toLong()))
+
+        assertFalse("five attempts of 1 KB cannot finish 8 KB", first.downloadUpdate())
+        assertEquals(UpdateRepository.UpdateState.ERROR, first.updateState.value)
+        assertNull("a partial may never offer install", first.downloadedApkPath.value)
+        assertEquals("the run's bytes are what the next run starts from", 5120L, updateFile.length())
+
+        // The press the user makes after that error: it must ask for the rest of the
+        // asset, not the whole of it again.
+        val recovered = InMemoryStreamSource(payload)
+        val second = repository(recovered)
+        second.adoptAvailableUpdate(update(assetSize = payload.size.toLong()))
+
+        assertTrue(second.downloadUpdate())
+
+        assertEquals("nothing may be re-fetched below the resume point", listOf(5120L), recovered.requestedOffsets)
+        assertEquals(UpdateRepository.UpdateState.DOWNLOADED, second.updateState.value)
+        assertArrayEquals(payload, updateFile.readBytes())
+    }
+
+    @Test
     fun `a truncated stream with only a response length is rejected`() = runTest {
         val payload = apkPayload(2048)
         // The response advertises 4096 bytes but the payload is only 2048, so every
@@ -261,7 +293,9 @@ class UpdateDownloadVerificationTest {
 
         assertEquals(UpdateRepository.UpdateState.ERROR, repository.updateState.value)
         assertNull(repository.downloadedApkPath.value)
-        assertFalse(updateFile.exists())
+        // Two KB of a promised four: short, but still a prefix of the asset, so the
+        // next press picks up at 2048 instead of throwing the transfer away.
+        assertEquals(2048L, updateFile.length())
     }
 
     @Test
