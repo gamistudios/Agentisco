@@ -128,12 +128,12 @@ class LocalAiRuntimeTest {
   }
 
   @Test
-  fun `a device without the Python environment offers no on-device provider`() = runTest {
+  fun `a device without the model runtime offers no on-device provider`() = runTest {
     val local = serving("lfm2", engine = FakeEngine(available = false))
 
     assertNull(local.provider.value)
     assertNull(local.endpoint.value)
-    assertTrue(local.unavailableReason!!.contains("Python environment"))
+    assertTrue(local.unavailableReason!!.contains("model runtime"))
   }
 
   @Test

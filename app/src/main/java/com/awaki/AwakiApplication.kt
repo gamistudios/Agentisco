@@ -84,6 +84,23 @@ class AwakiApplication : Application() {
   }
 
   /**
+   * The runtime bundle this build ships for this device, or null when it has none.
+   *
+   * Read once and kept: the catalog is a small JSON asset beside a 50 MB archive, and every
+   * "can a model run" question the engine asks is answered against the same answer the
+   * installer is working towards.
+   */
+  val localRuntimeBundle: com.awaki.local.py.RuntimeBundle? by lazy {
+    (localRuntimeResolution() as? com.awaki.local.py.BundleResolution.Found)?.bundle
+  }
+
+  private fun localRuntimeResolution(): com.awaki.local.py.BundleResolution =
+    com.awaki.local.py.RuntimeBundleCatalog.resolve(
+      openCatalog = { runCatching { assets.open(com.awaki.local.py.RuntimeBundleCatalog.ASSET_PATH) }.getOrNull() },
+      abis = Build.SUPPORTED_ABIS.toList()
+    )
+
+  /**
    * The Python environment the models run in, as the engine contract the runtime layer knows.
    *
    * Built here rather than in [com.awaki.data.repository.WorkspaceRepository] because a
@@ -104,7 +121,11 @@ class AwakiApplication : Application() {
         else {
           val args = com.awaki.workspace.terminal.ProotArgsBuilder(binaries, bootstrap.rootfsDir, modelBind)
           args.buildCommand(
-            com.awaki.local.py.PythonModelServer.guestCommand(port, token, args.guestEnv())
+            com.awaki.local.py.PythonModelServer.guestCommand(
+              port,
+              token,
+              args.guestEnv(extra = mapOf("LD_LIBRARY_PATH" to com.awaki.local.LocalModelPaths.RUNTIME_GUEST_LIB))
+            )
           )
         }
       },
@@ -120,7 +141,9 @@ class AwakiApplication : Application() {
     return com.awaki.local.py.PythonEngine(
       filesDir = filesDir,
       server = server,
-      environmentReady = { com.awaki.local.py.PythonEnvironment.venvPresent(filesDir) }
+      environmentReady = {
+        com.awaki.local.py.PythonRuntime.isCurrent(filesDir, localRuntimeBundle)
+      }
     )
   }
 

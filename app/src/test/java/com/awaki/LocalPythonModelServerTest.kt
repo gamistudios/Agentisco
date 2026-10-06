@@ -120,7 +120,7 @@ class LocalPythonModelServerTest {
   }
 
   @Test
-  fun `the guest is started with an empty environment, the venv interpreter and this port`() {
+  fun `the guest is started with an empty environment, the runtime interpreter and this port`() {
     val host = Harness("s")
     host.startServer()
     try {
@@ -130,7 +130,7 @@ class LocalPythonModelServerTest {
       assertEquals("-i", host.command[1])
       assertTrue(host.command.contains("HOME=/root"))
       assertEquals(
-        LocalModelPaths.VENV_PYTHON,
+        LocalModelPaths.RUNTIME_PYTHON,
         host.command[host.command.indexOf(LocalModelPaths.SERVER_SCRIPT) - 1]
       )
       assertEquals(host.server.port.toString(), host.command[host.command.indexOf("--port") + 1])

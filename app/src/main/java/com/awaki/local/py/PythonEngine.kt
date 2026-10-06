@@ -28,7 +28,7 @@ import java.io.File
 class PythonEngine(
   private val filesDir: File,
   private val server: PythonModelServer,
-  /** Whether the guest can run a model: the venv is on disk and verified in this process. */
+  /** Whether the guest can run a model: the runtime is installed and checked. */
   private val environmentReady: () -> Boolean = { true },
   /** What to tell the user when it cannot, phrased for a screen rather than the log. */
   private val notReadyReason: () -> String = { NO_ENVIRONMENT }
@@ -36,8 +36,8 @@ class PythonEngine(
 
   companion object {
     const val NO_ENVIRONMENT =
-      "The Python environment the models run in is not set up yet. Run Setup environment on the " +
-        "on-device models screen; compiling the runtime on the phone takes a few minutes."
+      "The model runtime is not installed yet. Open the on-device models screen and it will be " +
+        "unpacked from the app — it takes under a minute and needs no download."
   }
 
   override val isAvailable: Boolean get() = environmentReady()

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """The model server Awaki runs inside its Linux environment.
 
-Only the standard library plus llama-cpp-python and psutil are used: this file is copied into
-the model directory by the app and run by the virtualenv the app built there, so every import
-below is a package the setup step already installed.
+Only the standard library plus llama-cpp-python, jinja2 and psutil are used: this file is copied
+into the model directory by the app and run by the Python runtime the app ships inside itself, so
+every import below is a package that runtime already holds. Nothing here installs, builds or
+downloads anything — a phone starts this script, it does not assemble the world around it.
 
 The API is OpenAI's, because that is the shape the rest of Awaki speaks — and this time it
 is a real chat API, not a raw text one. That puts the two hard jobs of an on-device runtime

@@ -134,17 +134,19 @@ class PythonModelServer(
     const val LOG_LINES = 60
 
     /**
-     * The guest command line: an empty environment, the venv's own interpreter, the script the
-     * app just wrote, and the port and token this process will answer on.
+     * The guest command line: an empty environment, the bundled runtime's own interpreter, the
+     * script the app just wrote, and the port and token this process will answer on.
      *
      * `env -i` is what makes it reproducible — the server sees exactly the variables listed
-     * here, so a guest shell full of terminal settings cannot change how a model loads.
+     * here, so a guest shell full of terminal settings cannot change how a model loads. The
+     * library path is not optional: the runtime carries shared libraries the Ubuntu base image
+     * does not ship, and an interpreter that cannot find them fails before it prints a reason.
      */
     fun guestCommand(port: Int, token: String, guestEnv: Map<String, String>): List<String> =
       listOf("/usr/bin/env", "-i") +
         guestEnv.entries.map { (key, value) -> "$key=$value" } +
         listOf(
-          LocalModelPaths.VENV_PYTHON,
+          LocalModelPaths.RUNTIME_PYTHON,
           LocalModelPaths.SERVER_SCRIPT,
           "--port", port.toString(),
           "--token", token

@@ -151,17 +151,18 @@ class LocalPythonEngineTest {
   }
 
   @Test
-  fun `a device without the Python environment starts nothing`() {
+  fun `a device without the model runtime starts nothing`() {
     val host = Harness(loadedModel)
     host.begin()
     try {
       val engine = host.engine(ready = { false })
 
       assertFalse(engine.isAvailable)
-      assertTrue(engine.unavailableReason.contains("Python environment"))
+      assertTrue(engine.unavailableReason.contains("model runtime"))
       val failure = runCatching { engine.load("/data/x.gguf", LocalRuntimeSettings()) }.exceptionOrNull()
       assertTrue(failure is LocalEngineException)
-      assertTrue(failure!!.message!!.contains("Setup environment"))
+      // The runtime is in the app, so the message points at the screen that unpacks it.
+      assertTrue(failure!!.message!!.contains("on-device models screen"))
       assertEquals(0, host.startedProcesses)
     } finally {
       host.end()

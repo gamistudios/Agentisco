@@ -5,7 +5,7 @@ import java.io.File
 /**
  * Installs the model server script into the directory the Linux environment mounts.
  *
- * The script ships in the app's assets rather than inside the Debian rootfs or the venv: it is
+ * The script ships in the app's assets rather than inside the Debian rootfs or the runtime: it is
  * app code, versioned with the app, and the guest only ever runs the copy the current build
  * wrote. That makes rewriting it on every start the whole upgrade story — no migration, no
  * "an old server answered in a shape the app cannot parse", and a device that downgraded an

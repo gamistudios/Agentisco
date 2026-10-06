@@ -135,7 +135,7 @@ class LocalPythonModelClientTest {
   ) { _, client ->
     val info = client.load("/root/m.gguf", LocalRuntimeSettings())
     assertFalse(info.capabilities.available)
-    assertTrue(info.capabilities.reason.contains("Setup environment"))
+    assertTrue(info.capabilities.reason.contains("Reinstall the model runtime"))
   }
 
   @Test
@@ -327,7 +327,7 @@ class LocalPythonModelClientTest {
   ) { _, client ->
     val failure = runCatching { client.chat(turn()) { true } }.exceptionOrNull()
     assertTrue(failure is LocalEngineException)
-    assertTrue(failure!!.message!!.contains("Setup environment"))
+    assertTrue(failure!!.message!!.contains("Reinstall the model runtime"))
   }
 
   @Test

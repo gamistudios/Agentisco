@@ -44,7 +44,7 @@ internal class FakeEngine(var available: Boolean = true) : LocalModelEngine {
   var threadCount = 8
   var capabilities = CAPABLE
   var loadFailure: Throwable? = null
-  var unavailableText = "The Python environment is not set up yet."
+  var unavailableText = "The model runtime is not installed yet."
 
   /** Applied to a session as it is created, so a test can script the answer before it runs. */
   var sessionScript: (FakeSession) -> Unit = {}

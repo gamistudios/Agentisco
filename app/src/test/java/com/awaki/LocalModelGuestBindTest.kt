@@ -15,7 +15,7 @@ import org.robolectric.annotation.Config
 
 /**
  * The claim the whole Python design rests on: a model the app downloaded is readable from
- * inside the Linux environment at the path the virtualenv was built in.
+ * inside the Linux environment at the path the runtime is installed in.
  *
  * Without that bind, the guest would be serving a directory the app never writes to, and the
  * failure would surface as a model that "is not installed" on a phone holding its bytes.
@@ -39,7 +39,7 @@ class LocalModelGuestBindTest {
     argv.filterIndexed { index, _ -> argv.getOrNull(index - 1) == "-b" }.toSet()
 
   @Test
-  fun `every guest command sees the model directory at the home path the venv lives in`() {
+  fun `every guest command sees the model directory at the home path the runtime lives in`() {
     val models = File(context.filesDir, LocalModelPaths.HOST_DIR_NAME).apply { mkdirs() }
     val (argv, _) = builder(File(context.filesDir, "linux-rootfs"), modelBinds(models))
       .buildCommand(listOf("/bin/true"))

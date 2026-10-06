@@ -1397,19 +1397,30 @@ class WorkspaceViewModel(
   val localAiNote: String? get() = repository.localAiNote
 
   /**
-   * The Python environment the models run in. Reading it costs nothing when the build has no
-   * Linux side at all, which is why this is a flow and not a nullable lookup.
+   * The Python runtime the models run in. Reading it costs nothing when the build has no Linux
+   * side at all, which is why this is a flow and not a nullable lookup.
    */
-  val pythonEnvironmentState: StateFlow<com.awaki.local.py.PythonEnvironment.State> =
-    repository.pythonEnvironment?.state ?: MutableStateFlow(com.awaki.local.py.PythonEnvironment.State.Missing)
+  val pythonRuntimeState: StateFlow<com.awaki.local.py.PythonRuntime.State> =
+    repository.pythonRuntime?.state
+      ?: MutableStateFlow(com.awaki.local.py.PythonRuntime.State.Missing)
 
-  /** Creates or repairs that environment. Slow the first time: llama.cpp is compiled here. */
-  fun setupPythonEnvironment() {
-    repository.startPythonEnvironmentSetup()
+  /**
+   * Installs the runtime unless the device already has this build's copy of it.
+   *
+   * Opening the on-device models screen calls this: the archive is in the app, so the work is an
+   * unpack rather than the compile-and-hope a user used to have to opt into.
+   */
+  fun ensurePythonRuntime() {
+    repository.ensurePythonRuntime()
   }
 
-  fun cancelPythonEnvironmentSetup() {
-    repository.cancelPythonEnvironmentSetup()
+  /** Throws the runtime away and unpacks it again — the recovery for a failed install. */
+  fun reinstallPythonRuntime() {
+    repository.ensurePythonRuntime(reinstall = true)
+  }
+
+  fun cancelPythonRuntimeSetup() {
+    repository.cancelPythonRuntimeSetup()
   }
 
   private val localStore: com.awaki.data.repository.LocalModelRepository?

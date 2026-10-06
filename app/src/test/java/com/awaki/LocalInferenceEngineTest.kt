@@ -48,7 +48,7 @@ import java.nio.charset.StandardCharsets
  *
  * The repository is real — models install through the same verified transfer a device uses —
  * while the decode backend is a fake, so these tests are about ownership and integrity rather
- * than about the Python environment, which owns the chat template and the answer read-back.
+ * than about the model runtime, which owns the chat template and the answer read-back.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -137,7 +137,7 @@ class LocalInferenceEngineTest {
         override fun shutdown() {}
 
         companion object {
-            const val NO_ENVIRONMENT = "The Python environment the models run in is not set up yet."
+            const val NO_ENVIRONMENT = "The model runtime is not installed yet."
         }
     }
 
@@ -401,7 +401,7 @@ class LocalInferenceEngineTest {
     }
 
     @Test
-    fun `a device without the Python environment says so instead of crashing`() = runTest {
+    fun `a device without the model runtime says so instead of crashing`() = runTest {
         val payload = ggufBytes(4096)
         val repository = repositoryFor(payload)
         val installed = install(repository, "alpha", payload)
@@ -412,7 +412,7 @@ class LocalInferenceEngineTest {
         val error = failureOf(engine, installed)
 
         assertTrue(error is LocalEngineException)
-        assertTrue(error!!.message!!.contains("Python environment"))
+        assertTrue(error!!.message!!.contains("model runtime"))
     }
 
     // ---- memory and failure ----

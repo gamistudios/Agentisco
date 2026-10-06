@@ -36,6 +36,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -104,7 +105,11 @@ fun LocalModelsSection(
 
   val installedCount = models.count { it.installed }
   val bytesOnDisk = models.filter { it.installed }.sumOf { it.sizeBytes }
-  val envState by viewModel.pythonEnvironmentState.collectAsState()
+  val runtimeState by viewModel.pythonRuntimeState.collectAsState()
+
+  // This screen is the only place a phone would ever need the runtime, so opening it is the
+  // trigger: the copy the app ships gets unpacked if it is missing, stale or half-written.
+  LaunchedEffect(Unit) { viewModel.ensurePythonRuntime() }
 
   Column(modifier = modifier.fillMaxWidth()) {
     Row(
@@ -170,9 +175,9 @@ fun LocalModelsSection(
 
     Spacer(modifier = Modifier.height(8.dp))
     LocalModelEnvironmentRow(
-      state = envState,
-      onSetup = { viewModel.setupPythonEnvironment() },
-      onCancel = { viewModel.cancelPythonEnvironmentSetup() }
+      state = runtimeState,
+      onRetry = { viewModel.reinstallPythonRuntime() },
+      onCancel = { viewModel.cancelPythonRuntimeSetup() }
     )
 
     importError?.let {
@@ -294,23 +299,25 @@ fun LocalModelsSection(
 }
 
 /**
- * The Python environment the models run in, and the one button that makes it.
+ * The Python runtime the models run in, and what it is doing about it.
  *
- * It sits above the list rather than beside a model because it is not a per-model choice:
- * one virtualenv serves every file in the directory, and the first setup spends minutes
- * compiling llama.cpp on the phone. What the guest printed is shown as it arrives so a long
- * step reads as work rather than a hang.
+ * It sits above the list rather than beside a model because it is not a per-model choice: one
+ * runtime serves every file in the directory. There is no setup button because there is nothing
+ * to opt into — the runtime ships inside the app, this screen unpacks it on open, and a missing
+ * or stale copy is repaired the same way. What is left for the user is the two decisions the
+ * automatic path cannot make: stop an unpack in progress, or try again after it failed. The
+ * guest's own output is shown as it arrives so a long step reads as work rather than a hang.
  */
 @Composable
 internal fun LocalModelEnvironmentRow(
-  state: com.awaki.local.py.PythonEnvironment.State,
-  onSetup: () -> Unit,
+  state: com.awaki.local.py.PythonRuntime.State,
+  onRetry: () -> Unit,
   onCancel: () -> Unit,
   modifier: Modifier = Modifier
 ) {
-  val installing = state as? com.awaki.local.py.PythonEnvironment.State.Installing
-  val failed = state as? com.awaki.local.py.PythonEnvironment.State.Failed
-  val ready = state is com.awaki.local.py.PythonEnvironment.State.Installed
+  val installing = state as? com.awaki.local.py.PythonRuntime.State.Installing
+  val failed = state as? com.awaki.local.py.PythonRuntime.State.Failed
+  val installed = state as? com.awaki.local.py.PythonRuntime.State.Installed
 
   Row(
     modifier = modifier.fillMaxWidth(),
@@ -320,14 +327,14 @@ internal fun LocalModelEnvironmentRow(
     Column(modifier = Modifier.weight(1f)) {
       Text(
         when {
-          installing != null -> installing.step
+          installing != null -> "${installing.step} ${installing.percent}%"
           failed != null -> failed.reason
-          ready -> "Python environment ready"
-          else -> "No Python environment yet"
+          installed != null -> "Model runtime ready"
+          else -> "Preparing the model runtime"
         },
         color = when {
           failed != null -> MaterialTheme.colorScheme.error
-          ready -> AwakiTheme.extra.success
+          installed != null -> AwakiTheme.extra.success
           else -> MaterialTheme.colorScheme.onSurfaceVariant
         },
         fontSize = 11.sp,
@@ -335,18 +342,14 @@ internal fun LocalModelEnvironmentRow(
         maxLines = 1,
         overflow = TextOverflow.Ellipsis
       )
-      state.log.lastOrNull()?.let {
+      (state.log.lastOrNull() ?: installed?.detail)?.let {
         Text(it, color = AwakiTheme.extra.textMuted, fontSize = 9.sp, fontFamily = FontFamily.Monospace, maxLines = 1, overflow = TextOverflow.Ellipsis)
       }
     }
     if (installing != null) {
-      MiniAction("Cancel", modifier = Modifier.testTag("btn_cancel_local_env")) { onCancel() }
-    } else {
-      MiniAction(
-        label = if (ready) "Rebuild" else "Setup environment",
-        tint = if (ready) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary,
-        modifier = Modifier.testTag("btn_setup_local_env")
-      ) { onSetup() }
+      MiniAction("Cancel", modifier = Modifier.testTag("btn_cancel_local_runtime")) { onCancel() }
+    } else if (failed != null) {
+      MiniAction("Retry", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.testTag("btn_retry_local_runtime")) { onRetry() }
     }
   }
 }

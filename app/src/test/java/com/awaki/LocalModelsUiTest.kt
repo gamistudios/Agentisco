@@ -23,7 +23,7 @@ import com.awaki.local.model.LocalModelConfiguration
 import com.awaki.local.model.LocalModelInstallStatus
 import com.awaki.local.model.LocalModelProgress
 import com.awaki.local.model.LocalRuntimeSettings
-import com.awaki.local.py.PythonEnvironment
+import com.awaki.local.py.PythonRuntime
 import com.awaki.local.repositoryWithInstalled
 import com.awaki.local.runtime.LocalInferenceEngine
 import com.awaki.settings.model.AIModel
@@ -587,69 +587,74 @@ class LocalModelsUiTest {
     assertNull(viewModel.localModels.value.first { it.id == "lfm2" }.configuration.allowedTools)
   }
 
-  // ---- the Python environment those models run in ----
+  // ---- the runtime those models run in ----
 
+  /**
+   * The row never asks anyone to build anything: the runtime ships inside the app and the screen
+   * unpacks it on open, so the only affordances left are the two the automatic path cannot make.
+   * Each state below asserts the setup button is gone, because that is the regression this whole
+   * change exists to prevent.
+   */
   @Test
-  fun `an empty device offers one button and says what is missing`() {
-    renderEnvRow(PythonEnvironment.State.Missing)
+  fun `an empty device says the runtime is coming and waits`() {
+    renderEnvRow(PythonRuntime.State.Missing)
 
-    compose.onNodeWithText("No Python environment yet").assertIsDisplayed()
-    compose.onNodeWithText("Setup environment").assertIsDisplayed()
-    compose.onNodeWithText("Cancel").assertDoesNotExist()
+    compose.onNodeWithText("Preparing the model runtime").assertIsDisplayed()
+    compose.onNodeWithText("Setup environment").assertDoesNotExist()
+    compose.onNodeWithTag("btn_retry_local_runtime").assertDoesNotExist()
+    compose.onNodeWithTag("btn_cancel_local_runtime").assertDoesNotExist()
   }
 
+  /** Unpacking 50 MB on a phone has to look like work, and has to be stoppable. */
   @Test
-  fun `pressing setup asks for the environment, not for a model`() {
-    var asked = 0
-    renderEnvRow(PythonEnvironment.State.Missing, onSetup = { asked++ })
-
-    compose.onNodeWithTag("btn_setup_local_env").performClick()
-    assertEquals(1, asked)
-  }
-
-  /** Minutes of compiling on a phone has to look like work, and has to be stoppable. */
-  @Test
-  fun `a setup in flight shows the step, what it printed, and how to stop it`() {
+  fun `an install in flight shows the step, how far it got, and how to stop it`() {
     var cancelled = 0
     renderEnvRow(
-      PythonEnvironment.State.Installing("llama-cpp-python", listOf("Building wheel for llama-cpp-python")),
+      PythonRuntime.State.Installing(PythonRuntime.UNPACK_STEP, 42, listOf("-> unpacked 1200 entries")),
       onCancel = { cancelled++ }
     )
 
-    compose.onNodeWithText("llama-cpp-python").assertIsDisplayed()
-    compose.onNodeWithText("Building wheel for llama-cpp-python").assertIsDisplayed()
+    compose.onNodeWithText("${PythonRuntime.UNPACK_STEP} 42%").assertIsDisplayed()
+    compose.onNodeWithText("-> unpacked 1200 entries").assertIsDisplayed()
     compose.onNodeWithText("Setup environment").assertDoesNotExist()
-    compose.onNodeWithTag("btn_cancel_local_env").performClick()
+    compose.onNodeWithTag("btn_retry_local_runtime").assertDoesNotExist()
+    compose.onNodeWithTag("btn_cancel_local_runtime").performClick()
     assertEquals(1, cancelled)
   }
 
   @Test
-  fun `a failed setup says which step failed and offers the attempt again`() {
+  fun `a failed install says why and offers the attempt again`() {
+    var retried = 0
     renderEnvRow(
-      PythonEnvironment.State.Failed("pip", "pip failed (exit 1)", listOf("no matching distribution"))
+      PythonRuntime.State.Failed("Verifying", "The runtime archive does not match this build.", listOf("! digest mismatch")),
+      onRetry = { retried++ }
     )
 
-    compose.onNodeWithText("pip failed (exit 1)").assertIsDisplayed()
-    compose.onNodeWithText("no matching distribution").assertIsDisplayed()
-    compose.onNodeWithText("Setup environment").assertIsDisplayed()
+    compose.onNodeWithText("The runtime archive does not match this build.").assertIsDisplayed()
+    compose.onNodeWithText("! digest mismatch").assertIsDisplayed()
+    compose.onNodeWithText("Setup environment").assertDoesNotExist()
+    compose.onNodeWithTag("btn_retry_local_runtime").performClick()
+    assertEquals(1, retried)
   }
 
-  /** An environment that is there can still be rebuilt: a rootfs reinstall takes apt's packages. */
+  /** The versions inside the runtime are the thing a user wants to see when it works. */
   @Test
-  fun `a ready environment says so and offers a rebuild`() {
-    renderEnvRow(PythonEnvironment.State.Installed())
+  fun `a ready runtime says so and names what is in it`() {
+    renderEnvRow(PythonRuntime.State.Installed("Python 3.12.15 · llama-cpp-python 0.3.36"))
 
-    compose.onNodeWithText("Python environment ready").assertIsDisplayed()
-    compose.onNodeWithText("Rebuild").assertIsDisplayed()
+    compose.onNodeWithText("Model runtime ready").assertIsDisplayed()
+    compose.onNodeWithText("Python 3.12.15 · llama-cpp-python 0.3.36").assertIsDisplayed()
+    compose.onNodeWithText("Setup environment").assertDoesNotExist()
+    compose.onNodeWithTag("btn_retry_local_runtime").assertDoesNotExist()
   }
 
   private fun renderEnvRow(
-    state: PythonEnvironment.State,
-    onSetup: () -> Unit = {},
+    state: PythonRuntime.State,
+    onRetry: () -> Unit = {},
     onCancel: () -> Unit = {}
   ) {
     compose.setContent {
-      AwakiTheme { LocalModelEnvironmentRow(state = state, onSetup = onSetup, onCancel = onCancel) }
+      AwakiTheme { LocalModelEnvironmentRow(state = state, onRetry = onRetry, onCancel = onCancel) }
     }
   }
 }

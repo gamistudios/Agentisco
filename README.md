@@ -80,6 +80,15 @@ Streaming is a sealed `AgentStreamEvent` flow (`Token`, `ReasoningToken`, `ToolS
 
 Providers and models are configured in-app and stored in `providers.json`; **API keys live in a separate `credentials.json`** in app-private storage. "Test connection" probes `/models` for free before falling back to a minimal completion. Errors are classified (`AUTH`, `RATE_LIMIT`, `SERVER`, `NETWORK`, `TIMEOUT`, …) — rate limits and 5xx are retried, invalid-request errors are surfaced immediately. The model dropdown stays usable during a running turn so a rate-limited model can be swapped mid-conversation.
 
+### On-device models
+
+GGUF models run with no API key and no network beyond the phone, behind the same OpenAI-compatible surface the cloud providers use (`LocalAiServer` on loopback).
+
+- **The Python runtime ships inside the APK**, as `assets/local-runtime/` (`bundles.json` + one `tar.gz` per ABI, built by `tools/local-runtime/build-awaki-runtime.sh`). It is a relocatable CPython plus `llama-cpp-python` and everything `serve.py` imports, assembled on a native ARM64 Linux box.
+- `PythonRuntime` installs it: one pass hashes and unpacks the archive into `filesDir/local-models/runtime`, the tree is staged and renamed, and the `.awaki-runtime-ready` marker — holding the archive's SHA-256 — is written **only after the guest proves it can `import llama_cpp`**. Nothing compiles on the phone.
+- **There is no setup button.** Opening the on-device models screen calls `ensurePythonRuntime()`, which unpacks a missing, stale or half-written runtime and costs one file read when the disk already holds this build's copy. The screen shows the step and percent, with Cancel and a Retry after a failure.
+- `serve.py` owns the model's own Jinja chat template — rendering, and reading content/reasoning/tool calls back out of the markers the template used — so a model with an unpredictable dialect needs no new app build.
+
 ### Agent tools (21)
 
 - **Filesystem:** `list_files`, `read_file` (32k cap), `read_files` (batch), `write_file`, `create_file`, `edit_file` (exact-string replace, uniqueness enforced), `delete_file` (always approval-gated), `move_file`, `file_info`, `directory_tree`

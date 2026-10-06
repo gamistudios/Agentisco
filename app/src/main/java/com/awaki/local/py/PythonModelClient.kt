@@ -128,7 +128,8 @@ class PythonModelClient(private val port: Int, private val token: String) {
   private fun capabilitiesOf(chat: JSONObject?): LocalTemplateCapabilities {
     if (chat == null) {
       return LocalTemplateCapabilities.unavailable.copy(
-        reason = "The model server on this device is older than the app. Re-run Setup environment."
+        reason = "The model server on this device is older than the app. " +
+          "Reinstall the model runtime from the on-device models screen."
       )
     }
     return LocalTemplateCapabilities(
@@ -177,7 +178,7 @@ class PythonModelClient(private val port: Int, private val token: String) {
           } catch (e: org.json.JSONException) {
             throw LocalEngineException(
               "The model server answered in a shape this app does not understand. " +
-                "Re-run Setup environment to replace it."
+                "Reinstall the model runtime to replace it."
             )
           }
           chunk.optJSONObject("error")?.let { error ->

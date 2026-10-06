@@ -557,20 +557,31 @@ class WorkspaceRepository(
 
   /**
    * The Python environment the on-device models run in, driven through the same scripted
-   * PRoot path git uses. It lives here rather than beside the model records because apt,
-   * proot and the foreground service all answer to this repository.
+   * PRoot path git uses. It lives here rather than beside the model records because the guest
+   * command channel and the foreground service both answer to this repository, while the
+   * runtime itself is the application's to name: a model answers a turn started before any
+   * workspace is open, and both halves have to agree about what is installed.
    */
-  val pythonEnvironment: com.awaki.local.py.PythonEnvironment? = context?.let { ctx ->
-    com.awaki.local.py.PythonEnvironment(
+  val pythonRuntime: com.awaki.local.py.PythonRuntime? = context?.let { ctx ->
+    com.awaki.local.py.PythonRuntime(
       filesDir = ctx.filesDir,
+      resolve = {
+        com.awaki.local.py.RuntimeBundleCatalog.resolve(
+          openCatalog = {
+            runCatching { ctx.assets.open(com.awaki.local.py.RuntimeBundleCatalog.ASSET_PATH) }.getOrNull()
+          },
+          abis = android.os.Build.SUPPORTED_ABIS.toList()
+        )
+      },
+      openArchive = { bundle -> runCatching { ctx.assets.open(bundle.asset) }.getOrNull() },
       execute = { command, onLine ->
         terminalManager.executeCommand(
-          TerminalSession(id = PYTHON_ENV_SESSION_ID, name = "model environment", currentDir = "/"),
+          TerminalSession(id = PYTHON_RUNTIME_SESSION_ID, name = "model runtime", currentDir = "/"),
           command,
           { line -> onLine(line.text) }
         )
       },
-      interrupt = { terminalManager.interrupt(PYTHON_ENV_SESSION_ID) }
+      interrupt = { terminalManager.interrupt(PYTHON_RUNTIME_SESSION_ID) }
     )
   }
 
@@ -2933,46 +2944,69 @@ class WorkspaceRepository(
   }
 
   /**
-   * Creates — or repairs — the Python environment the local models run in. A no-op while a
-   * setup is already running, because the slow step is a compile and a second one would only
-   * fight the first over the same virtualenv.
+   * Brings the model runtime up, whatever state the device is in.
+   *
+   * This is the whole of the setup a user used to have to press a button for: the Linux guest
+   * is unpacked from the APK if it is not there, the Python runtime is unpacked beside the
+   * models it has to read, and the guest is asked to prove it can import them. Nothing in that
+   * sequence touches the network or a compiler, so opening the screen the first time is enough.
+   *
+   * A no-op while an install is running, and a no-op when the runtime on disk is the one this
+   * build ships — which is what lets every open of the screen call it, including after the
+   * user deleted the directory from a terminal without telling anyone.
    */
-  fun startPythonEnvironmentSetup() {
-    val environment = pythonEnvironment ?: return
-    if (environment.state.value is com.awaki.local.py.PythonEnvironment.State.Installing) return
-    if (nativeBinaries?.isComplete() != true || debianBootstrap?.isBootstrapped() != true) {
-      environment.markUnavailable(
-        "The Linux environment is not set up yet — run it from the Terminal screen first."
+  fun ensurePythonRuntime(reinstall: Boolean = false) {
+    val runtime = pythonRuntime ?: return
+    val ctx = appContext ?: return
+    val bootstrap = debianBootstrap ?: return
+    if (runtime.state.value is com.awaki.local.py.PythonRuntime.State.Installing) return
+    if (!reinstall && com.awaki.local.py.PythonRuntime.isCurrent(ctx.filesDir, runtime.bundle())) {
+      runtime.refresh()
+      return
+    }
+    if (nativeBinaries?.isComplete() != true) {
+      runtime.markUnavailable(
+        "The Linux environment cannot be unpacked: this device is missing the binaries it runs " +
+          "proot with."
       )
       return
     }
+    if (reinstall) localAi?.shutdown()
     repositoryScope.launch {
-      // Minutes of on-device compilation, with the screen off by the time it reaches the
-      // package that has no wheel: this belongs to the foreground service, not to a screen.
+      // Unpacking 50 MB and importing an interpreter is a minute of work the user did not ask
+      // for by name, so it belongs to the foreground service rather than to a screen.
       workRegistry?.begin(
-        id = PYTHON_ENV_WORK_ID,
+        id = PYTHON_RUNTIME_WORK_ID,
         kind = com.awaki.background.WorkKind.BOOTSTRAP,
-        label = "Setting up the model environment",
-        detail = "Creating the Python virtual environment",
-        canceller = { environment.cancel() }
+        label = "Setting up the model runtime",
+        detail = "Preparing the Linux environment",
+        canceller = { runtime.cancel() }
       )
       try {
-        environment.setup { step ->
+        if (!bootstrap.isBootstrapped()) {
+          if (!bootstrap.bootstrap()) {
+            val failed = bootstrap.state.value as? com.awaki.workspace.terminal.LinuxEnvironmentState.Failed
+            runtime.markUnavailable(failed?.reason ?: "The Linux environment could not be prepared.")
+            return@launch
+          }
+        }
+        val step: (String) -> Unit = { name ->
           workRegistry?.setProgress(
-            PYTHON_ENV_WORK_ID,
-            label = "Setting up the model environment",
-            detail = step
+            PYTHON_RUNTIME_WORK_ID,
+            label = "Setting up the model runtime",
+            detail = name
           )
         }
+        if (reinstall) runtime.reinstall(step) else runtime.ensure(step)
       } finally {
-        workRegistry?.end(PYTHON_ENV_WORK_ID)
+        workRegistry?.end(PYTHON_RUNTIME_WORK_ID)
       }
     }
   }
 
-  /** Stops the setup run: the flag ends the sequence, the interrupt ends the command inside it. */
-  fun cancelPythonEnvironmentSetup() {
-    pythonEnvironment?.cancel()
+  /** Stops the running install: the flag ends the sequence, the interrupt ends the command in it. */
+  fun cancelPythonRuntimeSetup() {
+    pythonRuntime?.cancel()
   }
 
   fun selectTerminalSession(id: String) {
@@ -3508,11 +3542,11 @@ class WorkspaceRepository(
     /** Registry record for the one-shot Debian rootfs bootstrap. */
     private const val LINUX_BOOTSTRAP_WORK_ID = "linux-bootstrap"
 
-    /** Registry record for the model environment: apt, a venv, and a source build of llama.cpp. */
-    private const val PYTHON_ENV_WORK_ID = "local-model-env"
+    /** Registry record for unpacking the model runtime the local models run in. */
+    private const val PYTHON_RUNTIME_WORK_ID = "local-model-runtime"
 
     /** The scripted session those commands run in, named so a cancel can kill the right one. */
-    private const val PYTHON_ENV_SESSION_ID = "local-model-env"
+    private const val PYTHON_RUNTIME_SESSION_ID = "local-model-runtime"
 
     /** System prompt for the Run & Build AI auto-configuration pass. */
     private const val AI_BUILD_CONFIG_SYSTEM_PROMPT =
