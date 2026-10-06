@@ -9,15 +9,14 @@
 #   app/src/main/assets/local-runtime/bundles.json   (this arch's entry replaced, others kept)
 #
 # THE ARCHIVE CONTRACT
-#   Every entry lives under one top directory, `runtime/`:
-#     runtime/manifest.json  runtime/bin/python  runtime/lib/python3.12/site-packages/...
-#   The phone unpacks it so that directory becomes /root/local-models/runtime, runs
-#   /root/local-models/runtime/bin/python — a real file, never a symlink — with
-#   LD_LIBRARY_PATH=/root/local-models/runtime/lib, and nothing else is required of it. The
-#   container has to be gzip: the guest has no zstd and no xz binary, and the app reads the
+#   The tree IS the archive root, so its first entries are ./manifest.json, ./bin/python,
+#   ./lib/python3.12/site-packages/... The app unpacks those bytes straight into
+#   /root/local-models/runtime and runs /root/local-models/runtime/bin/python — a real file,
+#   never a symlink — with LD_LIBRARY_PATH=/root/local-models/runtime/lib, and nothing else is
+#   required of it. A top-level runtime/ directory inside the archive would land as
+#   runtime/runtime on the phone, and the interpreter check would fail forever.
+#   The container has to be gzip: the guest has no zstd and no xz binary, and the app reads the
 #   archive with GZIPInputStream plus TarArchiveInputStream.
-#   (--flat-archive packs the same tree at the archive root instead, for an installer that
-#   unpacks into the runtime directory itself; the app side is what decides which is right.)
 #
 # WHY IT EXISTS
 #   PyPI publishes no wheel at all for llama-cpp-python: every release is an sdist, so the ggml
@@ -141,7 +140,7 @@ TARGET=""
 OUTPUT_DIR="dist"
 INSTALL_INTO_REPO=0
 VERIFY_ARCHIVE=""
-FLAT_ARCHIVE=0
+CHECK_CATALOG=""
 
 usage() {
   cat <<'EOF'
@@ -156,11 +155,9 @@ Usage: bash tools/local-runtime/build-awaki-runtime.sh [options]
   --output-dir DIR      where the archive and catalog are written (default: dist)
   --install-into-repo   copy the archive into app/src/main/assets/local-runtime/ and merge its
                         entry into that directory's bundles.json
-  --flat-archive        pack the tree at the archive root (./bin/python) instead of under a
-                        runtime/ directory, for an installer that unpacks into the runtime
-                        directory itself
   --verify-archive FILE unpack an existing archive and re-run the acceptance self-check against
                         it without building anything (the CI verify step)
+  --check-catalog FILE  validate a bundles.json against the keys the app parses, building nothing
   -h, --help            this message
 
 Environment:
@@ -198,13 +195,18 @@ parse_args() {
         ;;
       --output-dir=*) OUTPUT_DIR="${1#*=}"; shift ;;
       --install-into-repo) INSTALL_INTO_REPO=1; shift ;;
-      --flat-archive) FLAT_ARCHIVE=1; shift ;;
       --verify-archive)
         [ $# -ge 2 ] || die "--verify-archive needs a path"
         VERIFY_ARCHIVE="$2"
         shift 2
         ;;
       --verify-archive=*) VERIFY_ARCHIVE="${1#*=}"; shift ;;
+      --check-catalog)
+        [ $# -ge 2 ] || die "--check-catalog needs a path"
+        CHECK_CATALOG="$2"
+        shift 2
+        ;;
+      --check-catalog=*) CHECK_CATALOG="${1#*=}"; shift ;;
       -h | --help)
         usage
         exit 0
@@ -340,8 +342,9 @@ stage_bundle() {
   if [ ! -d "$pbs/python" ]; then
     die "unexpected python-build-standalone layout: no python/ top directory in $PYTHON_ASSET"
   fi
-  # The distribution's contents become runtime/{bin,lib,...}: that top directory is the archive's
-  # root, and the app unpacks the archive so that it lands at /root/local-models/runtime.
+  # The distribution's contents become runtime/{bin,lib,...}: that directory is the archive's
+  # root, so its entries are ./bin/python and ./manifest.json — which is where the app's
+  # unpacker puts them when it streams the archive into /root/local-models/runtime.
   cp -a "$pbs/python/." "$RUNTIME/"
   rm -rf "$pbs"
 
@@ -702,38 +705,51 @@ selfcheck_runtime() {
 }
 
 # ---------- archive -------------------------------------------------------------
+# The app unpacks each entry relative to the runtime directory itself, so an archive wrapped in a
+# top-level runtime/ becomes runtime/runtime on the phone: the interpreter is never found, the
+# guest check fails, and every Retry reproduces the same dead tree. The layout is the one contract
+# a successful build can still break, so the packed bytes are read back instead of trusted.
+check_archive_layout() {
+  local archive="$1" listing
+  listing="$(tar -tzf "$archive")"
+  if ! grep -qxF './bin/python' <<<"$listing"; then
+    die "the archive carries no ./bin/python at its root (first entries: $(head -n 3 <<<"$listing" | tr '\n' ' '))"
+  fi
+  if ! grep -qxF './manifest.json' <<<"$listing"; then
+    die "the archive carries no ./manifest.json at its root"
+  fi
+  if grep -qE '^\./runtime/?$' <<<"$listing"; then
+    die "the archive wraps the tree in a runtime/ directory; the app unpacks entries INTO the runtime directory"
+  fi
+  log "archive layout: $(grep -c '' <<<"$listing") entries rooted at ./bin/python"
+}
+
 create_archive() {
   local out="$1"
-  local -a pack=(runtime)
-  local from="$STAGE"
-  if [ "$FLAT_ARCHIVE" = "1" ]; then
-    # The same tree with the runtime directory as the archive root: an installer that unpacks
-    # straight into .../local-models/runtime needs ./bin/python, not ./runtime/bin/python.
-    pack=(.)
-    from="$RUNTIME"
-  fi
-  # GZIP supplies both --best and -n, so the gzip header carries no file name and no mtime and
-  # the container is as reproducible as the tar stream inside it.
   export GZIP="-9 -n"
   rm -f "$out"
   (
-    cd "$from" &&
+    cd "$RUNTIME" &&
       # LC_ALL=C because tar --sort=name collates through the locale, and two machines that
       # disagree about collation would produce two different archives from one identical tree.
       # --dereference so the archive holds only regular files: the app's unpacker treats a
       # symlink as best-effort, and a runtime whose bin/python is a skipped symlink is not a
-      # runtime. --format=pax because the stdlib paths outgrow ustar's 100-character name field.
+      # runtime. --format=pax because the stdlib paths outgrow ustar's 100-character name field,
+      # and its atime/ctime records are deleted because they would otherwise differ per machine
+      # and a changing digest means every phone re-unpacks a runtime it already holds.
       LC_ALL=C tar --create --gzip \
         --format=pax \
+        --pax-option=exthdr.name=%d/PaxHeaders/%f,delete=atime,delete=ctime \
         --sort=name \
         --mtime='UTC 2000-01-01' \
         --owner=0 --group=0 --numeric-owner \
         --dereference \
-        --file="$out" "${pack[@]}"
+        --file="$out" .
   )
   ARCHIVE_PATH="$out"
   ARCHIVE_SHA256="$(sha256sum "$out" | cut -d' ' -f1)"
   ARCHIVE_SIZE="$(wc -c <"$out" | tr -d '[:space:]')"
+  check_archive_layout "$out"
 }
 
 verify_archive() {
@@ -748,16 +764,12 @@ verify_archive() {
     rm -rf "$probe"
     die "the archive did not unpack - it is truncated or not gzip"
   fi
-  # Either documented layout is accepted here, because the archive is the thing being checked:
-  # what has to be true is that the tree it holds runs from wherever it was put.
-  local target=""
-  if [ -d "$probe/runtime" ]; then
-    target="$probe/runtime"
-  elif [ -d "$probe/bin" ]; then
-    target="$probe"
-  else
+  # The archive is checked the way the phone will read it: unpacked, then run from wherever the
+  # unpack put it, with nothing but its own lib on LD_LIBRARY_PATH.
+  local target="$probe"
+  if [ ! -d "$probe/bin" ]; then
     rm -rf "$probe"
-    die "the archive holds neither a top-level runtime/ directory nor a bin/ directory at its root"
+    die "the archive has no bin/ at its root - the app unpacks entries into the runtime directory, it does not expect a runtime/ wrapper"
   fi
   if [ ! -f "$target/manifest.json" ] || [ ! -x "$target/bin/python" ]; then
     rm -rf "$probe"
@@ -794,6 +806,49 @@ with open(path, "w", encoding="utf-8", newline="\n") as handle:
     json.dump({"schema": 1, "bundles": [entry]}, handle, indent=2)
     handle.write("\n")
 print(">> wrote " + path)
+PY
+}
+
+# The app reads bundles.json into `RuntimeBundle` and ignores unknown keys, so a renamed field is
+# not an error there — it is a phone that sees no runtime at all. Every key the Kotlin data class
+# declares is required here, and the digest has to be the 64 hex characters its parser asks for,
+# because an entry that fails those filters is dropped silently rather than rejected.
+check_catalog() {
+  local path="$1"
+  require_cmd python3
+  [ -s "$path" ] || die "no such catalog: $path"
+  CATALOG_FILE="$path" python3 - <<'PY'
+import json
+import os
+import re
+import sys
+
+required = {"abi", "arch", "asset", "sha256", "sizeBytes", "python", "llamaCpp", "bundleId"}
+path = os.environ["CATALOG_FILE"]
+try:
+    catalog = json.load(open(path, encoding="utf-8"))
+except ValueError as error:
+    sys.exit("%s is not readable JSON: %s" % (path, error))
+
+bundles = catalog.get("bundles")
+if not isinstance(bundles, list) or not bundles:
+    sys.exit("%s carries no bundles" % path)
+problems = []
+for index, entry in enumerate(bundles):
+    for key in sorted(required - set(entry)):
+        problems.append("bundles[%d] (%s) has no %r" % (index, entry.get("arch", "?"), key))
+    digest = entry.get("sha256", "")
+    if not re.fullmatch(r"[0-9a-fA-F]{64}", str(digest)):
+        problems.append("bundles[%d] sha256 %r is not 64 hex digits" % (index, digest))
+    size = entry.get("sizeBytes")
+    if not isinstance(size, int) or size <= 0:
+        problems.append("bundles[%d] sizeBytes %r is not a positive size" % (index, size))
+    for key in ("abi", "arch", "asset", "bundleId"):
+        if not str(entry.get(key, "")).strip():
+            problems.append("bundles[%d] %s is blank" % (index, key))
+if problems:
+    sys.exit("%s:\n  %s" % (path, "\n  ".join(problems)))
+print(">> %s: %d bundle(s), every key the app parses is present" % (path, len(bundles)))
 PY
 }
 
@@ -866,6 +921,11 @@ main() {
     exit 0
   fi
 
+  if [ -n "$CHECK_CATALOG" ]; then
+    check_catalog "$CHECK_CATALOG"
+    exit 0
+  fi
+
   check_host_arch
   check_build_tools
   prepare_workspace
@@ -889,6 +949,7 @@ main() {
 
   if [ "$INSTALL_INTO_REPO" = "1" ]; then
     install_into_repo
+    check_catalog "$REPO_ROOT/app/src/main/assets/local-runtime/bundles.json"
   fi
 
   cat <<EOF

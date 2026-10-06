@@ -5,8 +5,9 @@ name: Awaki Local AI Runtime
 #
 # It is a separate workflow because it needs a native ARM64 runner: PyPI publishes no wheel for
 # llama-cpp-python, so ggml has to be compiled, and compiling it for aarch64 on an x86_64 box
-# would produce bytes that crash on every phone. Nothing here runs on the CI job for ordinary
-# commits - the runtime belongs to a release, not to a pull request.
+# would produce bytes that crash on every phone. A commit that touches the recipe builds the
+# x86_64 bundle on every push, which runs the whole recipe without shipping anything; the shippable
+# arm64 artifact still takes an explicit dispatch.
 #
 # The build script is invoked with `bash <script>`: the executable bit is not carried by every
 # development machine in this project, and the recipe does not depend on it.
@@ -27,8 +28,8 @@ on:
         type: boolean
         required: true
         default: false
-  # Syntax-checked only. The paths filter means a change to the recipe gets a `bash -n` without
-  # ever paying for a compile, and the build itself stays behind the explicit dispatch.
+  # A change to the recipe, or to either side of the contract between the archive and the app that
+  # unpacks it, gets a real x86_64 build. The arm64 artifact stays behind the dispatch below.
   pull_request:
     branches: ["main"]
     paths:
@@ -39,6 +40,8 @@ on:
     paths:
       - 'tools/local-runtime/**'
       - '.github/workflows/local-runtime.yml'
+      - 'app/src/main/java/com/awaki/local/**'
+      - 'app/src/main/assets/local-models/serve.py'
 
 permissions:
   contents: write
@@ -69,10 +72,49 @@ jobs:
       - name: YAML syntax
         run: python3 -c "import yaml,sys; yaml.safe_load(open('.github/workflows/local-runtime.yml')); print('workflow parses')"
 
+  # The recipe is ~950 lines of shell whose output is a binary a phone cannot inspect. Building
+  # the x86_64 bundle runs every step of it for real - pin cross-check against upstream, download,
+  # pip, the llama.cpp compile, the trim, the library sweep, the relocation self-check, the pack
+  # and the read-back of the packed bytes - so a recipe that stopped working says so on the commit
+  # that broke it rather than on the release. Its bundle is never shipped: an x86_64 tree cannot
+  # run on an arm64 phone.
+  validate:
+    name: Build an x86_64 runtime to prove the recipe
+    needs: lint
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      AWAKI_DOWNLOAD_CACHE: ${{ github.workspace }}/.cache/awaki/local-runtime
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v7
+
+      - name: Cache the interpreter archive
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.AWAKI_DOWNLOAD_CACHE }}
+          key: awaki-python-x86_64-${{ hashFiles('tools/local-runtime/build-awaki-runtime.sh') }}
+          restore-keys: |
+            awaki-python-x86_64-
+
+      - name: Build the runtime
+        run: >-
+          bash tools/local-runtime/build-awaki-runtime.sh
+          --target x86_64
+          --output-dir dist
+
+      - name: Verify the archive that was produced
+        run: bash tools/local-runtime/build-awaki-runtime.sh --verify-archive dist/awaki-runtime-x86_64.tar.gz
+
+      - name: Check the catalog the app would read
+        run: bash tools/local-runtime/build-awaki-runtime.sh --check-catalog dist/bundles-x86_64.json
+
   build:
     name: Build the ${{ inputs.arch }} runtime
     needs: lint
-    # Never on a plain push or a pull request: those only want the syntax check above.
+    # The shipping artifact is built on request, because it is a ~50 MB binary and merging it is a
+    # decision a person makes. Ordinary pushes get the x86_64 build above instead.
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
@@ -136,6 +178,9 @@ jobs:
           sha256sum "$archive"
           ls -l dist/
           bash tools/local-runtime/build-awaki-runtime.sh --verify-archive "$archive"
+
+      - name: Check the catalog the app would read
+        run: bash tools/local-runtime/build-awaki-runtime.sh --check-catalog "dist/bundles-${ARCH}.json"
 
       - name: Upload runtime bundle
         uses: actions/upload-artifact@v4

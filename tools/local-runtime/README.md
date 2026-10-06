@@ -1,8 +1,9 @@
 # Awaki local model runtime
 
 The Python tree that runs GGUF models inside the PRoot Ubuntu guest, built here and shipped
-**inside the APK**. `tools/local-runtime/build-awaki-runtime.sh` assembles it, and
-`.github/workflows/local-runtime.yml` runs that script on a native ARM64 runner.
+**inside the APK**. `tools/local-runtime/build-awaki-runtime.sh` assembles it,
+`.github/workflows/local-runtime.yml` runs that script on a native ARM64 runner, and every commit
+that touches the recipe gets a real x86_64 build of it on CI first.
 
 ## Why this exists
 
@@ -18,18 +19,19 @@ SHA-256 check and a `tar` extract: no pip, no compiler, no network, no `apt-get`
 
 | File | What it is |
 |---|---|
-| `dist/awaki-runtime-<arch>.tar.gz` | the runtime tree: `runtime/bin/python`, `runtime/lib/python3.12/`, `runtime/manifest.json` |
+| `dist/awaki-runtime-<arch>.tar.gz` | the runtime tree: `./bin/python`, `./lib/python3.12/`, `./manifest.json` |
 | `dist/bundles-<arch>.json` | the catalog (`schema: 1`, one entry per ABI) the app reads from its assets |
 
 The archive is reproducible — pinned versions, `--sort=name`, `--mtime='UTC 2000-01-01'`,
-`--owner=0 --group=0 --numeric-owner`, `GZIP=-9 -n`, `LC_ALL=C` — so rebuilding the same pins
-gives the same digest and no device re-unpacks anything. It is gzip because that is all the guest
-can read: no `zstd`, no `xz`, and the app unpacks with `GZIPInputStream` + `TarArchiveInputStream`.
+`--owner=0 --group=0 --numeric-owner`, pax records with `delete=atime,delete=ctime`, `GZIP=-9 -n`,
+`LC_ALL=C` — so rebuilding the same pins gives the same digest and no device re-unpacks anything.
+It is gzip because that is all the guest can read: no `zstd`, no `xz`, and the app unpacks with
+`GZIPInputStream` + `TarArchiveInputStream`.
 
 The tree that lands in the archive:
 
 ```
-runtime/
+./                                   the archive root; the app unpacks it as local-models/runtime
 ├── manifest.json                    runtime, arch, libc, python, llamaCpp, bundleId
 ├── bin/python                       a real COPY of the interpreter, never a symlink
 ├── bin/python3.12
@@ -132,10 +134,11 @@ The app reads `assets/local-runtime/bundles.json`, picks the entry for its ABI l
 archive's SHA-256 as it streams it, and unpacks it to `filesDir/local-models/runtime`
 (`com.awaki.local.LocalModelPaths`), which the guest mounts as `/root/local-models/runtime`.
 
-- **Archive entries are under a top-level `runtime/` directory.** An installer that unpacks into
-  the runtime directory itself should pass `--flat-archive`, which packs the identical tree at the
-  archive root (`./bin/python`) instead. Decide which one the app wants and commit the matching
-  bytes; `--verify-archive` accepts either.
+- **Archive entries are rooted at the runtime tree**: `./bin/python`, `./manifest.json`,
+  `./lib/python3.12/…`. The app unpacks each entry relative to `local-models/runtime` itself, so a
+  top-level `runtime/` wrapper would land as `runtime/runtime` and the interpreter would never be
+  found. `create_archive` reads the packed listing back and refuses such an archive, and
+  `--verify-archive` requires `bin/` at the root.
 - **`bin/python` is a real file, not a symlink** — the app's entry-by-entry extractor treats
   symlinks as best-effort, and a skipped link reads as a missing runtime forever.
 - **Libraries the guest lacks live in `runtime/lib`** — `libgomp.so.1` (OpenMP), plus glibc's
