@@ -1,6 +1,7 @@
 package com.awaki.data.local
 
 import android.content.Context
+import com.awaki.local.LocalAiRuntime
 import com.awaki.settings.model.AIModel
 import com.awaki.settings.model.AIProvider
 import com.awaki.settings.model.LLMProtocol
@@ -165,10 +166,17 @@ class ProviderConfigStore(private val context: Context? = null) {
    * Drops a stale selected model; picks the first available one when [autoSelectFallback]
    * is set. [isKnownModel] widens what counts as still valid, so a selection pointing at an
    * on-device model — which is never stored here — survives a restart.
+   *
+   * The widening is not enough on its own, and used to lose the user's choice: on a cold
+   * start the on-device catalogue is still empty while this runs, so a selection naming an
+   * installed local model looked stale, was dropped, and the drop was written out. An
+   * on-device record id is therefore never this store's to discard, whoever asks.
    */
   fun reconcileSelection(autoSelectFallback: Boolean, isKnownModel: (String) -> Boolean = ::ownsRecord) {
     val selected = selectedIdCache
-    if (selected != null && !isKnownModel(selected)) selectedIdCache = null
+    if (selected != null && !LocalAiRuntime.isLocalRecord(selected) && !isKnownModel(selected)) {
+      selectedIdCache = null
+    }
     if (selectedIdCache == null && autoSelectFallback) selectedIdCache = modelsCache.firstOrNull()?.id
     persistConfig()
   }

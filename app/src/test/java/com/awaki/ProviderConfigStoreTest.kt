@@ -76,6 +76,34 @@ class ProviderConfigStoreTest {
   }
 
   @Test
+  fun `a cold start cannot talk the store out of an on-device selection`() {
+    val store = newStore().apply {
+      seedTwoProvidersWithSameModelId(this)
+      selectModel("local:lfm2") { true }
+    }
+
+    // The reconcile the repository runs before the local server has bound, when its
+    // catalogue holds nothing that names the model the user chose last time they ran
+    // it. Dropping that selection used to be the whole of "my model does not stick",
+    // and the drop was written out, so the next start could not recover it.
+    store.reconcileSelection(autoSelectFallback = true, isKnownModel = { false })
+
+    assertEquals("local:lfm2", newStore().getSelectedModelId())
+  }
+
+  @Test
+  fun `a selection naming a cloud model that really is gone is still replaced`() {
+    val store = newStore().apply {
+      seedTwoProvidersWithSameModelId(this)
+      selectModel("deleted-model") { true }
+    }
+
+    store.reconcileSelection(autoSelectFallback = true, isKnownModel = { false })
+
+    assertEquals("model_001", store.getSelectedModelId())
+  }
+
+  @Test
   fun `deleting a provider cascades to its models and reconciles selection`() {
     val store = newStore()
     seedTwoProvidersWithSameModelId(store)

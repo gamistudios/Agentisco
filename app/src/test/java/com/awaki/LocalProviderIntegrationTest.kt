@@ -185,6 +185,25 @@ class LocalProviderIntegrationTest {
   }
 
   @Test
+  fun `a session that settles for a running model does not rewrite the remembered choice`() = runTest {
+    val store = storedStore().apply { selectModel("local:lfm2") { true } }
+
+    // Nothing installed and no server yet: what the app looks like for the first
+    // seconds of a cold start, when the only selectable record is the cloud one. The
+    // session may run on that, but paying for it with the user's stored choice is how
+    // an on-device selection used to come back as a cloud model after a restart.
+    val repo = held.hold(WorkspaceRepository(
+      context = null,
+      providerStore = store,
+      llmService = RecordingLlm(),
+      localAi = localRuntime()
+    ))
+
+    assertEquals("cloud-model", repo.selectedModel.value?.id)
+    assertEquals("local:lfm2", store.getSelectedModelId())
+  }
+
+  @Test
   fun `deleting the last cloud provider leaves the on-device model selectable`() = runTest {
     val repo = held.hold(WorkspaceRepository(
       context = null,

@@ -1175,7 +1175,11 @@ class WorkspaceRepository(
   val modelCatalogs: StateFlow<Map<String, ModelCatalogState>> = _modelCatalogs.asStateFlow()
 
   // Agent Permissions
-  private val _permissions = MutableStateFlow(AgentPermissions())
+  // Owned by a store like every other setting: seventeen switches that returned to
+  // their shipped values on the next launch were the report that "changing a
+  // permission doesn't stick".
+  val permissionsStore = com.awaki.data.local.PermissionsStore(context)
+  private val _permissions = MutableStateFlow(permissionsStore.get())
   val permissions: StateFlow<AgentPermissions> = _permissions.asStateFlow()
 
   // Search Query & Results
@@ -1286,11 +1290,25 @@ class WorkspaceRepository(
   /** Keeps the selection when it still exists; otherwise falls back to the remembered or first model. */
   private fun reconcileSelectedModel() {
     val current = _selectedModel.value
-    if (current != null && _aiModels.value.any { it.id == current.id }) return
-    val next = providerStore?.getSelectedModelId()?.let { id -> _aiModels.value.firstOrNull { it.id == id } }
+    val remembered = providerStore?.getSelectedModelId()
+    if (current != null && current.id == remembered && _aiModels.value.any { it.id == current.id }) return
+    // The store holds what the user last chose — [selectModel] writes every choice
+    // through — so it outranks whatever an earlier publish had to settle for. An
+    // on-device model's record exists only while the local server is up, which is
+    // after the first publish of a cold start: choosing it used to survive exactly
+    // one restart, because the fallback below replaced it and persisted the
+    // replacement. Now the choice is restored as soon as its record is back.
+    val next = remembered?.let { id -> _aiModels.value.firstOrNull { it.id == id } }
       ?: _aiModels.value.firstOrNull()
     _selectedModel.value = next
-    if (next != null) providerStore?.selectModel(next.id) { id -> _aiModels.value.any { it.id == id } }
+    // A remembered on-device choice stays in the store even while this session has to
+    // settle for a model that is actually up: writing the fallback back is what made
+    // the choice come back as the first cloud model after a restart.
+    val choiceIsOnDevice = remembered != null &&
+      com.awaki.local.LocalAiRuntime.isLocalRecord(remembered)
+    if (next != null && !choiceIsOnDevice && next.id != remembered) {
+      providerStore?.selectModel(next.id) { id -> _aiModels.value.any { it.id == id } }
+    }
   }
 
   /**
@@ -3177,7 +3195,7 @@ class WorkspaceRepository(
 
   // Permission handling
   fun updatePermissions(transform: (AgentPermissions) -> AgentPermissions) {
-    _permissions.update(transform)
+    _permissions.value = permissionsStore.update(transform)
   }
 
   fun requestApproval(approval: PendingApproval) {
