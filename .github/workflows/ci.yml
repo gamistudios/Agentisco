@@ -117,12 +117,34 @@ jobs:
 
       - name: Run Tests
         run: |
+          # errexit is on by default here and the whole point of this step is to keep
+          # going after a failing command, so turn it off explicitly.
+          set +e
           # Robolectric downloads its android-all jars into ~/.m2 during tests.
           # Retry once so a transient Maven fetch failure never fails the build.
-          ./gradlew testDebugUnitTest --stacktrace || {
-            echo "::warning::testDebugUnitTest failed — retrying once (likely transient Robolectric artifact fetch)."
-            ./gradlew testDebugUnitTest --stacktrace --rerun-tasks
-          }
+          ./gradlew testDebugUnitTest --stacktrace && exit 0
+
+          # The first pass failed. This retry used to be the end of the story: one
+          # flaky test came back as a green job plus a one-line warning, with no stack
+          # trace anywhere, which made a real, repeating bug undiagnosable. Print what
+          # failed and keep that run's XML before the second pass overwrites it.
+          echo "::error::First test run failed — the failing cases and their traces are below."
+          echo '::group::First-run test failures'
+          reports=$(find . -path '*/build/test-results/*' -name 'TEST-*.xml' 2>/dev/null)
+          for report in $reports; do
+            grep -q '<failure' "$report" || continue
+            printf '=== %s\n' "$report"
+            grep -B 4 -A 24 '<failure' "$report"
+          done | head -c 60000
+          echo '::endgroup::'
+          for report in $reports; do
+            grep -q '<failure' "$report" || continue
+            dest=first-run-test-results/$(dirname "$report")
+            mkdir -p "$dest" && cp "$report" "$dest/"
+          done
+
+          ./gradlew testDebugUnitTest --stacktrace --rerun-tasks
+          exit $?
         env:
           ANDROID_KEYSTORE_PATH: ${{ github.workspace }}/debug.keystore
           ANDROID_KEYSTORE_PASSWORD: android
@@ -132,6 +154,17 @@ jobs:
           AGENTISCO_KEYSTORE_PASSWORD: android
           AGENTISCO_KEY_ALIAS: androiddebugkey
           AGENTISCO_KEY_PASSWORD: android
+
+      # The XML above would otherwise be lost under the retry's own results: this is
+      # what to read when a log says the tests failed once and then went green.
+      - name: Upload first-run test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: first-run-test-results
+          path: first-run-test-results/
+          if-no-files-found: ignore
+          retention-days: 14
 
       # ---------- Release detection + version resolution (publish runs only) ----------
       # The commit message is read from git (never interpolated into the shell)
