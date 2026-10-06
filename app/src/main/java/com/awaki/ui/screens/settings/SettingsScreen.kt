@@ -77,6 +77,7 @@ import com.awaki.editor.model.EditorSettings
 import com.awaki.ui.UpdateViewModel
 import com.awaki.ui.WorkspaceViewModel
 import com.awaki.ui.theme.AwakiTheme
+import com.awaki.ui.theme.uiThemes
 
 /**
  * Awaki's configuration, in one scrollable list rather than fourteen cards.
@@ -254,6 +255,16 @@ private fun SettingsCatalog(
         detail = "What the agent may use at all",
         end = RowEnd.Value("$enabledTools of 12", ValueTone.Accent, "txt_quick_tools"),
         onClick = { openSheet(SettingsSheet.ToolPermissions) }
+      )
+    )
+    add(
+      SettingsItem(
+        id = "quick_ui_theme",
+        group = SettingsGroup.QuickAccess,
+        title = "Theme",
+        icon = Icons.Outlined.Palette,
+        end = RowEnd.Value(uiTheme.name, ValueTone.Accent, "txt_quick_ui_theme"),
+        onClick = { openSheet(SettingsSheet.UiTheme) }
       )
     )
     add(
@@ -606,11 +617,10 @@ private fun SettingsCatalog(
         title = "Theme",
         icon = Icons.Outlined.Palette,
         detail = "The colours every screen wears",
-        keywords = listOf(
-          "colours", "colors", "appearance", "dark", "light", "nocturne", "midnight",
-          "graphite", "abyss", "evergreen", "ember", "grape", "sail", "one dark",
-          "monokai", "tokyo", "github", "daylight", "porcelain", "sandstone", "mint"
-        ),
+        // Derived from the catalogue, so a theme is findable by its own name the moment
+        // it joins [uiThemes] rather than after somebody remembers to edit this row.
+        keywords = listOf("colours", "colors", "appearance", "dark", "light") +
+          uiThemes.flatMap { listOf(it.name.lowercase(), it.key) },
         end = RowEnd.Value(uiTheme.name, ValueTone.Accent, "txt_ui_theme"),
         onClick = { openSheet(SettingsSheet.UiTheme) }
       )

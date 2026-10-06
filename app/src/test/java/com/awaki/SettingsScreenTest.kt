@@ -237,7 +237,7 @@ class SettingsScreenTest {
     // "Work lost with the last process" is deliberately absent: that row only exists
     // while there is interrupted work to show, and a test workspace has none.
     val expected = setOf(
-      "quick_model", "quick_background", "quick_permissions", "quick_theme",
+      "quick_model", "quick_background", "quick_permissions", "quick_ui_theme", "quick_theme",
       "model", "providers", "local_models", "plan_mode", "compaction", "agent_team", "skills",
       "file_editing", "terminal_safety", "tool_permissions", "network_access",
       "tool_iterations", "web_access", "skipped_folders",
