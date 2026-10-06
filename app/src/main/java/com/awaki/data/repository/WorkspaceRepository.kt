@@ -289,6 +289,40 @@ class WorkspaceRepository(
     _editorSettings.value = editorSettingsStore.update { settings }
   }
 
+  // ---- UI theme (Settings → Appearance → Theme gallery) ----
+  // The application owns this state rather than the repository: the very first frame of
+  // the process is already themed, before any screen has asked for a view model, and the
+  // terminal and the cold-start window read their colours from the same flow. A
+  // repository with no application (tests, previews) falls back to its own store, so the
+  // settings screen stays drivable there.
+  private val owningApplication: com.awaki.AwakiApplication? =
+    appContext as? com.awaki.AwakiApplication
+
+  private val uiThemeStore by lazy { com.awaki.data.local.UiThemeStore(context) }
+
+  private val fallbackUiTheme by lazy {
+    MutableStateFlow(com.awaki.ui.theme.uiThemeByKey(uiThemeStore.get().orEmpty()))
+  }
+
+  val uiTheme: StateFlow<com.awaki.ui.theme.UiPalette>
+    get() = owningApplication?.uiTheme ?: fallbackUiTheme
+
+  /** Paint the whole app with the theme registered under [key], and remember it. */
+  fun setUiTheme(key: String) {
+    val palette = com.awaki.ui.theme.uiThemeByKey(key)
+    val app = owningApplication
+    if (app != null) {
+      app.setUiTheme(key)
+    } else {
+      uiThemeStore.setKey(key)
+      fallbackUiTheme.value = palette
+      com.awaki.workspace.terminal.TerminalPalette.apply(palette)
+    }
+    // A shell that is already running holds the colours it started with; every live
+    // session is pulled back to the theme and told to redraw.
+    _ptySessions.value.values.forEach { com.awaki.workspace.terminal.TerminalPalette.refresh(it) }
+  }
+
   // ---- Projects layout (grid vs. list) ----
   val projectsViewStore = com.awaki.data.local.ProjectsViewStore(context)
   private val _projectsView = MutableStateFlow(projectsViewStore.get())

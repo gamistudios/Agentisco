@@ -37,6 +37,7 @@ import androidx.compose.material.icons.outlined.LineStyle
 import androidx.compose.material.icons.outlined.Map
 import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.automirrored.outlined.Rule
@@ -196,6 +197,7 @@ private fun SettingsCatalog(
   val skippedDirs by viewModel.effectiveIgnoredDirs.collectAsState()
   val chatDisplay by viewModel.chatDisplay.collectAsState()
   val editor by viewModel.editorSettings.collectAsState()
+  val uiTheme by viewModel.uiTheme.collectAsState()
   val allowed by viewModel.allowBackgroundExecution.collectAsState()
   val wakeLock by viewModel.backgroundWakeLockEnabled.collectAsState()
   val terminalHold by viewModel.terminalHeld.collectAsState()
@@ -597,6 +599,22 @@ private fun SettingsCatalog(
     )
 
     // ---- Appearance ----
+    add(
+      SettingsItem(
+        id = "ui_theme",
+        group = SettingsGroup.Appearance,
+        title = "Theme",
+        icon = Icons.Outlined.Palette,
+        detail = "The colours every screen wears",
+        keywords = listOf(
+          "colours", "colors", "appearance", "dark", "light", "nocturne", "midnight",
+          "graphite", "abyss", "evergreen", "ember", "grape", "sail", "one dark",
+          "monokai", "tokyo", "github", "daylight", "porcelain", "sandstone", "mint"
+        ),
+        end = RowEnd.Value(uiTheme.name, ValueTone.Accent, "txt_ui_theme"),
+        onClick = { openSheet(SettingsSheet.UiTheme) }
+      )
+    )
     add(
       SettingsItem(
         id = "syntax_theme",

@@ -3,8 +3,15 @@ package com.awaki
 import android.app.Application
 import android.os.Build
 import com.awaki.data.local.ProviderConfigStore
+import com.awaki.data.local.UiThemeStore
 import com.awaki.data.repository.UpdateRepository
 import com.awaki.settings.store.UserPreferencesStore
+import com.awaki.ui.theme.UiPalette
+import com.awaki.ui.theme.uiThemeByKey
+import com.awaki.workspace.terminal.TerminalPalette
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.io.File
 import java.io.PrintWriter
@@ -17,6 +24,30 @@ class AwakiApplication : Application() {
 
   /** User preferences (auto-update toggle etc.), persisted to internal storage. */
   val userPreferencesStore: UserPreferencesStore by lazy { UserPreferencesStore(this) }
+
+  /** Which UI theme the user picked, by its catalogue key. */
+  val uiThemeStore: UiThemeStore by lazy { UiThemeStore(this) }
+
+  /**
+   * The theme the app paints with. Owned here rather than by the workspace repository
+   * because it is process-wide chrome, not workspace state: the first frame is already
+   * themed, the terminal takes its default colours from it, and Settings reads it
+   * before any project is open.
+   */
+  val uiTheme: StateFlow<UiPalette> by lazy { uiThemeState.asStateFlow() }
+
+  private val uiThemeState: MutableStateFlow<UiPalette> by lazy {
+    MutableStateFlow(uiThemeByKey(uiThemeStore.get().orEmpty()))
+      .also { TerminalPalette.apply(it.value) }
+  }
+
+  /** Switch every screen to the theme registered under [key] and remember the choice. */
+  fun setUiTheme(key: String) {
+    val palette = uiThemeByKey(key)
+    uiThemeStore.setKey(key)
+    uiThemeState.value = palette
+    TerminalPalette.apply(palette)
+  }
 
   /** Update-API backed checker/downloader (resumable, verified against the asset digest). */
   val updateRepository: UpdateRepository by lazy { UpdateRepository(this) }
@@ -106,6 +137,11 @@ class AwakiApplication : Application() {
 
   override fun onCreate() {
     super.onCreate()
+    // Install the stored theme before anything asks for it. The flow is lazy, and a process
+    // woken by a notification or a background terminal never reaches the UI: without this
+    // the console would paint with the defaults baked into the terminal's colour array
+    // rather than the theme its user picked.
+    TerminalPalette.apply(uiTheme.value)
     installCrashCapture()
     backgroundExecution.start()
   }

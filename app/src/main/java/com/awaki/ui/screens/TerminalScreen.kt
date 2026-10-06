@@ -22,8 +22,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -207,7 +205,7 @@ fun TerminalScreen(
           modifier = Modifier
             .weight(1f)
             .fillMaxWidth()
-            .background(Color.Black)
+            .background(MaterialTheme.colorScheme.background)
             .testTag("terminal_console")
         )
         TerminalExtraKeysGrid(onKey = { key, ctrlActive -> activePty?.let { pty ->

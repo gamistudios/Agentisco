@@ -1,6 +1,8 @@
 package com.awaki
 
 import android.content.Context
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -76,7 +78,10 @@ class SettingsScreenTest {
     val viewModel = WorkspaceViewModel(WorkspaceRepository(context = null))
     val updateViewModel = UpdateViewModel(UpdateRepository(context), UserPreferencesStore(context))
     compose.setContent {
-      AwakiTheme { SettingsScreen(viewModel, updateViewModel, onNavigate = {}) }
+      // The same way the activity wears a theme, so a test that changes it sees the page
+      // change rather than only the state behind it.
+      val theme by viewModel.uiTheme.collectAsState()
+      AwakiTheme(palette = theme) { SettingsScreen(viewModel, updateViewModel, onNavigate = {}) }
     }
     return viewModel
   }
@@ -176,6 +181,43 @@ class SettingsScreenTest {
   }
 
   @Test
+  fun `the theme row wears the theme the app is wearing`() {
+    val viewModel = showSettings()
+
+    compose.onNodeWithTag("input_settings_search").performTextInput("the colours every screen")
+    compose.onNodeWithTag("row_ui_theme").assertIsDisplayed()
+    compose.onNodeWithText("Nocturne").assertIsDisplayed()
+
+    // What a row of the gallery sheet calls, from the state the whole app paints from.
+    viewModel.setUiTheme("tokyo_night")
+    assertEquals("tokyo_night", viewModel.uiTheme.value.key)
+    compose.onNodeWithText("Tokyo Night").assertIsDisplayed()
+  }
+
+  @Test
+  fun `a theme's own name is enough to find the row that changes it`() {
+    showSettings()
+
+    compose.onNodeWithTag("input_settings_search").performTextInput("graphite")
+    compose.onNodeWithTag("row_ui_theme").assertIsDisplayed()
+    compose.onNodeWithTag("row_model").assertDoesNotExist()
+  }
+
+  @Test
+  fun `a light theme repaints the page, not only the row that chose it`() {
+    val viewModel = showSettings()
+
+    compose.onNodeWithTag("input_settings_search").performTextInput("theme")
+    compose.onNodeWithTag("row_ui_theme").assertIsDisplayed()
+    viewModel.setUiTheme("daylight")
+    assertEquals("Daylight", viewModel.uiTheme.value.name)
+
+    // Colour is what this asserts, and a semantics tree cannot show it: the read of this
+    // test is settings_screen_daylight.png.
+    compose.onRoot().captureRoboImage(filePath = "src/test/screenshots/settings_screen_daylight.png")
+  }
+
+  @Test
   fun `the stepper on a number row moves it without a dialog`() {
     val viewModel = showSettings()
     assertEquals(2, viewModel.editorSettings.value.tabSize)
@@ -202,7 +244,7 @@ class SettingsScreenTest {
       "editor_font_size", "editor_line_height", "editor_tab_size", "editor_use_spaces",
       "editor_word_wrap", "editor_auto_save", "editor_format_on_save",
       "editor_bracket_matching", "editor_code_folding", "editor_touch_shortcuts",
-      "syntax_theme", "editor_line_numbers", "editor_active_line", "editor_minimap",
+      "ui_theme", "syntax_theme", "editor_line_numbers", "editor_active_line", "editor_minimap",
       "show_tool_json", "show_context_usage",
       "background_execution", "background_wakelock", "terminal_hold", "background_checks",
       "alert_approval", "alert_interrupted", "alert_update",

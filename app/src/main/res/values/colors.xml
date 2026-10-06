@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="ic_launcher_background">#000E21</color>
-    <!-- The window is dark before Compose draws, so this is the cold-start colour. -->
+    <!-- The cold-start colour, before the activity has read which theme is stored:
+         MainActivity repaints the window from the chosen palette on the first frame. -->
     <color name="awaki_window_background">#FF090D16</color>
 </resources>

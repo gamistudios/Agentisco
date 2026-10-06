@@ -2,6 +2,7 @@ package com.awaki
 
 import android.Manifest
 import android.content.Intent
+import android.graphics.drawable.ColorDrawable
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -23,8 +24,10 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.ScaffoldDefaults
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
@@ -49,10 +52,26 @@ class MainActivity : ComponentActivity() {
     enableEdgeToEdge()
     recordWorkNotificationEntry()
     setContent {
-      AwakiTheme {
+      val app = LocalContext.current.applicationContext as AwakiApplication
+      val uiTheme by app.uiTheme.collectAsState()
+      // The window is painted before Compose draws anything, and the system bars keep
+      // their own ink: both are the theme's business but outside its composition.
+      LaunchedEffect(uiTheme) { applyWindowChrome(uiTheme) }
+      AwakiTheme(palette = uiTheme) {
         AgentIDEApp()
       }
     }
+  }
+
+  /**
+   * Dress the parts of the screen the activity owns: the cold-start window colour and
+   * whether the status and navigation bars draw dark ink (a light theme) or light ink.
+   */
+  private fun applyWindowChrome(palette: com.awaki.ui.theme.UiPalette) {
+    window.setBackgroundDrawable(ColorDrawable(palette.background.toArgb()))
+    val bars = WindowInsetsControllerCompat(window, window.decorView)
+    bars.isAppearanceLightStatusBars = !palette.dark
+    bars.isAppearanceLightNavigationBars = !palette.dark
   }
 
   // singleTop: a notification tap while the app is alive arrives here rather than

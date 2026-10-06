@@ -69,6 +69,11 @@ class WorkspaceViewModel(
 
   val editorSettings: StateFlow<EditorSettings> = repository.editorSettings
 
+  /** The theme the whole app paints with; the Theme gallery in Settings writes here. */
+  val uiTheme: StateFlow<com.awaki.ui.theme.UiPalette> = repository.uiTheme
+
+  fun setUiTheme(key: String) = repository.setUiTheme(key)
+
   val isAgentWorking: StateFlow<Boolean> = repository.isAgentWorking
   val agentStatusText: StateFlow<String> = repository.agentStatusText
   /** Delegate call id -> whether the user is holding that specialist still. */

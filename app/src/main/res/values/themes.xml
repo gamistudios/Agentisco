@@ -2,8 +2,9 @@
 <resources>
 
     <!--
-      DeviceDefault tracks the system's light/dark mode, but Awaki only ships dark, so a
-      light-mode phone would flash a white window before Compose draws its first frame.
+      DeviceDefault tracks the system's light/dark mode, so a light-mode phone would
+      flash a white window before Compose draws its first frame. The window colour and
+      the system-bar ink are re-dressed from the stored theme by MainActivity.
     -->
     <style name="Theme.Awaki" parent="android:Theme.DeviceDefault.NoActionBar">
         <item name="android:windowBackground">@color/awaki_window_background</item>

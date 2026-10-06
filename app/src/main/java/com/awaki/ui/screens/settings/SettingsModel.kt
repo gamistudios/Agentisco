@@ -42,6 +42,7 @@ enum class SettingsSheet {
   BackgroundChecks,
   AgentTeam,
   Skills,
+  UiTheme,
   SyntaxTheme,
   Updates,
   About

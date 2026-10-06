@@ -68,6 +68,7 @@ import com.awaki.ui.UpdateViewModel
 import com.awaki.ui.components.AgentTeamSection
 import com.awaki.ui.components.SkillSection
 import com.awaki.ui.theme.AwakiTheme
+import com.awaki.ui.theme.uiThemes
 
 /**
  * The detail half of the compact settings screen: anything that is more than one
@@ -120,6 +121,7 @@ fun SettingsSheetHost(
         SettingsSheet.BackgroundChecks -> BackgroundChecksBody(viewModel)
         SettingsSheet.AgentTeam -> AgentTeamBody(viewModel)
         SettingsSheet.Skills -> SkillsBody(viewModel)
+        SettingsSheet.UiTheme -> UiThemeBody(viewModel)
         SettingsSheet.SyntaxTheme -> SyntaxThemeBody(viewModel)
         SettingsSheet.Updates -> UpdatesBody(updateViewModel)
         SettingsSheet.About -> AboutCard()
@@ -715,6 +717,78 @@ private fun RequirementRow(
   }
 }
 
+// ---- UI theme ----
+
+/**
+ * Internal rather than private so the gallery is testable: a bottom sheet cannot be
+ * driven from a Robolectric compose test, so the body is rendered on its own instead.
+ */
+@Composable
+internal fun UiThemeBody(viewModel: WorkspaceViewModel) {
+  val current by viewModel.uiTheme.collectAsState()
+  SheetHeading(
+    title = "Theme",
+    subtitle = "The colours the whole app wears: chat, files, editor chrome, terminal, settings, dialogs and " +
+      "sheets. How the code inside the editor is painted is the separate syntax choice, on the row below.",
+    tag = "txt_ui_theme_sheet"
+  )
+  Column(
+    modifier = Modifier
+      .fillMaxWidth()
+      .clip(RoundedCornerShape(14.dp))
+      .background(MaterialTheme.colorScheme.surface)
+      .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(14.dp))
+  ) {
+    uiThemes.forEachIndexed { index, theme ->
+      val selected = theme.key == current.key
+      Row(
+        modifier = Modifier
+          .fillMaxWidth()
+          .heightIn(min = 52.dp)
+          .clickable { viewModel.setUiTheme(theme.key) }
+          .testTag("row_ui_theme_${theme.key}")
+          .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Column(modifier = Modifier.weight(1f)) {
+          Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+              theme.name,
+              color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+              fontSize = 13.5.sp,
+              fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium
+            )
+            Spacer(modifier = Modifier.width(7.dp))
+            Text(theme.blurb, color = AwakiTheme.extra.textMuted, fontSize = 10.5.sp)
+          }
+          Spacer(modifier = Modifier.height(5.dp))
+          Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            listOf(
+              theme.background,
+              theme.surface,
+              theme.surfaceContainer,
+              theme.primary,
+              theme.secondary,
+              theme.tertiary
+            ).forEach {
+              Box(
+                modifier = Modifier
+                  .size(width = 18.dp, height = 8.dp)
+                  .clip(RoundedCornerShape(2.dp))
+                  .background(it)
+              )
+            }
+          }
+        }
+        if (selected) Text("In use", color = AwakiTheme.extra.textMuted, fontSize = 11.sp)
+      }
+      if (index < uiThemes.lastIndex) {
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
+      }
+    }
+  }
+}
+
 // ---- Syntax theme ----
 
 @Composable
@@ -722,8 +796,8 @@ private fun SyntaxThemeBody(viewModel: WorkspaceViewModel) {
   val settings by viewModel.editorSettings.collectAsState()
   SheetHeading(
     title = "Syntax theme",
-    subtitle = "How code is painted in the editor. The app itself stays dark; this is the one colour choice " +
-      "Awaki offers."
+    subtitle = "How code is painted in the editor. Independent of the app theme above: any syntax palette can " +
+      "sit inside any theme."
   )
   Column(
     modifier = Modifier

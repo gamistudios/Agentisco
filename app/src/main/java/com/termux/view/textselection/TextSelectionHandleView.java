@@ -13,6 +13,8 @@ import android.view.WindowManager;
 import android.widget.PopupWindow;
 
 import com.awaki.R;
+import com.termux.terminal.TerminalColors;
+import com.termux.terminal.TextStyle;
 import com.termux.view.TerminalView;
 
 @SuppressLint("ViewConstructor")
@@ -57,8 +59,8 @@ public class TextSelectionHandleView extends View {
         mCursorController = cursorController;
         mInitialOrientation = initialOrientation;
 
-        mHandleLeftDrawable = getContext().getDrawable(R.drawable.text_select_handle_left_material);
-        mHandleRightDrawable = getContext().getDrawable(R.drawable.text_select_handle_right_material);
+        mHandleLeftDrawable = getContext().getDrawable(R.drawable.text_select_handle_left_material).mutate();
+        mHandleRightDrawable = getContext().getDrawable(R.drawable.text_select_handle_right_material).mutate();
 
         setOrientation(mInitialOrientation);
     }
@@ -274,6 +276,9 @@ public class TextSelectionHandleView extends View {
         final int width = mHandleDrawable.getIntrinsicWidth();
         int height = mHandleDrawable.getIntrinsicHeight();
         mHandleDrawable.setBounds(0, 0, width, height);
+        // Drawn in the terminal's own ink, so a handle stays visible on whatever
+        // background the current UI theme gives the console.
+        mHandleDrawable.setTint(TerminalColors.COLOR_SCHEME.mDefaultColors[TextStyle.COLOR_INDEX_FOREGROUND]);
         mHandleDrawable.draw(c);
     }
 
