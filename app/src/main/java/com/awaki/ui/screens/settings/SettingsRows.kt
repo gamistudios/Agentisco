@@ -246,7 +246,8 @@ fun SettingsSearchField(
   onQueryChange: (String) -> Unit,
   modifier: Modifier = Modifier,
   placeholder: String = "Search settings",
-  tag: String = "input_settings_search"
+  tag: String = "input_settings_search",
+  clearTag: String = "btn_clear_settings_search"
 ) {
   Row(
     modifier = modifier
@@ -285,7 +286,7 @@ fun SettingsSearchField(
         onClick = { onQueryChange("") },
         modifier = Modifier
           .size(28.dp)
-          .testTag("btn_clear_settings_search")
+          .testTag(clearTag)
       ) {
         Icon(Icons.Default.Close, contentDescription = "Clear", tint = AwakiTheme.extra.textMuted, modifier = Modifier.size(15.dp))
       }
@@ -295,7 +296,13 @@ fun SettingsSearchField(
 
 /** A search that matched nothing says so, rather than leaving a blank screen. */
 @Composable
-fun SettingsNoResults(query: String, modifier: Modifier = Modifier) {
+fun SettingsNoResults(
+  query: String,
+  modifier: Modifier = Modifier,
+  noun: String = "setting",
+  hint: String = "Try a shorter word — model, battery, git, theme.",
+  tag: String = "txt_no_settings_results"
+) {
   Column(
     modifier = modifier
       .fillMaxWidth()
@@ -303,12 +310,17 @@ fun SettingsNoResults(query: String, modifier: Modifier = Modifier) {
       .background(MaterialTheme.colorScheme.surface)
       .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(14.dp))
       .padding(horizontal = 14.dp, vertical = 18.dp)
-      .testTag("txt_no_settings_results")
+      .testTag(tag)
   ) {
-    Text("No setting matches \"$query\"", color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+    Text(
+      "No $noun matches \"$query\"",
+      color = MaterialTheme.colorScheme.onSurface,
+      fontSize = 13.sp,
+      fontWeight = FontWeight.Medium
+    )
     Spacer(modifier = Modifier.height(4.dp))
     Text(
-      "Try a shorter word — model, battery, git, theme.",
+      hint,
       color = AwakiTheme.extra.textMuted,
       fontSize = 11.sp,
       lineHeight = 14.sp

@@ -26,7 +26,7 @@ import org.junit.Test
  * palette which looks good in a mockup has contrast.
  *
  * Plain JUnit on purpose: the derivation is arithmetic on [Color] with no Android
- * framework in the path, so all seventeen themes are audited in well under a second.
+ * framework in the path, so all fifty-seven themes are audited in well under a second.
  */
 class UiThemeContrastTest {
 
@@ -230,7 +230,16 @@ class UiThemeContrastTest {
       listOf(
         "nocturne", "midnight", "graphite", "abyss", "evergreen", "ember", "grape", "sail_night",
         "one_dark", "monokai_pro", "tokyo_night", "github_dark",
-        "daylight", "porcelain", "sandstone", "mint", "sail_day"
+        "turquoise_sunset_night", "royal_berry_night", "forest_bloom_night", "cobalt_lemon_night",
+        "rosewood_night", "coral_lagoon_night", "indigo_apricot_night", "meadow_plum_night",
+        "sky_cherry_night", "midnight_orchid_night", "citrus_ink_night", "ocean_terracotta_night",
+        "lilac_moss_night", "peach_navy_night", "pistachio_ink_night", "electric_plum_night",
+        "clay_sky_night", "jade_papaya_night", "denim_peony_night", "butterfly_blue_night",
+        "daylight", "porcelain", "sandstone", "mint", "sail_day",
+        "turquoise_sunset", "royal_berry", "forest_bloom", "cobalt_lemon", "rosewood",
+        "coral_lagoon", "indigo_apricot", "meadow_plum", "sky_cherry", "midnight_orchid",
+        "citrus_ink", "ocean_terracotta", "lilac_moss", "peach_navy", "pistachio_ink",
+        "electric_plum", "clay_sky", "jade_papaya", "denim_peony", "butterfly_blue"
       ),
       uiThemes.map { it.key }
     )

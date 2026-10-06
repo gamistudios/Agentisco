@@ -68,6 +68,7 @@ import com.awaki.ui.UpdateViewModel
 import com.awaki.ui.components.AgentTeamSection
 import com.awaki.ui.components.SkillSection
 import com.awaki.ui.theme.AwakiTheme
+import com.awaki.ui.theme.UiPalette
 import com.awaki.ui.theme.uiThemes
 
 /**
@@ -720,18 +721,51 @@ private fun RequirementRow(
 // ---- UI theme ----
 
 /**
+ * The gallery's own search. Every whitespace-separated word has to match somewhere in
+ * the theme's name, key or blurb, which is the same rule the settings list uses — two
+ * words narrow a fifty-seven row list instead of widening it.
+ */
+internal fun filterUiThemes(themes: List<UiPalette>, query: String): List<UiPalette> {
+  val tokens = query.trim().lowercase().split(Regex("\\s+")).filter { it.isNotEmpty() }
+  if (tokens.isEmpty()) return themes
+  return themes.filter { theme ->
+    val haystack = "${theme.name.lowercase()} ${theme.key} ${theme.blurb.lowercase()}"
+    tokens.all { haystack.contains(it) }
+  }
+}
+
+/**
  * Internal rather than private so the gallery is testable: a bottom sheet cannot be
  * driven from a Robolectric compose test, so the body is rendered on its own instead.
  */
 @Composable
 internal fun UiThemeBody(viewModel: WorkspaceViewModel) {
   val current by viewModel.uiTheme.collectAsState()
+  var query by remember { mutableStateOf("") }
+  val shown = filterUiThemes(uiThemes, query)
   SheetHeading(
     title = "Theme",
     subtitle = "The colours the whole app wears: chat, files, editor chrome, terminal, settings, dialogs and " +
       "sheets. How the code inside the editor is painted is the separate syntax choice, on the row below.",
     tag = "txt_ui_theme_sheet"
   )
+  SettingsSearchField(
+    query = query,
+    onQueryChange = { query = it },
+    placeholder = "Search ${uiThemes.size} themes",
+    tag = "input_ui_theme_search",
+    clearTag = "btn_clear_ui_theme_search"
+  )
+  Spacer(modifier = Modifier.height(10.dp))
+  if (shown.isEmpty()) {
+    SettingsNoResults(
+      query = query,
+      noun = "theme",
+      hint = "Try a colour or a mood — blue, night, warm, berry.",
+      tag = "txt_no_theme_results"
+    )
+    return
+  }
   Column(
     modifier = Modifier
       .fillMaxWidth()
@@ -739,7 +773,7 @@ internal fun UiThemeBody(viewModel: WorkspaceViewModel) {
       .background(MaterialTheme.colorScheme.surface)
       .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(14.dp))
   ) {
-    uiThemes.forEachIndexed { index, theme ->
+    shown.forEachIndexed { index, theme ->
       val selected = theme.key == current.key
       Row(
         modifier = Modifier
@@ -782,7 +816,7 @@ internal fun UiThemeBody(viewModel: WorkspaceViewModel) {
         }
         if (selected) Text("In use", color = AwakiTheme.extra.textMuted, fontSize = 11.sp)
       }
-      if (index < uiThemes.lastIndex) {
+      if (index < shown.lastIndex) {
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
       }
     }

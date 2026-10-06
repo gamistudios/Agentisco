@@ -12,8 +12,10 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
 import com.awaki.data.repository.WorkspaceRepository
 import com.awaki.ui.WorkspaceViewModel
 import com.awaki.ui.screens.settings.UiThemeBody
@@ -41,8 +43,9 @@ import org.robolectric.annotation.GraphicsMode
  * The theme gallery, driven as a body rather than as a sheet: a bottom sheet cannot be
  * opened from a Robolectric compose test, and the sheet scaffold is not what this
  * feature promises. Pinned here: the gallery holds every theme the catalogue has,
- * tapping one repaints the app through the same call the real sheet makes, and the
- * "In use" mark is never on two rows at once.
+ * tapping one repaints the app through the same call the real sheet makes, the "In use"
+ * mark is never on two rows at once, and the search on top narrows the list instead of
+ * scattering it.
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -60,12 +63,15 @@ class UiThemeGalleryTest {
 
   @After
   fun tearDown() {
+    held.closeAll()
     Dispatchers.resetMain()
   }
 
+  private val held = HeldWork()
+
   /** The way the activity wears a theme: the palette is collected, not read once. */
   private fun showGallery(): WorkspaceViewModel {
-    val viewModel = WorkspaceViewModel(WorkspaceRepository(context = null))
+    val viewModel = held.hold(WorkspaceViewModel(WorkspaceRepository(context = null)))
     compose.setContent {
       val theme by viewModel.uiTheme.collectAsState()
       AwakiTheme(palette = theme) {
@@ -105,12 +111,55 @@ class UiThemeGalleryTest {
     assertEquals("graphite", viewModel.uiTheme.value.key)
     assertEquals("the mark moved, it did not multiply", 1, inUseCount())
 
-    // A light theme from the far end of the list: the same call, the other family.
+    // A light theme from deep inside a fifty-seven row list. The search is what brings
+    // it to the tap, which is the flow the search box exists for.
+    compose.onNodeWithTag("input_ui_theme_search").performTextInput("daylight")
     compose.onNodeWithTag("row_ui_theme_daylight").performClick()
     assertEquals("daylight", viewModel.uiTheme.value.key)
     assertEquals(1, inUseCount())
 
+    compose.onNodeWithTag("btn_clear_ui_theme_search").performClick()
     compose.onNodeWithTag("row_ui_theme_nocturne").performClick()
     assertEquals(DefaultUiTheme.key, viewModel.uiTheme.value.key)
+  }
+
+  @Test
+  fun `the search on top narrows the gallery to the themes that match`() {
+    showGallery()
+
+    // Two cuts of one favourite colour, and nothing else.
+    compose.onNodeWithTag("input_ui_theme_search").performTextInput("turquoise")
+    compose.onNodeWithTag("row_ui_theme_turquoise_sunset").assertExists()
+    compose.onNodeWithTag("row_ui_theme_turquoise_sunset_night").assertExists()
+    compose.onNodeWithTag("row_ui_theme_nocturne").assertDoesNotExist()
+    assertEquals("each cut still says whether it is worn", 0, inUseCount())
+
+    // The second word has to match too, so the pair separates the night from the day.
+    compose.onNodeWithTag("btn_clear_ui_theme_search").performClick()
+    compose.onNodeWithTag("input_ui_theme_search").performTextInput("turquoise night")
+    compose.onNodeWithTag("row_ui_theme_turquoise_sunset_night").assertExists()
+    compose.onNodeWithTag("row_ui_theme_turquoise_sunset").assertDoesNotExist()
+
+    // A whole family, by the word its blurb carries: every night cut answers, and no
+    // light theme does.
+    compose.onNodeWithTag("btn_clear_ui_theme_search").performClick()
+    compose.onNodeWithTag("input_ui_theme_search").performTextInput("dark")
+    compose.onNodeWithTag("row_ui_theme_cobalt_lemon_night").assertExists()
+    compose.onNodeWithTag("row_ui_theme_butterfly_blue_night").assertExists()
+    compose.onNodeWithTag("row_ui_theme_cobalt_lemon").assertDoesNotExist()
+    compose.onNodeWithTag("row_ui_theme_graphite").assertDoesNotExist()
+    assertEquals("the theme being worn is still in the results", 1, inUseCount())
+  }
+
+  @Test
+  fun `a query with no theme behind it says so instead of showing an empty sheet`() {
+    showGallery()
+
+    compose.onNodeWithTag("input_ui_theme_search").performTextInput("chartreuse")
+    compose.onNodeWithTag("txt_no_theme_results").assertIsDisplayed()
+    compose.onNodeWithText("No theme matches", substring = true).assertIsDisplayed()
+
+    compose.onNodeWithTag("btn_clear_ui_theme_search").performClick()
+    compose.onNodeWithTag("row_ui_theme_nocturne").assertExists()
   }
 }
