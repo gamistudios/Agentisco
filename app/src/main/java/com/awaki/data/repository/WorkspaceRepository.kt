@@ -278,6 +278,17 @@ class WorkspaceRepository(
     _chatDisplay.value = chatDisplayStore.update { it.copy(showToolJson = visible) }
   }
 
+  // ---- Editor preferences (Settings → Editor, and the editor's own quick panel) ----
+  // Owned here rather than by the view model so the two surfaces that edit these
+  // share one source of truth, and a change survives the process.
+  val editorSettingsStore = com.awaki.data.local.EditorSettingsStore(context)
+  private val _editorSettings = MutableStateFlow(editorSettingsStore.get())
+  val editorSettings: StateFlow<com.awaki.editor.model.EditorSettings> = _editorSettings.asStateFlow()
+
+  fun updateEditorSettings(settings: com.awaki.editor.model.EditorSettings) {
+    _editorSettings.value = editorSettingsStore.update { settings }
+  }
+
   // ---- Projects layout (grid vs. list) ----
   val projectsViewStore = com.awaki.data.local.ProjectsViewStore(context)
   private val _projectsView = MutableStateFlow(projectsViewStore.get())

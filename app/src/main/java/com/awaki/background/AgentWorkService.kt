@@ -136,7 +136,8 @@ class AgentWorkService : Service() {
   private fun postAttentionNotification(work: List<ActiveWork>) {
     val manager = notificationManager() ?: return
     val attention = work.firstOrNull { it.needsAttention }
-    if (attention != null) {
+    val wanted = app?.backgroundExecution?.alerts?.value?.approvalRequested ?: true
+    if (attention != null && wanted) {
       manager.notify(
         WorkNotifications.ATTENTION_NOTIFICATION_ID,
         WorkNotifications.buildAttentionNotification(this, attention)

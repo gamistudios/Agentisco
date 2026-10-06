@@ -15,5 +15,17 @@ data class UserPreferences(
     /** Keep the CPU awake for compute-bound work. Off lets the device sleep. */
     val backgroundWakeLock: Boolean = true,
     /** Timestamp of the one-time notification permission ask, so it is not nagged. */
-    val notificationsAskedAt: Long = 0
+    val notificationsAskedAt: Long = 0,
+    /**
+     * Alerts the user may silence. Each gates exactly one notification the app really
+     * posts; the ongoing foreground-service notice is not among them because Android
+     * requires it while a foreground service is up, and hiding it is not this app's
+     * choice to make.
+     */
+    /** A turn is parked on an approval the user has not answered. */
+    val alertOnApprovalRequested: Boolean = true,
+    /** Work died with an earlier process, and nothing will restart it by itself. */
+    val alertOnInterruptedWork: Boolean = true,
+    /** An update APK finished downloading while the app was off screen. */
+    val alertOnUpdateReady: Boolean = true
 )

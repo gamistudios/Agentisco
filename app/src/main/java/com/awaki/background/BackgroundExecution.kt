@@ -49,6 +49,11 @@ class BackgroundExecution(
   private val _wakeLockEnabled = MutableStateFlow(prefs.preferences.value.backgroundWakeLock)
   val wakeLockEnabled: StateFlow<Boolean> = _wakeLockEnabled.asStateFlow()
 
+  private val _alerts = MutableStateFlow(WorkAlerts.of(prefs.preferences.value))
+
+  /** Which of the app's alerting notifications the user still wants to be interrupted by. */
+  val alerts: StateFlow<WorkAlerts> = _alerts.asStateFlow()
+
   private val _isAppForeground = MutableStateFlow(false)
 
   /** Whether an Awaki activity is visible; decides who may start a screen. */
@@ -115,10 +120,15 @@ class BackgroundExecution(
       val lost = journal.takeInterrupted(processToken, System.currentTimeMillis())
       if (lost.isNotEmpty()) {
         _interruptedWork.value = lost
-        notificationManager()?.notify(
-          WorkNotifications.RECOVERY_NOTIFICATION_ID,
-          WorkNotifications.buildRecoveryNotification(appContext, lost)
-        )
+        // The card in Settings shows the loss either way; only the ping is the user's.
+        if (_alerts.value.interruptedWork) {
+          notificationManager()?.notify(
+            WorkNotifications.RECOVERY_NOTIFICATION_ID,
+            WorkNotifications.buildRecoveryNotification(appContext, lost)
+          )
+        } else {
+          clearRecoveryNotification()
+        }
       } else {
         clearRecoveryNotification()
       }
@@ -138,6 +148,7 @@ class BackgroundExecution(
       prefs.preferences.collect { values ->
         _allowBackgroundExecution.value = values.allowBackgroundExecution
         _wakeLockEnabled.value = values.backgroundWakeLock
+        _alerts.value = WorkAlerts.of(values)
         syncService(registry.active.value)
         refreshPermissions()
       }
@@ -263,6 +274,10 @@ class BackgroundExecution(
    */
   fun showInstallReadyNotification(installIntent: Intent?) {
     if (installIntent == null) return
+    if (!_alerts.value.updateReady) {
+      dismissInstallReadyNotification()
+      return
+    }
     notificationManager()?.notify(
       WorkNotifications.INSTALL_READY_NOTIFICATION_ID,
       WorkNotifications.buildInstallReadyNotification(appContext, installIntent)
@@ -271,6 +286,24 @@ class BackgroundExecution(
 
   fun dismissInstallReadyNotification() {
     runCatching { notificationManager()?.cancel(WorkNotifications.INSTALL_READY_NOTIFICATION_ID) }
+  }
+
+  /** The three switches behind Settings → Execution → Alerts. */
+  fun setAlertApprovalRequested(enabled: Boolean) {
+    prefs.updatePreferences { it.copy(alertOnApprovalRequested = enabled) }
+    // An alert already in the shade was posted under the old choice, and the service
+    // re-publishes only when the work changes — so switching off clears it here.
+    if (!enabled) {
+      runCatching { notificationManager()?.cancel(WorkNotifications.ATTENTION_NOTIFICATION_ID) }
+    }
+  }
+
+  fun setAlertInterruptedWork(enabled: Boolean) {
+    prefs.updatePreferences { it.copy(alertOnInterruptedWork = enabled) }
+  }
+
+  fun setAlertUpdateReady(enabled: Boolean) {
+    prefs.updatePreferences { it.copy(alertOnUpdateReady = enabled) }
   }
 
   private fun syncService(active: List<ActiveWork>) {
@@ -312,5 +345,24 @@ class BackgroundExecution(
 
   private companion object {
     const val TERMINAL_HOLD_ID = "terminal-hold"
+  }
+}
+
+/**
+ * The alerting notifications the user opts into. The ongoing foreground-service
+ * notice is deliberately absent: it is what Android demands while work is held, it
+ * makes no sound, and switching it off would misreport what the service is doing.
+ */
+data class WorkAlerts(
+  val approvalRequested: Boolean,
+  val interruptedWork: Boolean,
+  val updateReady: Boolean
+) {
+  companion object {
+    fun of(prefs: com.awaki.settings.model.UserPreferences): WorkAlerts = WorkAlerts(
+      approvalRequested = prefs.alertOnApprovalRequested,
+      interruptedWork = prefs.alertOnInterruptedWork,
+      updateReady = prefs.alertOnUpdateReady
+    )
   }
 }

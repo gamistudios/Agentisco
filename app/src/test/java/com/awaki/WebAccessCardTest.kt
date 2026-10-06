@@ -12,7 +12,7 @@ import com.awaki.data.local.WebAccessSettings
 import com.awaki.data.local.WebAccessStore
 import com.awaki.data.repository.WorkspaceRepository
 import com.awaki.ui.WorkspaceViewModel
-import com.awaki.ui.screens.WebAccessCard
+import com.awaki.ui.screens.settings.WebAccessCard
 import com.awaki.ui.theme.AwakiTheme
 import com.github.takahirom.roborazzi.RobolectricDeviceQualifiers
 import com.github.takahirom.roborazzi.captureRoboImage

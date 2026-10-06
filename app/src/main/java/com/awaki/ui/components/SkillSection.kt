@@ -17,8 +17,6 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -52,13 +50,16 @@ import com.awaki.ui.theme.TextSecondary
 /**
  * The know-how this workspace can hand the agent.
  *
- * A skill is a file, so this screen is a view of folders rather than of a database:
- * what is listed is what is on disk right now, and writing one here is the same act
- * as creating it by hand or committing it with the repo.
+ * A skill is a file, so this is a view of folders rather than of a database: what is
+ * listed is what is on disk right now, and writing one here is the same act as
+ * creating it by hand or committing it with the repo.
+ *
+ * Rendered inside Settings' "Skills" sheet, which carries the heading and the
+ * explanation, so this holds only the list and its editors.
  */
 @Composable
-fun SkillCard(viewModel: WorkspaceViewModel, modifier: Modifier = Modifier) {
-  // Re-read on each recomposition of the settings screen: cheap, and it picks up
+fun SkillSection(viewModel: WorkspaceViewModel, modifier: Modifier = Modifier) {
+  // Re-read on each recomposition of the sheet: cheap, and it picks up
   // a skill the agent itself just wrote into the project.
   var refresh by remember { mutableStateOf(0) }
   val skills = remember(refresh) { viewModel.skills() }
@@ -66,82 +67,65 @@ fun SkillCard(viewModel: WorkspaceViewModel, modifier: Modifier = Modifier) {
   var creating by remember { mutableStateOf(false) }
   var deleting by remember { mutableStateOf<AgentSkill?>(null) }
 
-  Card(
-    modifier = modifier
-      .fillMaxWidth()
-      .clip(RoundedCornerShape(12.dp))
-      .border(1.dp, DarkBorder, RoundedCornerShape(12.dp))
-      .testTag("card_skills"),
-    colors = CardDefaults.cardColors(containerColor = DarkSurface)
-  ) {
-    Column(modifier = Modifier.padding(14.dp)) {
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
+  Column(modifier = modifier.fillMaxWidth()) {
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.End
+    ) {
+      TextButton(
+        onClick = { creating = true },
+        modifier = Modifier.testTag("btn_new_skill")
       ) {
-        Text("Skills", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-        TextButton(
-          onClick = { creating = true },
-          modifier = Modifier.testTag("btn_new_skill")
-        ) {
-          Icon(Icons.Default.Add, contentDescription = null, tint = ElectricBlue, modifier = Modifier.size(14.dp))
-          Spacer(modifier = Modifier.width(4.dp))
-          Text("New skill", color = ElectricBlue, fontSize = 12.sp)
-        }
+        Icon(Icons.Default.Add, contentDescription = null, tint = ElectricBlue, modifier = Modifier.size(14.dp))
+        Spacer(modifier = Modifier.width(4.dp))
+        Text("New skill", color = ElectricBlue, fontSize = 12.sp)
       }
-      Spacer(modifier = Modifier.height(6.dp))
+    }
+
+    if (skills.isEmpty()) {
       Text(
-        "A skill is a short document you write once - how this project tests, ships, reviews or " +
-          "names things. The agent is shown what each one covers and reads the whole thing before " +
-          "doing that kind of work, so it follows your house rules instead of guessing them.",
+        "No skills yet. One page of instructions is usually enough to change how the agent works " +
+          "in a project you know.",
         color = TextMuted,
         fontSize = 11.sp,
-        lineHeight = 15.sp
+        modifier = Modifier.testTag("txt_no_skills")
       )
-      Spacer(modifier = Modifier.height(12.dp))
-
-      if (skills.isEmpty()) {
-        Text(
-          "No skills yet. One page of instructions is usually enough to change how the agent works " +
-            "in a project you know.",
-          color = TextMuted,
-          fontSize = 11.sp,
-          modifier = Modifier.testTag("txt_no_skills")
-        )
-      } else {
-        skills.forEach { skill ->
-          Row(
-            modifier = Modifier
-              .fillMaxWidth()
-              .padding(vertical = 6.dp)
-              .testTag("row_skill_${skill.name}"),
-            verticalAlignment = Alignment.Top
-          ) {
-            Column(modifier = Modifier.weight(1f)) {
-              Text(skill.displayName, color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-              Text(skill.description, color = TextMuted, fontSize = 11.sp, lineHeight = 14.sp)
-              Text(
-                if (skill.scope == SkillScope.PROJECT) "this project · ${skill.path}" else "every project · ${skill.path}",
-                color = TextSecondary,
-                fontSize = 10.sp
-              )
-            }
-            IconButton(
-              onClick = { editing = skill },
-              modifier = Modifier.size(28.dp).testTag("btn_edit_skill_${skill.name}")
-            ) {
-              Icon(Icons.Default.Edit, contentDescription = "Edit", tint = TextMuted, modifier = Modifier.size(14.dp))
-            }
-            IconButton(
-              onClick = { deleting = skill },
-              modifier = Modifier.size(28.dp).testTag("btn_delete_skill_${skill.name}")
-            ) {
-              Icon(Icons.Default.Delete, contentDescription = "Delete", tint = DangerRed, modifier = Modifier.size(14.dp))
-            }
+    } else {
+      skills.forEach { skill ->
+        Row(
+          modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp)
+            .testTag("row_skill_${skill.name}"),
+          verticalAlignment = Alignment.Top
+        ) {
+          Column(modifier = Modifier.weight(1f)) {
+            Text(skill.displayName, color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            Text(skill.description, color = TextMuted, fontSize = 11.sp, lineHeight = 14.sp)
+            Text(
+              if (skill.scope == SkillScope.PROJECT) "this project · ${skill.path}" else "every project · ${skill.path}",
+              color = TextSecondary,
+              fontSize = 10.sp
+            )
           }
-          if (skill != skills.last()) HorizontalDivider(color = DarkBorderSubtle)
+          IconButton(
+            onClick = { editing = skill },
+            modifier = Modifier
+              .size(28.dp)
+              .testTag("btn_edit_skill_${skill.name}")
+          ) {
+            Icon(Icons.Default.Edit, contentDescription = "Edit", tint = TextMuted, modifier = Modifier.size(14.dp))
+          }
+          IconButton(
+            onClick = { deleting = skill },
+            modifier = Modifier
+              .size(28.dp)
+              .testTag("btn_delete_skill_${skill.name}")
+          ) {
+            Icon(Icons.Default.Delete, contentDescription = "Delete", tint = DangerRed, modifier = Modifier.size(14.dp))
+          }
         }
+        if (skill != skills.last()) HorizontalDivider(color = DarkBorderSubtle)
       }
     }
   }

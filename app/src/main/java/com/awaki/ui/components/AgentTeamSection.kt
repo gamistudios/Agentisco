@@ -2,7 +2,6 @@ package com.awaki.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,10 +18,6 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -45,7 +40,6 @@ import com.awaki.agent.model.AgentRole
 import com.awaki.agent.model.AgentRoles
 import com.awaki.ui.WorkspaceViewModel
 import com.awaki.ui.theme.DarkBackground
-import com.awaki.ui.theme.DarkBorder
 import com.awaki.ui.theme.DarkBorderSubtle
 import com.awaki.ui.theme.DangerRed
 import com.awaki.ui.theme.DarkSurface
@@ -59,76 +53,58 @@ import com.awaki.ui.theme.TextSecondary
  *
  * The built-in seats are the app's and are only shown here: what a user can add
  * is a seat of their own, which `delegate` can name as soon as it is saved.
+ *
+ * Rendered inside Settings' "Agent team" sheet, so it carries no card of its own —
+ * the sheet is already the container.
  */
 @Composable
-fun AgentTeamCard(viewModel: WorkspaceViewModel, modifier: Modifier = Modifier) {
+fun AgentTeamSection(viewModel: WorkspaceViewModel, modifier: Modifier = Modifier) {
   val customAgents by viewModel.customAgents.collectAsState()
   var editorTarget by remember { mutableStateOf<AgentRole?>(null) }
   var editorOpen by remember { mutableStateOf(false) }
   var deleting by remember { mutableStateOf<AgentRole?>(null) }
 
-  Card(
-    modifier = modifier
-      .fillMaxWidth()
-      .clip(RoundedCornerShape(12.dp))
-      .border(1.dp, DarkBorder, RoundedCornerShape(12.dp))
-      .testTag("card_agent_team"),
-    colors = CardDefaults.cardColors(containerColor = DarkSurface)
-  ) {
-    Column(modifier = Modifier.padding(14.dp)) {
-      Text("Agent Team", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-      Spacer(modifier = Modifier.height(6.dp))
+  Column(modifier = modifier.fillMaxWidth()) {
+    Text("Built in", color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+    Spacer(modifier = Modifier.height(6.dp))
+    AgentRoles.builtIn.forEach { role -> AgentRoleRow(role) }
+
+    Spacer(modifier = Modifier.height(12.dp))
+    HorizontalDivider(color = DarkBorderSubtle)
+    Spacer(modifier = Modifier.height(12.dp))
+
+    Row(
+      modifier = Modifier.fillMaxWidth(),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically
+    ) {
+      Text("My agents", color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+      TextButton(
+        onClick = { editorTarget = null; editorOpen = true },
+        modifier = Modifier.testTag("btn_new_agent")
+      ) {
+        Icon(Icons.Default.Add, contentDescription = null, tint = ElectricBlue, modifier = Modifier.size(14.dp))
+        Spacer(modifier = Modifier.width(4.dp))
+        Text("New agent", color = ElectricBlue, fontSize = 12.sp)
+      }
+    }
+
+    if (customAgents.isEmpty()) {
       Text(
-        "A task that needs several kinds of work can be handed to a specialist instead of done " +
-          "all at once. Each one gets its own brief, its own tools and its own slice of the " +
-          "project, and reports back when it is done - so the main agent keeps the overview.",
+        "No agents of your own yet. A specialist you define is delegated to exactly like a " +
+          "built-in one - say \"have the DB reviewer check my migration\" and it will be used.",
         color = TextMuted,
         fontSize = 11.sp,
-        lineHeight = 15.sp
+        lineHeight = 15.sp,
+        modifier = Modifier.testTag("txt_no_custom_agents")
       )
-      Spacer(modifier = Modifier.height(12.dp))
-
-      Text("Built in", color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-      Spacer(modifier = Modifier.height(6.dp))
-      AgentRoles.builtIn.forEach { role -> AgentRoleRow(role) }
-
-      Spacer(modifier = Modifier.height(12.dp))
-      HorizontalDivider(color = DarkBorderSubtle)
-      Spacer(modifier = Modifier.height(12.dp))
-
-      Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically
-      ) {
-        Text("My agents", color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-        TextButton(
-          onClick = { editorTarget = null; editorOpen = true },
-          modifier = Modifier.testTag("btn_new_agent")
-        ) {
-          Icon(Icons.Default.Add, contentDescription = null, tint = ElectricBlue, modifier = Modifier.size(14.dp))
-          Spacer(modifier = Modifier.width(4.dp))
-          Text("New agent", color = ElectricBlue, fontSize = 12.sp)
-        }
-      }
-
-      if (customAgents.isEmpty()) {
-        Text(
-          "No agents of your own yet. A specialist you define is delegated to exactly like a " +
-            "built-in one - say \"have the DB reviewer check my migration\" and it will be used.",
-          color = TextMuted,
-          fontSize = 11.sp,
-          lineHeight = 15.sp,
-          modifier = Modifier.testTag("txt_no_custom_agents")
+    } else {
+      customAgents.forEach { role ->
+        AgentRoleRow(
+          role = role,
+          onEdit = { editorTarget = role; editorOpen = true },
+          onDelete = { deleting = role }
         )
-      } else {
-        customAgents.forEach { role ->
-          AgentRoleRow(
-            role = role,
-            onEdit = { editorTarget = role; editorOpen = true },
-            onDelete = { deleting = role }
-          )
-        }
       }
     }
   }

@@ -67,8 +67,7 @@ class WorkspaceViewModel(
   val hasClosedTabs: StateFlow<Boolean> = _recentlyClosedTabs.map { it.isNotEmpty() }
     .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
-  private val _editorSettings = MutableStateFlow(EditorSettings())
-  val editorSettings: StateFlow<EditorSettings> = _editorSettings.asStateFlow()
+  val editorSettings: StateFlow<EditorSettings> = repository.editorSettings
 
   val isAgentWorking: StateFlow<Boolean> = repository.isAgentWorking
   val agentStatusText: StateFlow<String> = repository.agentStatusText
@@ -88,6 +87,24 @@ class WorkspaceViewModel(
     background?.wakeLockEnabled ?: MutableStateFlow(false)
 
   val terminalHeld: StateFlow<Boolean> = background?.terminalHeld ?: MutableStateFlow(false)
+
+  /** Which of the app's alerting notifications the user still wants to be interrupted by. */
+  val workAlerts: StateFlow<com.awaki.background.WorkAlerts> =
+    background?.alerts ?: MutableStateFlow(
+      com.awaki.background.WorkAlerts(approvalRequested = true, interruptedWork = true, updateReady = true)
+    )
+
+  fun setAlertApprovalRequested(enabled: Boolean) {
+    background?.setAlertApprovalRequested(enabled)
+  }
+
+  fun setAlertInterruptedWork(enabled: Boolean) {
+    background?.setAlertInterruptedWork(enabled)
+  }
+
+  fun setAlertUpdateReady(enabled: Boolean) {
+    background?.setAlertUpdateReady(enabled)
+  }
 
   /** Work a previous process was running when it died, offered back once. */
   val interruptedBackgroundWork: StateFlow<List<com.awaki.background.JournalEntry>> =
@@ -1270,7 +1287,7 @@ class WorkspaceViewModel(
   }
 
   fun updateEditorSettings(settings: EditorSettings) {
-    _editorSettings.value = settings
+    repository.updateEditorSettings(settings)
   }
 
   fun updateEditorContent(content: String) {

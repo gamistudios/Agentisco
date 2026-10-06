@@ -2,7 +2,6 @@ package com.awaki
 
 import android.content.Context
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -14,6 +13,7 @@ import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.unit.dp
@@ -36,7 +36,11 @@ import com.awaki.settings.model.ModelCapabilities
 import com.awaki.ui.WorkspaceViewModel
 import com.awaki.ui.components.LocalModelCard
 import com.awaki.ui.screens.LocalModelsScreen
-import com.awaki.ui.screens.SettingsNavigationCard
+import com.awaki.ui.screens.settings.RowEnd
+import com.awaki.ui.screens.settings.SettingsGroup
+import com.awaki.ui.screens.settings.SettingsItem
+import com.awaki.ui.screens.settings.SettingsRowGroup
+import com.awaki.ui.screens.settings.ValueTone
 import com.awaki.ui.theme.AwakiTheme
 import com.awaki.ui.theme.DarkBackground
 import com.github.takahirom.roborazzi.RobolectricDeviceQualifiers
@@ -278,39 +282,48 @@ class LocalModelsScreenshotTest {
     compose.onRoot().captureRoboImage(filePath = "src/test/screenshots/local_model_tools.png")
   }
 
-  /** The two doorways Settings offers for AI configuration, as the page shows them. */
+  /** The two AI doorways, now rows in the same list as every other setting. */
   @Test
-  fun `the AI doorways in settings are one card each and read as a pair`() {
+  fun `the AI doorways are rows that carry their own count`() {
     compose.setContent {
       AwakiTheme {
         Column(
           modifier = Modifier
             .fillMaxSize()
             .background(DarkBackground)
-            .padding(16.dp),
-          verticalArrangement = Arrangement.spacedBy(16.dp)
+            .padding(16.dp)
         ) {
-          SettingsNavigationCard(
-            icon = Icons.Outlined.Psychology,
-            title = "AI Providers",
-            summary = "3 providers · 12 models",
-            onClick = {},
-            tag = "card_ai_providers"
-          )
-          SettingsNavigationCard(
-            icon = Icons.Outlined.Memory,
-            title = "Local Models",
-            summary = "1 installed · 142 MB on disk",
-            onClick = {},
-            tag = "card_local_models"
+          SettingsRowGroup(
+            listOf(
+              SettingsItem(
+                id = "providers",
+                group = SettingsGroup.AiAgent,
+                title = "Providers",
+                icon = Icons.Outlined.Psychology,
+                detail = "Connections, keys and the models each one offers",
+                end = RowEnd.Value("3 configured", ValueTone.Neutral, "txt_row_providers"),
+                onClick = {}
+              ),
+              SettingsItem(
+                id = "local_models",
+                group = SettingsGroup.AiAgent,
+                title = "Local models",
+                icon = Icons.Outlined.Memory,
+                detail = "Models that run on this device, with no network",
+                end = RowEnd.Value("142 MB", ValueTone.Neutral, "txt_row_local_models"),
+                onClick = {}
+              )
+            )
           )
         }
       }
     }
 
-    compose.onNodeWithText("AI Providers").assertIsDisplayed()
-    compose.onNodeWithText("Local Models").assertIsDisplayed()
-    compose.onNodeWithText("1 installed · 142 MB on disk").assertIsDisplayed()
-    compose.onRoot().captureRoboImage(filePath = "src/test/screenshots/settings_ai_doorways.png")
+    compose.onNodeWithTag("row_providers").assertIsDisplayed()
+    compose.onNodeWithText("3 configured").assertIsDisplayed()
+    compose.onNodeWithTag("row_local_models").assertIsDisplayed()
+    compose.onNodeWithText("Models that run on this device, with no network").assertIsDisplayed()
+    compose.onNodeWithText("142 MB").assertIsDisplayed()
+    compose.onRoot().captureRoboImage(filePath = "src/test/screenshots/settings_ai_rows.png")
   }
 }

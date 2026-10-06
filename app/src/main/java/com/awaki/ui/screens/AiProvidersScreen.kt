@@ -40,10 +40,9 @@ import com.awaki.ui.theme.*
  * Dedicated provider-management surface.
  *
  * Providers and their models can grow long (a dozen providers is normal), and
- * embedding that list in [SettingsScreen] pushed every other setting far below
- * the fold. Settings now holds only a navigation card that opens this screen,
- * so provider management gets the whole scroll area and the rest of Settings
- * stays reachable.
+ * embedding that list in the Settings rows pushed every other setting far below
+ * the fold. Settings now holds only a row that opens this screen, so provider
+ * management gets the whole scroll area and the rest of Settings stays reachable.
  */
 @Composable
 fun AiProvidersScreen(

@@ -36,6 +36,7 @@ import com.awaki.ui.UpdateViewModel
 import com.awaki.ui.WorkspaceViewModel
 import com.awaki.ui.components.*
 import com.awaki.ui.screens.*
+import com.awaki.ui.screens.settings.SettingsScreen
 import com.awaki.ui.theme.DarkBackground
 import com.awaki.ui.theme.AwakiTheme
 import kotlinx.coroutines.Dispatchers
