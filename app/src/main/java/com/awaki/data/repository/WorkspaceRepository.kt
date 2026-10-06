@@ -70,7 +70,12 @@ class WorkspaceRepository(
    * Absent in tests and previews that own no application, where the selectable list is
    * exactly what the durable store holds.
    */
-  private val localAi: com.awaki.local.LocalAiRuntime? = null
+  private val localAi: com.awaki.local.LocalAiRuntime? = null,
+  /**
+   * The agent's front door to the web. Given by a test that drives the settings screen
+   * over a stubbed transport; built here from the durable web-access store otherwise.
+   */
+  private val web: com.awaki.agent.web.WebGateway? = null
 ) {
 
   private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -195,6 +200,72 @@ class WorkspaceRepository(
   fun restoreDefaultIgnoredDirs() {
     scanIgnoreStore.reset()
     _scanIgnoreSettings.value = scanIgnoreStore.get()
+  }
+
+  // ---- Web access (Settings → Web access) ----
+  /**
+   * The agent's front door to the web: Jina.ai first, with whatever keys this device
+   * can spend, and the URL itself after. One instance for the whole repository, so the
+   * request budget the tools are spending is the same one the settings screen reports.
+   */
+  val webAccessStore = com.awaki.data.local.WebAccessStore(context)
+
+  private val _webAccess = MutableStateFlow(webAccessStore.get())
+
+  val webAccess: StateFlow<com.awaki.data.local.WebAccessSettings> = _webAccess.asStateFlow()
+
+  /** The user's own keys as handles, never as secrets. */
+  private val _jinaKeyHandles = MutableStateFlow(webAccessStore.keys().map(::jinaHandle))
+
+  val jinaKeyHandles: StateFlow<List<String>> = _jinaKeyHandles.asStateFlow()
+
+  val webGateway: com.awaki.agent.web.WebGateway = web ?: com.awaki.agent.web.WebGateway(
+    settings = { _webAccess.value },
+    userKeys = { webAccessStore.keys() }
+  )
+
+  fun setPreferJina(enabled: Boolean) {
+    _webAccess.value = webAccessStore.update { it.copy(preferJina = enabled) }
+  }
+
+  /**
+   * Stores every distinct key in [raw] — a paste of several is one gesture — and
+   * returns how many landed, so the screen can say what happened rather than assume.
+   */
+  fun addJinaKeys(raw: String): Int {
+    val added = webAccessStore.addKeys(raw)
+    _jinaKeyHandles.value = webAccessStore.keys().map(::jinaHandle)
+    return added
+  }
+
+  fun removeJinaKey(handle: String): Boolean {
+    val removed = webAccessStore.removeKey(handle)
+    if (removed) _jinaKeyHandles.value = webAccessStore.keys().map(::jinaHandle)
+    return removed
+  }
+
+  private fun jinaHandle(key: String): String =
+    com.awaki.data.local.WebAccessStore.fingerprintOf(key)
+
+  private val _webAccessReport = MutableStateFlow<List<String>>(emptyList())
+
+  /** What actually answers right now, one sentence per tier. */
+  val webAccessReport: StateFlow<List<String>> = _webAccessReport.asStateFlow()
+
+  private val _webAccessChecking = MutableStateFlow(false)
+  val webAccessChecking: StateFlow<Boolean> = _webAccessChecking.asStateFlow()
+
+  /** Costs one reader call, and one search call where a key exists. */
+  fun checkWebAccess() {
+    if (_webAccessChecking.value) return
+    _webAccessChecking.value = true
+    repositoryScope.launch {
+      try {
+        _webAccessReport.value = webGateway.probe()
+      } finally {
+        _webAccessChecking.value = false
+      }
+    }
   }
 
   // ---- Chat display (Settings → Tool activity) ----
@@ -513,6 +584,7 @@ class WorkspaceRepository(
     fileSystem = fileSystem,
     gitManager = gitManager,
     terminalManager = terminalManager,
+    webGateway = webGateway,
     skillStore = skillStore,
     stagedFilesProvider = { _stagedFiles.value },
     onStageFile = { f -> toggleFileStaged(f) },

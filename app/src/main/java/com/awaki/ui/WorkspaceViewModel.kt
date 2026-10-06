@@ -1027,6 +1027,30 @@ class WorkspaceViewModel(
   fun setIgnoredDirsOverride(enabled: Boolean) = repository.setIgnoredDirsOverride(enabled)
   fun restoreDefaultIgnoredDirs() = repository.restoreDefaultIgnoredDirs()
 
+  // ---- Web access (Settings: how the agent reaches the internet) ----
+
+  /** Whether a web tool may hand its URL to Jina.ai before fetching it itself. */
+  val webAccess: StateFlow<com.awaki.data.local.WebAccessSettings> = repository.webAccess
+
+  /** The user's own keys, as handles only — the secret never reaches the UI layer. */
+  val jinaKeyHandles: StateFlow<List<String>> = repository.jinaKeyHandles
+
+  /** Whether the app itself was built with keys to rotate through. */
+  val bundledJinaKeyCount: Int get() = com.awaki.agent.web.bundledAppKeyCount()
+
+  fun setPreferJina(enabled: Boolean) = repository.setPreferJina(enabled)
+
+  /** Returns how many keys were stored, so the screen can report what landed. */
+  fun addJinaKeys(raw: String): Int = repository.addJinaKeys(raw)
+
+  fun removeJinaKey(handle: String): Boolean = repository.removeJinaKey(handle)
+
+  val webAccessReport: StateFlow<List<String>> = repository.webAccessReport
+  val webAccessChecking: StateFlow<Boolean> = repository.webAccessChecking
+
+  /** Ask the tiers what they actually answer with right now. */
+  fun checkWebAccess() = repository.checkWebAccess()
+
   // ---- Agent team (Settings: who the agent may hand work to) ----
 
   /** The user's own specialists; the built-in seats are the app's and not editable. */

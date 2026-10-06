@@ -1,16 +1,13 @@
 package com.awaki.agent.tool
 
-import kotlinx.coroutines.suspendCancellableCoroutine
-import okhttp3.Call
-import okhttp3.Callback
+import com.awaki.agent.web.JinaRead
+import com.awaki.agent.web.JinaSearch
+import com.awaki.agent.web.WEB_TIMEOUT_SECONDS
+import com.awaki.agent.web.WebGateway
+import com.awaki.agent.web.WebHit
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
-import okhttp3.OkHttpClient
 import okhttp3.Request
-import okhttp3.Response
 import org.json.JSONObject
-import java.io.IOException
-import java.util.concurrent.TimeUnit
-import kotlin.coroutines.resume
 
 /**
  * Read a web page as text. The agent's other context sources are the workspace
@@ -19,11 +16,16 @@ import kotlin.coroutines.resume
  *
  * Deliberately narrow: http(s) only, a byte cap, an explicit output budget, and a
  * binary body is named rather than dumped.
+ *
+ * Two routes, in that order: Jina.ai's reader, which hands back markdown instead of a
+ * stripped page and needs no key for twenty fetches a minute, and then the URL fetched
+ * directly. The second route is the one that carries an honest status line, so a page
+ * that is gone still reports as gone rather than as whatever the site renders for it.
  */
-class WebFetchTool(private val client: OkHttpClient? = null) : AgentTool {
+class WebFetchTool(private val web: WebGateway) : AgentTool {
   override val name = "web_fetch"
   override val description =
-    "Fetch an http(s) URL and return its readable text (HTML tags stripped, script/style removed). Use it for documentation, error pages, changelogs and API responses. Binary bodies are refused, and a cut-off is always stated. To find a URL in the first place use web_search."
+    "Fetch an http(s) URL and return its readable text: markdown from the Jina.ai reader where it answers, otherwise the page fetched directly with HTML tags stripped and script/style removed. Use it for documentation, error pages, changelogs and API responses. Binary bodies are refused, and a cut-off is always stated. To find a URL in the first place use web_search."
   override val params = listOf(
     ToolParam("url", "Full URL to fetch, e.g. \"https://example.com/docs\"."),
     ToolParam(
@@ -37,44 +39,69 @@ class WebFetchTool(private val client: OkHttpClient? = null) : AgentTool {
     val rawUrl = args.str("url").trim().trim('<', '>')
     if (rawUrl.isEmpty()) return ToolResult(false, error = "url must be a full http(s) URL.")
     val candidate = if (rawUrl.startsWith("//")) "https:$rawUrl" else rawUrl
-    val request = candidate.toHttpUrlOrNull()?.let { Request.Builder().url(it).get().build() }
+    val target = candidate.toHttpUrlOrNull()
       ?: return ToolResult(
         false,
         error = "Not a fetchable URL: \"${candidate.take(120)}\". Only complete http and https URLs can be read."
       )
     val maxChars = args.optInt("max_chars", DEFAULT_CHARS).coerceIn(1_000, MAX_CHARS)
 
-    val fetched = httpGet(client, request, maxChars)
+    val reader = if (web.readerPreferred) web.read(target.toString(), maxChars) else null
+    if (reader is JinaRead.Served) {
+      val header = buildString {
+        append(reader.finalUrl ?: target)
+        append(" — markdown from Jina.ai")
+        reader.title?.let { append(" — \"").append(it.take(120)).append('"') }
+        append("\n\n")
+      }
+      return ToolResult(
+        success = true,
+        output = ToolOutput.limit(header + reader.markdown.trim(), maxChars, MORE_HINT),
+        metadata = mapOf("via" to "jina.ai", "served_by" to reader.servedBy)
+      )
+    }
+    // A page the reader could not open is still worth dialing directly: a site that
+    // blocks the reader's address may answer a plain client, and only this route knows
+    // which status code the server chose.
+    val readerNote = when (reader) {
+      is JinaRead.Refused -> " The Jina.ai reader reported ${reader.status}: ${reader.message}."
+      is JinaRead.Unavailable -> " The Jina.ai reader did not serve it (${reader.message})."
+      else -> ""
+    }
+
+    val fetched = web.fetch(Request.Builder().url(target).get().build(), maxChars)
       ?: return ToolResult(
         false,
-        error = "Could not fetch $candidate: the connection failed or exceeded ${TIMEOUT_SECONDS}s. Verify the URL, or use run_command (curl) when the Linux environment has network access.",
+        error = "Could not fetch $candidate: the connection failed or exceeded ${WEB_TIMEOUT_SECONDS}s." +
+          readerNote +
+          " Verify the URL, or use run_command (curl) when the Linux environment has network access.",
         exitCode = -1
       )
 
     val body = if (fetched.contentType.isHtmlLike()) fetched.text.stripHtml() else fetched.text
     val header = "${fetched.finalUrl} — HTTP ${fetched.status}, ${fetched.contentType.ifBlank { "unknown type" }}\n\n"
-    val hint = if (fetched.truncated) "the response was larger than the read cap; raise max_chars or fetch a deeper URL"
-    else "raise max_chars, or fetch a deeper URL, for more"
+    val hint = if (fetched.truncated) CAP_HINT else MORE_HINT
     val output = ToolOutput.limit(header + body, maxChars, hint)
     if (fetched.status !in 200..299) {
       return ToolResult(
         success = false,
         error = "HTTP ${fetched.status} for ${fetched.finalUrl}",
         output = output,
-        metadata = mapOf("status" to fetched.status.toString())
+        metadata = mapOf("status" to fetched.status.toString(), "via" to "direct")
       )
     }
     return ToolResult(
       success = true,
       output = output,
-      metadata = mapOf("status" to fetched.status.toString())
+      metadata = mapOf("status" to fetched.status.toString(), "via" to "direct")
     )
   }
 
   companion object {
     const val DEFAULT_CHARS = 12_000
     const val MAX_CHARS = 60_000
-    const val MAX_BYTES_TO_READ = 2_000_000L
+    private const val MORE_HINT = "raise max_chars, or fetch a deeper URL, for more"
+    private const val CAP_HINT = "the response was larger than the read cap; raise max_chars or fetch a deeper URL"
   }
 }
 
@@ -83,11 +110,15 @@ class WebFetchTool(private val client: OkHttpClient? = null) : AgentTool {
  * the error text but rarely the canonical page for it; guessing a URL produces a
  * 404 and a second guess, so search is a separate step with its own honest
  * failure: no parsed results is reported as such rather than padded with guesses.
+ *
+ * Jina.ai answers with real titles, links and snippets but refuses an anonymous
+ * call, so DuckDuckGo's flat result page is both the fallback and the whole answer
+ * on a device with no key.
  */
-class WebSearchTool(private val client: OkHttpClient? = null) : AgentTool {
+class WebSearchTool(private val web: WebGateway) : AgentTool {
   override val name = "web_search"
   override val description =
-    "Search the web and get back titles, URLs and short snippets. Use it to find the documentation, issue or changelog for an error message or library, then web_fetch the URL that looks right. Returns at most $MAX_RESULTS results; when the engine does not answer it says so instead of inventing links."
+    "Search the web and get back titles, URLs and short snippets (Jina.ai search where a key is configured, DuckDuckGo otherwise). Use it to find the documentation, issue or changelog for an error message or library, then web_fetch the URL that looks right. Returns at most $MAX_RESULTS results; when the engine does not answer it says so instead of inventing links."
   override val params = listOf(
     ToolParam("query", "Search terms, e.g. \"Room android database migration UNIQUE constraint\"."),
     ToolParam(
@@ -101,6 +132,24 @@ class WebSearchTool(private val client: OkHttpClient? = null) : AgentTool {
     val query = args.str("query").trim()
     if (query.isEmpty()) return ToolResult(false, error = "query must be a non-empty search phrase.")
     val wanted = args.optInt("max_results", DEFAULT_RESULTS).coerceIn(1, MAX_RESULTS)
+
+    var engineNote = ""
+    if (web.searchPreferred) {
+      when (val found = web.search(query, wanted)) {
+        is JinaSearch.Served -> return ToolResult(
+          success = true,
+          output = ToolOutput.limit(
+            renderHits(query, found.hits),
+            ToolOutput.LIST_CHARS,
+            "raise max_results or narrow the query"
+          ),
+          metadata = mapOf("results" to found.hits.size.toString(), "via" to "jina.ai", "served_by" to found.servedBy)
+        )
+
+        is JinaSearch.Unavailable -> engineNote = " The Jina.ai search did not answer (${found.message})."
+      }
+    }
+
     val request = Request.Builder()
       .url(
         okhttp3.HttpUrl.Builder()
@@ -111,16 +160,17 @@ class WebSearchTool(private val client: OkHttpClient? = null) : AgentTool {
       .get()
       .build()
 
-    val fetched = httpGet(client, request, SNAPSHOT_CHARS)
+    val fetched = web.fetch(request, SNAPSHOT_CHARS)
       ?: return ToolResult(
         false,
-        error = "Search for \"$query\" failed: the connection to $SEARCH_HOST did not complete within ${TIMEOUT_SECONDS}s. Use run_command (curl) when the Linux environment has network.",
+        error = "Search for \"$query\" failed: the connection to $SEARCH_HOST did not complete within " +
+          "${WEB_TIMEOUT_SECONDS}s.$engineNote Use run_command (curl) when the Linux environment has network.",
         exitCode = -1
       )
     if (fetched.status !in 200..299) {
       return ToolResult(
         success = false,
-        error = "Search for \"$query\" returned HTTP ${fetched.status} — the engine refused the request.",
+        error = "Search for \"$query\" returned HTTP ${fetched.status} — the engine refused the request.$engineNote",
         metadata = mapOf("status" to fetched.status.toString(), "results" to "0")
       )
     }
@@ -128,21 +178,20 @@ class WebSearchTool(private val client: OkHttpClient? = null) : AgentTool {
     if (results.isEmpty()) {
       return ToolResult(
         false,
-        error = "Search for \"$query\" returned no readable results, so the engine's page could not be parsed (it may have served a challenge or changed markup). Do not invent links: fetch the project's own documentation with web_fetch, or use run_command (curl) instead.",
+        error = "Search for \"$query\" returned no readable results, so the engine's page could not be parsed " +
+          "(it may have served a challenge or changed markup).$engineNote Do not invent links: fetch the " +
+          "project's own documentation with web_fetch, or use run_command (curl) instead.",
         metadata = mapOf("results" to "0")
       )
     }
-    val out = StringBuilder("Search results for \"$query\":\n")
-    results.forEachIndexed { index, result ->
-      out.appendLine("${index + 1}. ${result.title}")
-      out.appendLine("   ${result.url}")
-      if (result.snippet.isNotBlank()) out.appendLine("   ${result.snippet}")
-    }
-    out.append("\nRead one of these with web_fetch before acting on it.")
     return ToolResult(
       success = true,
-      output = ToolOutput.limit(out.toString().trimEnd(), ToolOutput.LIST_CHARS, "raise max_results or narrow the query"),
-      metadata = mapOf("results" to results.size.toString())
+      output = ToolOutput.limit(
+        renderHits(query, results),
+        ToolOutput.LIST_CHARS,
+        "raise max_results or narrow the query"
+      ),
+      metadata = mapOf("results" to results.size.toString(), "via" to "duckduckgo")
     )
   }
 
@@ -153,11 +202,20 @@ class WebSearchTool(private val client: OkHttpClient? = null) : AgentTool {
     private const val SNAPSHOT_CHARS = 60_000
     private const val USER_AGENT =
       "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+
+    /** Both engines answer in the same shape, so the model reads one format. */
+    private fun renderHits(query: String, hits: List<WebHit>): String {
+      val out = StringBuilder("Search results for \"$query\":\n")
+      hits.forEachIndexed { index, hit ->
+        out.appendLine("${index + 1}. ${hit.title}")
+        out.appendLine("   ${hit.url}")
+        if (hit.snippet.isNotBlank()) out.appendLine("   ${hit.snippet}")
+      }
+      out.append("\nRead one of these with web_fetch before acting on it.")
+      return out.toString().trimEnd()
+    }
   }
 }
-
-/** One search hit, already reduced to what the model needs to pick a link. */
-internal data class SearchResult(val title: String, val url: String, val snippet: String)
 
 private val RESULT_LINK = Regex(
   "(?is)<a[^>]*class=\"[^\"]*result__a[^\"]*\"[^>]*href=\"([^\"]*)\"[^>]*>(.*?)</a>"
@@ -173,8 +231,8 @@ private const val SNIPPET_WINDOW = 1_200
  * rather than tree-based on purpose: the markup is a flat result list, and a
  * link whose target cannot be resolved is skipped instead of reported.
  */
-internal fun parseSearchResults(html: String, limit: Int): List<SearchResult> {
-  val out = ArrayList<SearchResult>(limit)
+internal fun parseSearchResults(html: String, limit: Int): List<WebHit> {
+  val out = ArrayList<WebHit>(limit)
   for (match in RESULT_LINK.findAll(html)) {
     if (out.size >= limit) break
     val url = resolveSearchTarget(match.groupValues[1]) ?: continue
@@ -183,7 +241,7 @@ internal fun parseSearchResults(html: String, limit: Int): List<SearchResult> {
     val snippet = RESULT_SNIPPET
       .find(html.substring(match.range.last, minOf(html.length, match.range.last + SNIPPET_WINDOW)))
       ?.groupValues?.get(1).orEmpty().stripHtml()
-    out.add(SearchResult(title, url, snippet))
+    out.add(WebHit(title, url, snippet))
   }
   return out
 }
@@ -206,86 +264,6 @@ private fun resolveSearchTarget(href: String): String? {
 }
 
 private const val ENGINE_HOST_SUFFIX = "duckduckgo.com"
-
-/** Both web tools give the network the same budget. */
-private const val TIMEOUT_SECONDS = 30L
-
-/** One HTTP GET, read under a byte cap. Null means the transport failed. */
-private suspend fun httpGet(client: OkHttpClient?, request: Request, maxChars: Int): HttpBody? {
-  val http = (client ?: sharedClient).newBuilder()
-    .callTimeout(TIMEOUT_SECONDS, TimeUnit.SECONDS)
-    .build()
-  val call = http.newCall(request)
-  return suspendCancellableCoroutine { continuation ->
-    continuation.invokeOnCancellation { call.cancel() }
-    call.enqueue(
-      object : Callback {
-        override fun onFailure(call: Call, e: IOException) {
-          if (continuation.isActive) continuation.resume(null)
-        }
-
-        override fun onResponse(call: Call, response: Response) {
-          val outcome = runCatching { response.use { readBody(it, maxChars) } }.getOrNull()
-          if (continuation.isActive) continuation.resume(outcome)
-        }
-      }
-    )
-  }
-}
-
-/** Result of one HTTP round trip, already size-limited. */
-internal class HttpBody(
-  val status: Int,
-  val contentType: String,
-  val finalUrl: String,
-  val text: String,
-  val truncated: Boolean
-)
-
-/** Reads at most [WebFetchTool.MAX_BYTES_TO_READ] so a huge download cannot exhaust the app. */
-private fun readBody(response: Response, maxChars: Int): HttpBody {
-  val contentType = response.header("Content-Type").orEmpty().lowercase()
-  val url = response.request.url.toString()
-  if (contentType.contains("octet-stream") || contentType.contains("image/") ||
-    contentType.contains("video/") || contentType.contains("audio/") ||
-    contentType.contains("application/pdf") || contentType.contains("zip")
-  ) {
-    return HttpBody(
-      status = response.code,
-      contentType = contentType,
-      finalUrl = url,
-      text = "(refused: this is a ${contentType.substringBefore(';')} file, not text. Download it with run_command if the project needs it.)",
-      truncated = false
-    )
-  }
-  val input = response.body?.byteStream()
-    ?: return HttpBody(response.code, contentType, url, "(empty response body)", false)
-  val builder = StringBuilder()
-  var bytesRead = 0L
-  var truncated = false
-  input.use { stream ->
-    val buffer = ByteArray(8_192)
-    while (true) {
-      val read = stream.read(buffer)
-      if (read < 0) break
-      bytesRead += read
-      if (bytesRead > WebFetchTool.MAX_BYTES_TO_READ || builder.length > maxChars * 2) {
-        truncated = true
-        break
-      }
-      builder.append(String(buffer, 0, read, Charsets.UTF_8))
-    }
-  }
-  return HttpBody(response.code, contentType, url, builder.toString(), truncated)
-}
-
-/** One shared client keeps a single connection pool; call timeouts are per call. */
-private val sharedClient by lazy {
-  OkHttpClient.Builder()
-    .connectTimeout(TIMEOUT_SECONDS, TimeUnit.SECONDS)
-    .readTimeout(TIMEOUT_SECONDS, TimeUnit.SECONDS)
-    .build()
-}
 
 private fun String.isHtmlLike(): Boolean =
   contains("html", ignoreCase = true) || contains("xml", ignoreCase = true)

@@ -15,6 +15,8 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.outlined.BugReport
 import androidx.compose.material.icons.outlined.Calculate
 import androidx.compose.material.icons.outlined.Compress
@@ -35,6 +37,8 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.awaki.BuildConfig
@@ -456,6 +460,11 @@ fun SettingsScreen(
           }
         }
       }
+    }
+
+    // Web access card: which tier answers a web_fetch or web_search
+    item {
+      WebAccessCard(viewModel)
     }
 
     // Notifications Preferences Card
@@ -1284,6 +1293,214 @@ private fun IgnoreChip(
     Icon(
       imageVector = if (struckThrough) Icons.Default.Add else Icons.Default.Close,
       contentDescription = if (struckThrough) "Restore $name" else "Stop skipping $name",
+      tint = TextMuted,
+      modifier = Modifier.size(12.dp)
+    )
+  }
+}
+
+/**
+ * Which tier answers the agent's web tools.
+ *
+ * `web_fetch` asks Jina.ai's reader first — 20 pages a minute with no key at all —
+ * then rotates through the keys below, then fetches the page itself. `web_search`
+ * needs a key for Jina and otherwise scrapes DuckDuckGo. Turning this off means no
+ * third party ever sees the URL a fetch is asked for.
+ */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+internal fun WebAccessCard(viewModel: WorkspaceViewModel) {
+  val settings by viewModel.webAccess.collectAsState()
+  val handles by viewModel.jinaKeyHandles.collectAsState()
+  val report by viewModel.webAccessReport.collectAsState()
+  val checking by viewModel.webAccessChecking.collectAsState()
+  val bundled = viewModel.bundledJinaKeyCount
+  var newKey by remember { mutableStateOf("") }
+  var keyVisible by remember { mutableStateOf(false) }
+  var addNote by remember { mutableStateOf<String?>(null) }
+
+  Card(
+    modifier = Modifier
+      .fillMaxWidth()
+      .clip(RoundedCornerShape(12.dp))
+      .border(1.dp, DarkBorder, RoundedCornerShape(12.dp)),
+    colors = CardDefaults.cardColors(containerColor = DarkSurface)
+  ) {
+    Column(modifier = Modifier.padding(14.dp)) {
+      Text("Web Access (Jina.ai)", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+      Spacer(modifier = Modifier.height(6.dp))
+      Text(
+        "Reader: Jina.ai first (20 pages a minute with no key), then a key, then the page itself. " +
+          "Search: Jina.ai only with a key, otherwise DuckDuckGo.",
+        color = TextMuted,
+        fontSize = 11.sp,
+        lineHeight = 15.sp
+      )
+      Spacer(modifier = Modifier.height(10.dp))
+
+      ToggleRow(
+        title = "Route web tools through Jina.ai",
+        subtitle = if (settings.preferJina)
+          "On: cleaner markdown, and a paid budget is spent only once the free tier is used up."
+        else "Off: the URL is never sent to a third party — pages are fetched and scraped directly.",
+        checked = settings.preferJina,
+        tag = "switch_prefer_jina",
+        onCheckedChange = { viewModel.setPreferJina(it) }
+      )
+
+      HorizontalDivider(color = DarkBorderSubtle, modifier = Modifier.padding(vertical = 10.dp))
+
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Text("Your keys", color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        Text(
+          "rotation: ${handles.size + bundled}",
+          color = TextMuted,
+          fontSize = 11.sp,
+          modifier = Modifier.testTag("txt_jina_rotation")
+        )
+      }
+      Spacer(modifier = Modifier.height(6.dp))
+      if (handles.isEmpty()) {
+        Text(
+          if (bundled > 0) "None of your own. $bundled key${if (bundled > 1) "s" else ""} bundled with this build, plus the free tier."
+          else "None of your own, and this build bundles none — the free tier and the direct route carry every call.",
+          color = TextMuted,
+          fontSize = 11.sp,
+          lineHeight = 14.sp
+        )
+      } else {
+        FlowRow(
+          horizontalArrangement = Arrangement.spacedBy(6.dp),
+          verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+          handles.forEach { handle ->
+            JinaKeyChip(handle = handle, onRemove = { viewModel.removeJinaKey(handle) })
+          }
+        }
+      }
+
+      Spacer(modifier = Modifier.height(10.dp))
+      Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+        OutlinedTextField(
+          value = newKey,
+          onValueChange = { newKey = it; addNote = null },
+          placeholder = { Text("jina_… — paste one or several", color = TextMuted, fontSize = 12.sp) },
+          singleLine = true,
+          visualTransformation = if (keyVisible) VisualTransformation.None else PasswordVisualTransformation(),
+          trailingIcon = {
+            IconButton(
+              onClick = { keyVisible = !keyVisible },
+              modifier = Modifier.testTag("btn_toggle_jina_key_visible")
+            ) {
+              Icon(
+                imageVector = if (keyVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                contentDescription = if (keyVisible) "Hide the key" else "Show the key",
+                tint = TextMuted,
+                modifier = Modifier.size(16.dp)
+              )
+            }
+          },
+          modifier = Modifier
+            .weight(1f)
+            .testTag("input_jina_key"),
+          textStyle = androidx.compose.ui.text.TextStyle(
+            fontSize = 13.sp,
+            color = TextPrimary,
+            fontFamily = FontFamily.Monospace
+          ),
+          shape = RoundedCornerShape(8.dp),
+          colors = OutlinedTextFieldDefaults.colors(
+            focusedBorderColor = ElectricBlue,
+            unfocusedBorderColor = DarkBorder,
+            focusedContainerColor = DarkBackground,
+            unfocusedContainerColor = DarkBackground
+          )
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Button(
+          onClick = {
+            val added = viewModel.addJinaKeys(newKey)
+            addNote = if (added == 0) "Nothing added — that held no key."
+            else "Added $added key${if (added > 1) "s" else ""} to the rotation."
+            newKey = ""
+          },
+          enabled = newKey.isNotBlank(),
+          modifier = Modifier.testTag("btn_add_jina_key"),
+          colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue)
+        ) { Text("Add", fontSize = 12.sp) }
+      }
+      Text(
+        addNote ?: "Keys stay in this device's private storage and go only to jina.ai.",
+        color = if (addNote == null) TextMuted else ElectricBlueGlow,
+        fontSize = 10.sp,
+        lineHeight = 13.sp,
+        modifier = Modifier.testTag("txt_jina_key_note")
+      )
+
+      HorizontalDivider(color = DarkBorderSubtle, modifier = Modifier.padding(vertical = 10.dp))
+
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Column(modifier = Modifier.weight(1f)) {
+          Text("Test what answers now", color = TextPrimary, fontSize = 13.sp)
+          Text(
+            "One reader call, plus one search call where a key is configured.",
+            color = TextMuted,
+            fontSize = 10.sp,
+            lineHeight = 13.sp
+          )
+        }
+        Button(
+          onClick = { viewModel.checkWebAccess() },
+          enabled = !checking,
+          modifier = Modifier.testTag("btn_test_web_access"),
+          colors = ButtonDefaults.buttonColors(
+            containerColor = DarkSurfaceElevated,
+            contentColor = TextPrimary,
+            disabledContainerColor = DarkSurfaceElevated,
+            disabledContentColor = TextMuted
+          ),
+          border = BorderStroke(1.dp, DarkBorder)
+        ) { Text(if (checking) "Checking…" else "Test", fontSize = 12.sp) }
+      }
+
+      if (report.isNotEmpty()) {
+        Spacer(modifier = Modifier.height(8.dp))
+        Column(modifier = Modifier.testTag("txt_web_access_report")) {
+          report.forEach { line ->
+            Text(line, color = TextSecondary, fontSize = 10.sp, lineHeight = 14.sp)
+          }
+        }
+      }
+    }
+  }
+}
+
+/** A key by its handle only: the secret is never rendered, and a tap removes it. */
+@Composable
+private fun JinaKeyChip(handle: String, onRemove: () -> Unit) {
+  Row(
+    verticalAlignment = Alignment.CenterVertically,
+    modifier = Modifier
+      .clip(RoundedCornerShape(6.dp))
+      .background(DarkSurfaceElevated)
+      .border(1.dp, DarkBorderSubtle, RoundedCornerShape(6.dp))
+      .clickable(onClick = onRemove)
+      .padding(horizontal = 8.dp, vertical = 5.dp)
+      .testTag("chip_jina_key_$handle")
+  ) {
+    Text(handle, color = TextPrimary, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+    Spacer(modifier = Modifier.width(5.dp))
+    Icon(
+      imageVector = Icons.Default.Close,
+      contentDescription = "Remove the key $handle",
       tint = TextMuted,
       modifier = Modifier.size(12.dp)
     )

@@ -2,8 +2,15 @@ package com.awaki
 
 import com.awaki.agent.tool.WebFetchTool
 import com.awaki.agent.tool.stripHtml
+import com.awaki.agent.web.WebGateway
+import com.awaki.data.local.WebAccessSettings
+import com.awaki.data.local.WebAccessStore
 import kotlinx.coroutines.runBlocking
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
+import okhttp3.Protocol
+import okhttp3.Request
+import okhttp3.ResponseBody.Companion.toResponseBody
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -39,7 +46,7 @@ class WebFetchToolTest {
       <ul><li>step one</li><li>step two</li></ul></body></html>
     """.trimIndent()
     val result = runBlocking {
-      WebFetchTool(stubHttp(200, "text/html; charset=utf-8", html))
+      WebFetchTool(WebGateway.direct(stubHttp(200, "text/html; charset=utf-8", html)))
         .execute(args("""{"url": "https://example.com/docs"}"""), contextFor(ws()))
     }
     assertTrue(result.error ?: "", result.success)
@@ -55,7 +62,7 @@ class WebFetchToolTest {
   @Test
   fun `an error page is returned but the call is marked failed`() {
     val result = runBlocking {
-      WebFetchTool(stubHttp(404, "text/html", "<h1>Not Found</h1><p>check the url</p>"))
+      WebFetchTool(WebGateway.direct(stubHttp(404, "text/html", "<h1>Not Found</h1><p>check the url</p>")))
         .execute(args("""{"url": "https://example.com/missing"}"""), contextFor(ws()))
     }
     assertFalse(result.success)
@@ -67,7 +74,7 @@ class WebFetchToolTest {
   @Test
   fun `a binary body is refused instead of dumped into the conversation`() {
     val result = runBlocking {
-      WebFetchTool(stubHttp(200, "application/pdf", "%PDF-1.4 garbage bytes"))
+      WebFetchTool(WebGateway.direct(stubHttp(200, "application/pdf", "%PDF-1.4 garbage bytes")))
         .execute(args("""{"url": "https://example.com/manual.pdf"}"""), contextFor(ws()))
     }
     assertTrue(result.output.contains("refused"))
@@ -78,13 +85,13 @@ class WebFetchToolTest {
   fun `only complete http urls are fetched`() {
     val ctx = contextFor(ws())
     val noScheme = runBlocking {
-      WebFetchTool(stubHttp(200, "text/plain", "ok")).execute(args("""{"url": "example.com/docs"}"""), ctx)
+      WebFetchTool(WebGateway.direct(stubHttp(200, "text/plain", "ok"))).execute(args("""{"url": "example.com/docs"}"""), ctx)
     }
     assertFalse(noScheme.success)
     assertTrue(noScheme.error!!.contains("Not a fetchable URL"))
 
     val fileUrl = runBlocking {
-      WebFetchTool(stubHttp(200, "text/plain", "ok")).execute(args("""{"url": "file:///etc/passwd"}"""), ctx)
+      WebFetchTool(WebGateway.direct(stubHttp(200, "text/plain", "ok"))).execute(args("""{"url": "file:///etc/passwd"}"""), ctx)
     }
     assertFalse(fileUrl.success)
     assertTrue(fileUrl.error!!.contains("http and https"))
@@ -97,7 +104,7 @@ class WebFetchToolTest {
       throw java.net.UnknownHostException("example.com")
     }.build()
     val result = runBlocking {
-      WebFetchTool(broken).execute(args("""{"url": "https://example.com/down"}"""), contextFor(ws()))
+      WebFetchTool(WebGateway.direct(broken)).execute(args("""{"url": "https://example.com/down"}"""), contextFor(ws()))
     }
     assertFalse(result.success)
     assertTrue(result.error!!.contains("Could not fetch"))
@@ -108,5 +115,119 @@ class WebFetchToolTest {
   fun `entity decoding leaves ampersands intact`() {
     assertEquals("a & b", "<p>a &amp; b</p>".stripHtml())
     assertEquals("<tag>", "&lt;tag&gt;".stripHtml())
+  }
+
+  // ---- The Jina.ai tier in front of that route ----
+
+  /**
+   * A gateway over a scripted client. The app's own keys are forced empty: a build on CI
+   * may carry them, and these tests are about which tier answers, not about the secret.
+   */
+  private fun pool(
+    vararg answers: StubAnswer,
+    userKeys: List<String> = emptyList(),
+    capture: (Request) -> Unit = {}
+  ): WebGateway = WebGateway(
+    client = stubHttpScripted(*answers, capture = capture),
+    settings = { WebAccessSettings(preferJina = true) },
+    userKeys = { userKeys },
+    appKeys = { emptyList() }
+  )
+
+  private val readerAnswer = StubAnswer(
+    200,
+    """{"code":200,"data":{"title":"Room migrations","url":"https://developer.android.com/room/migrations","""" +
+      """content":"# Migrations\n\nUse a Migration to change the schema."}}"""
+  )
+
+  @Test
+  fun `the reader's markdown is what the model reads when it answers`() {
+    val sent = mutableListOf<Request>()
+    val result = runBlocking {
+      pool(readerAnswer, capture = { sent.add(it) })
+        .let { WebFetchTool(it) }
+        .execute(args("""{"url": "https://developer.android.com/room/migrations"}"""), contextFor(ws()))
+    }
+    assertTrue(result.output, result.success)
+    assertEquals("the free tier is tried first, so the reader is the only host called",
+      listOf("r.jina.ai"), sent.map { it.url.host })
+    assertTrue(result.output.contains("markdown from Jina.ai"))
+    assertTrue(result.output.contains("Room migrations"))
+    assertTrue(result.output.contains("Use a Migration"))
+    assertEquals("jina.ai", result.metadata["via"])
+    assertEquals("anonymous", result.metadata["served_by"])
+  }
+
+  @Test
+  fun `a reader at its ceiling falls back to fetching the page directly`() {
+    val sent = mutableListOf<Request>()
+    val result = runBlocking {
+      WebFetchTool(
+        pool(
+          StubAnswer(429, """{"code":429,"name":"RateLimitExceedError","status":42900,"message":"Rate limit exceeded"}"""),
+          StubAnswer(200, "<html><body><h1>Migrations</h1><p>Change the schema.</p></body></html>", "text/html"),
+          capture = { sent.add(it) }
+        )
+      ).execute(args("""{"url": "https://developer.android.com/room"}"""), contextFor(ws()))
+    }
+    assertTrue(result.output, result.success)
+    assertEquals("a spent free tier does not end the call — the page itself is read next",
+      listOf("r.jina.ai", "developer.android.com"), sent.map { it.url.host })
+    assertTrue(result.output.contains("Migrations"))
+    assertTrue(result.output.contains("HTTP 200"))
+    assertEquals("direct", result.metadata["via"])
+  }
+
+  @Test
+  fun `a user's key answers when the free tier is spent`() {
+    val sent = mutableListOf<Request>()
+    val result = runBlocking {
+      WebFetchTool(
+        pool(
+          StubAnswer(429, """{"code":429,"name":"RateLimitExceedError","status":42900,"message":"Rate limit exceeded"}"""),
+          readerAnswer,
+          userKeys = listOf("jina_user_key"),
+          capture = { sent.add(it) }
+        )
+      ).execute(args("""{"url": "https://developer.android.com/room/migrations"}"""), contextFor(ws()))
+    }
+    assertTrue(result.output, result.success)
+    assertEquals(
+      "the second call is the key's, and it is the only one carrying a credential",
+      listOf(null, "Bearer jina_user_key"),
+      sent.map { it.header("Authorization") }
+    )
+    assertTrue("the key's answer is what the model reads: ${result.output}", result.output.contains("Room migrations"))
+    assertEquals(WebAccessStore.fingerprintOf("jina_user_key"), result.metadata["served_by"])
+  }
+
+  @Test
+  fun `when neither route reaches the page the model is told both reasons`() {
+    val client = OkHttpClient.Builder().addInterceptor { chain ->
+      val request = chain.request()
+      if (request.url.host == "r.jina.ai") {
+        okhttp3.Response.Builder().request(request).protocol(okhttp3.Protocol.HTTP_1_1)
+          .code(429).message("Error")
+          .header("Content-Type", "application/json")
+          .body("""{"code":429,"name":"RateLimitExceedError","status":42900,"message":"Rate limit exceeded"}"""
+            .toResponseBody("application/json".toMediaType()))
+          .build()
+      } else {
+        throw java.net.UnknownHostException(request.url.host)
+      }
+    }.build()
+    val result = runBlocking {
+      WebGateway(
+        client = client,
+        settings = { WebAccessSettings(preferJina = true) },
+        appKeys = { emptyList() }
+      ).let { WebFetchTool(it) }
+        .execute(args("""{"url": "https://developer.android.com/room"}"""), contextFor(ws()))
+    }
+    assertFalse(result.success)
+    val error = result.error!!
+    assertTrue(error, error.contains("Could not fetch"))
+    assertTrue(error.contains("rate-limited"))
+    assertTrue(error.contains("run_command"))
   }
 }

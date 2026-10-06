@@ -127,3 +127,37 @@ internal fun stubHttp(
     .body(body.toResponseBody(contentType.toMediaType()))
     .build()
 }.build()
+
+/** One scripted HTTP answer, with whatever headers a tier chooses to state. */
+internal data class StubAnswer(
+  val status: Int,
+  val body: String,
+  val contentType: String = "application/json",
+  val headers: Map<String, String> = emptyMap()
+)
+
+/**
+ * An HTTP client that answers its first request from the first entry, its second from
+ * the next, and any later request with the last one. This is how a key pool is tested:
+ * what matters is not the contents of one response but which identity the *next*
+ * request is made with.
+ */
+internal fun stubHttpScripted(
+  vararg answers: StubAnswer,
+  capture: (okhttp3.Request) -> Unit = {}
+): okhttp3.OkHttpClient {
+  val index = java.util.concurrent.atomic.AtomicInteger(0)
+  return okhttp3.OkHttpClient.Builder().addInterceptor { chain ->
+    capture(chain.request())
+    val answer = answers[index.getAndIncrement().coerceAtMost(answers.lastIndex)]
+    okhttp3.Response.Builder()
+      .request(chain.request())
+      .protocol(okhttp3.Protocol.HTTP_1_1)
+      .code(answer.status)
+      .message(if (answer.status in 200..299) "OK" else "Error")
+      .header("Content-Type", answer.contentType)
+      .apply { answer.headers.forEach { (name, value) -> header(name, value) } }
+      .body(answer.body.toResponseBody(answer.contentType.toMediaType()))
+      .build()
+  }.build()
+}

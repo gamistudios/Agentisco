@@ -32,8 +32,13 @@ class AgentToolRegistry(
   private val onUnstageAll: () -> Unit,
   /** Extra tools appended to the built-in set (used by tests). */
   private val extraTools: List<AgentTool> = emptyList(),
-  /** Injected for tests; production uses the shared client inside [WebFetchTool]. */
-  private val webClient: okhttp3.OkHttpClient? = null,
+  /**
+   * The web layer the two web tools read through: Jina.ai first, the URL itself after.
+   * Production passes the repository's instance so a Settings change lands on the same
+   * request budget the agent is spending; a test that never calls a web tool may leave
+   * the default, which is an unconfigured pool.
+   */
+  private val webGateway: com.awaki.agent.web.WebGateway = com.awaki.agent.web.WebGateway(),
   /** Set when a runtime exists to run delegated work; without it there is no `delegate` tool. */
   private val subagentLauncher: SubagentLauncher? = null,
   /** The team the delegate tool offers, including any custom agent the user defined. */
@@ -76,8 +81,8 @@ class AgentToolRegistry(
     GitCommitTool(gitManager, stagedFilesProvider),
     BuildTool(terminalManager),
     TestTool(terminalManager),
-    WebFetchTool(webClient),
-    WebSearchTool(webClient),
+    WebFetchTool(webGateway),
+    WebSearchTool(webGateway),
     AskUserTool(),
     UseSkillTool(skillStore)
   ) + extraTools + listOfNotNull(subagentLauncher?.let { SubagentTool(it, subagentRoles) })
@@ -113,7 +118,7 @@ class AgentToolRegistry(
     onStageFile = onStageFile,
     onStageAll = onStageAll,
     onUnstageAll = onUnstageAll,
-    webClient = webClient,
+    webGateway = webGateway,
     restrictTo = delegatedToolsFor(role)
   )
 
@@ -153,7 +158,7 @@ class AgentToolRegistry(
     onStageAll = onStageAll,
     onUnstageAll = onUnstageAll,
     extraTools = extraTools,
-    webClient = webClient,
+    webGateway = webGateway,
     skillStore = skillStore,
     restrictTo = names
   )

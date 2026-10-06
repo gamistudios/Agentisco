@@ -149,6 +149,8 @@ git clone <url>
 
 # Release build — requires keystore env/`.env` entries:
 #   AWAKI_KEYSTORE_PATH / _PASSWORD / _KEY_ALIAS / _KEY_PASSWORD
+# Optional: JINA_API_KEYS (comma- or newline-separated) bakes web-reader keys into
+# the build so devices without their own key still get authenticated Jina.ai calls.
 # See KEYSTORE_SETUP.md and generate-keystore.sh.
 ./gradlew :app:assembleRelease
 ```
@@ -164,6 +166,7 @@ git clone <url>
 ## Security notes
 
 - API keys are stored separately from provider config in app-private storage and never committed; the release keystore and `GITHUB_SECRETS.txt` must stay out of version control — CI credentials belong in GitHub Actions secrets.
+- `web_fetch`/`web_search` ask Jina.ai first — the anonymous tier, then the keys in rotation (the user's own before any baked into the build) — and fall back to fetching the page directly. Settings → Web Access holds the switch, the keys (shown as fingerprints only) and a live test of which tier answers. A key is sent only to `*.jina.ai` and is stripped before a redirect leaves that host; anything baked in via `JINA_API_KEYS` ships inside the APK and is extractable, so use keys that are cheap to revoke.
 - The agent's destructive-command guard plus per-mode approval policies are the safety boundary for autonomous file and shell operations; `delete_file` always requires explicit approval.
 
 # Developer

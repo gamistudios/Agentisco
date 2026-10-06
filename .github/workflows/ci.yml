@@ -317,6 +317,10 @@ jobs:
           AGENTISCO_KEYSTORE_PASSWORD: android
           AGENTISCO_KEY_ALIAS: androiddebugkey
           AGENTISCO_KEY_PASSWORD: android
+          # Baked into BuildConfig so a device with no key of its own still gets
+          # authenticated Jina.ai calls. Unset is fine: the free tier and the direct
+          # route carry every call.
+          JINA_API_KEYS: ${{ secrets.JINA_API_KEYS }}
         run: ./gradlew assembleDebug --stacktrace
 
       # Only runs for a release. Keystore is decoded to RUNNER_TEMP (outside the
@@ -360,6 +364,9 @@ jobs:
           AGENTISCO_KEYSTORE_PASSWORD: ${{ secrets.AGENTISCO_KEYSTORE_PASSWORD }}
           AGENTISCO_KEY_ALIAS: ${{ secrets.AGENTISCO_KEY_ALIAS }}
           AGENTISCO_KEY_PASSWORD: ${{ secrets.AGENTISCO_KEY_PASSWORD }}
+          # Shipped inside the APK, so it is extractable by anyone who unpacks it:
+          # use keys that are cheap to revoke and rotate, never a paid account's only key.
+          JINA_API_KEYS: ${{ secrets.JINA_API_KEYS }}
         run: ./gradlew assembleRelease bundleRelease --stacktrace
 
       - name: Remove Release Keystore

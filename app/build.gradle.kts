@@ -10,6 +10,30 @@ plugins {
   // alias(libs.plugins.google.services)
 }
 
+// Secrets that belong to the build itself — signing credentials, and the Jina.ai
+// keys the app rotates through when its free reader budget runs out — come from
+// environment variables (CI sets these from repository secrets), falling back to
+// the local, git-ignored .env file so `./gradlew assembleRelease` works on a dev
+// machine without manual exports. Nothing here is ever committed.
+val envFile = rootProject.file(".env")
+val envVars: Map<String, String> = if (envFile.exists()) {
+  envFile.readLines()
+    .filter { it.contains('=') && !it.trimStart().startsWith("#") }
+    .associate { line ->
+      val idx = line.indexOf('=')
+      line.substring(0, idx).trim() to line.substring(idx + 1).trim()
+    }
+} else {
+  emptyMap()
+}
+
+fun buildSecret(name: String): String? =
+  System.getenv(name)?.takeIf { it.isNotBlank() } ?: envVars[name]?.takeIf { it.isNotBlank() }
+
+/** A string literal for buildConfigField, with anything that would end it early escaped. */
+fun buildConfigString(value: String): String =
+  "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+
 android {
   namespace = "com.awaki"
   compileSdk { version = release(36) { minorApiLevel = 1 } }
@@ -47,51 +71,49 @@ android {
       "UPDATE_API_BASE_URL",
       "\"${System.getenv("UPDATE_API_BASE_URL") ?: "https://awakiai.onrender.com"}\""
     )
+    // The app's own Jina.ai keys, comma-separated. They are what the web tools rotate
+    // to once a device's free reader budget (20 pages a minute, no key at all) runs
+    // out, and they are what makes authenticated search possible at all. An unset
+    // build is simply "no bundled keys": the free tier and the direct fallback keep
+    // working, and only a user's own key can enable Jina search.
+    //
+    // Whatever is compiled into a buildConfigField ships inside the APK and can be read
+    // back out of it by anyone who installs the app, so budget these keys accordingly:
+    // several in the pool, each cheap to revoke, is what makes that survivable.
+    buildConfigField(
+      "String",
+      "JINA_API_KEYS",
+      buildConfigString(buildSecret("JINA_API_KEYS").orEmpty())
+    )
   }
 
-  // Release signing credentials come from environment variables (set by CI from
-  // repository secrets: AGENTISCO_KEYSTORE_PATH — itself decoded at runtime from
+  // Release signing credentials come from the same environment/.env lookup as the
+  // keys above: AGENTISCO_KEYSTORE_PATH — itself decoded at runtime from
   // AGENTISCO_KEYSTORE_BASE64 — plus AGENTISCO_KEYSTORE_PASSWORD,
-  // AGENTISCO_KEY_ALIAS, AGENTISCO_KEY_PASSWORD), falling back to the local,
-  // git-ignored .env file so `./gradlew assembleRelease` signs on a dev machine
-  // without manual exports. The keystore itself is never committed.
-  val envFile = rootProject.file(".env")
-  val envVars: Map<String, String> = if (envFile.exists()) {
-    envFile.readLines()
-      .filter { it.contains('=') && !it.trimStart().startsWith("#") }
-      .associate { line ->
-        val idx = line.indexOf('=')
-        line.substring(0, idx).trim() to line.substring(idx + 1).trim()
-      }
-  } else {
-    emptyMap()
-  }
-
-  fun signingSecret(name: String): String? =
-    System.getenv(name)?.takeIf { it.isNotBlank() } ?: envVars[name]?.takeIf { it.isNotBlank() }
-
-  val releaseKeystorePath: String? = signingSecret("AGENTISCO_KEYSTORE_PATH")
+  // AGENTISCO_KEY_ALIAS and AGENTISCO_KEY_PASSWORD. The keystore itself is never
+  // committed.
+  val releaseKeystorePath: String? = buildSecret("AGENTISCO_KEYSTORE_PATH")
 
   signingConfigs {
     create("release") {
       if (releaseKeystorePath != null) {
         storeFile = file(releaseKeystorePath)
-        storePassword = signingSecret("AGENTISCO_KEYSTORE_PASSWORD")
-        keyAlias = signingSecret("AGENTISCO_KEY_ALIAS")
-        keyPassword = signingSecret("AGENTISCO_KEY_PASSWORD")
+        storePassword = buildSecret("AGENTISCO_KEYSTORE_PASSWORD")
+        keyAlias = buildSecret("AGENTISCO_KEY_ALIAS")
+        keyPassword = buildSecret("AGENTISCO_KEY_PASSWORD")
       }
     }
     create("debugConfig") {
-      val debugPath = signingSecret("AGENTISCO_KEYSTORE_PATH")
+      val debugPath = buildSecret("AGENTISCO_KEYSTORE_PATH")
         ?: "${rootDir}/debug.keystore"
 
-      val debugStorePass = signingSecret("AGENTISCO_KEYSTORE_PASSWORD")
+      val debugStorePass = buildSecret("AGENTISCO_KEYSTORE_PASSWORD")
         ?: "android"
 
-      val debugKeyAlias = signingSecret("AGENTISCO_KEY_ALIAS")
+      val debugKeyAlias = buildSecret("AGENTISCO_KEY_ALIAS")
         ?: "androiddebugkey"
 
-      val debugKeyPass = signingSecret("AGENTISCO_KEY_PASSWORD")
+      val debugKeyPass = buildSecret("AGENTISCO_KEY_PASSWORD")
         ?: "android"
 
       storeFile = file(debugPath as String)

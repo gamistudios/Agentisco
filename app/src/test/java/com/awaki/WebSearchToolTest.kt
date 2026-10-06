@@ -3,6 +3,8 @@ package com.awaki
 import com.awaki.agent.tool.ToolResult
 import com.awaki.agent.tool.WebSearchTool
 import com.awaki.agent.tool.parseSearchResults
+import com.awaki.agent.web.WebGateway
+import com.awaki.data.local.WebAccessSettings
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
 import org.junit.After
@@ -56,7 +58,7 @@ class WebSearchToolTest {
     val captured = mutableListOf<okhttp3.Request>()
     val client = stubHttp(200, "text/html; charset=utf-8", html) { captured.add(it) }
     val result = runBlocking {
-      WebSearchTool(client).execute(args(arguments), contextFor(ws()))
+      WebSearchTool(WebGateway.direct(client)).execute(args(arguments), contextFor(ws()))
     }
     assertEquals(1, captured.size)
     assertEquals("html.duckduckgo.com", captured[0].url.host)
@@ -131,7 +133,7 @@ class WebSearchToolTest {
   fun `a refused search is reported with its status`() {
     val captured = mutableListOf<okhttp3.Request>()
     val result = runBlocking {
-      WebSearchTool(stubHttp(403, "text/html", "<html>blocked</html>") { captured.add(it) })
+      WebSearchTool(WebGateway.direct(stubHttp(403, "text/html", "<html>blocked</html>") { captured.add(it) }))
         .execute(args("""{"query": "room migration"}"""), contextFor(ws()))
     }
     assertFalse(result.success)
@@ -146,7 +148,7 @@ class WebSearchToolTest {
       throw java.net.SocketTimeoutException("timeout")
     }.build()
     val result = runBlocking {
-      WebSearchTool(broken).execute(args("""{"query": "room migration"}"""), contextFor(ws()))
+      WebSearchTool(WebGateway.direct(broken)).execute(args("""{"query": "room migration"}"""), contextFor(ws()))
     }
     assertFalse(result.success)
     assertTrue(result.error!!.contains("run_command"))
@@ -157,7 +159,7 @@ class WebSearchToolTest {
     var sent = 0
     val client = stubHttp(200, "text/html", resultsPage) { sent++ }
     val result = runBlocking {
-      WebSearchTool(client).execute(args("""{"query": "   "}"""), contextFor(ws()))
+      WebSearchTool(WebGateway.direct(client)).execute(args("""{"query": "   "}"""), contextFor(ws()))
     }
     assertFalse(result.success)
     assertTrue(result.error!!.contains("non-empty search phrase"))
@@ -168,9 +170,99 @@ class WebSearchToolTest {
   fun `the query is sent as a search parameter, not pasted into a url`() {
     val captured = mutableListOf<okhttp3.Request>()
     runBlocking {
-      WebSearchTool(stubHttp(200, "text/html", resultsPage) { captured.add(it) })
+      WebSearchTool(WebGateway.direct(stubHttp(200, "text/html", resultsPage) { captured.add(it) }))
         .execute(args("""{"query": "a b&c \"d\""}"""), contextFor(ws()))
     }
     assertEquals("a b&c \"d\"", captured[0].url.queryParameter("q"))
+  }
+
+  // ---- Jina.ai in front of the scrape ----
+
+  /**
+   * The app's bundled keys are forced empty here: CI may build with them, and what is
+   * under test is which engine answers for a device, not what the build happens to carry.
+   */
+  private fun pool(
+    vararg answers: StubAnswer,
+    userKeys: List<String> = emptyList(),
+    capture: (okhttp3.Request) -> Unit = {}
+  ): WebGateway = WebGateway(
+    client = stubHttpScripted(*answers, capture = capture),
+    settings = { WebAccessSettings(preferJina = true) },
+    userKeys = { userKeys },
+    appKeys = { emptyList() }
+  )
+
+  private val jinaSearch = StubAnswer(
+    200,
+    """{"code":200,"data":{"title":"Search","content":"",
+       "associatedLinks":[{"title":"Room migrations","url":"https://developer.android.com/room/migrations",
+       "snippet":"Change the schema across versions."}]}}"""
+  )
+
+  @Test
+  fun `a key makes Jina the engine and leaves the scrape alone`() {
+    val sent = mutableListOf<okhttp3.Request>()
+    val result = runBlocking {
+      WebSearchTool(pool(jinaSearch, userKeys = listOf("jina_user_key"), capture = { sent.add(it) }))
+        .execute(args("""{"query": "room migration"}"""), contextFor(ws()))
+    }
+    assertTrue(result.output, result.success)
+    assertEquals(listOf("s.jina.ai"), sent.map { it.url.host })
+    assertEquals("Bearer jina_user_key", sent[0].header("Authorization"))
+    assertTrue(result.output.contains("https://developer.android.com/room/migrations"))
+    assertTrue(result.output.contains("Change the schema across versions."))
+    assertEquals("jina.ai", result.metadata["via"])
+    assertEquals("1", result.metadata["results"])
+  }
+
+  @Test
+  fun `without a key no call is made to the search service and the scrape answers`() {
+    val sent = mutableListOf<okhttp3.Request>()
+    val result = runBlocking {
+      WebSearchTool(
+        pool(StubAnswer(200, resultsPage, "text/html"), capture = { sent.add(it) })
+      ).execute(args("""{"query": "room migration"}"""), contextFor(ws()))
+    }
+    assertTrue(result.output, result.success)
+    assertEquals("s.jina.ai refuses an anonymous call, so it is never dialled",
+      listOf("html.duckduckgo.com"), sent.map { it.url.host })
+    assertEquals("duckduckgo", result.metadata["via"])
+  }
+
+  @Test
+  fun `a Jina answer with no links in it falls back to the scrape`() {
+    val sent = mutableListOf<okhttp3.Request>()
+    val result = runBlocking {
+      WebSearchTool(
+        pool(
+          StubAnswer(200, """{"code":200,"data":{"title":"Search","content":"Nothing found."}}"""),
+          StubAnswer(200, resultsPage, "text/html"),
+          userKeys = listOf("jina_user_key"),
+          capture = { sent.add(it) }
+        )
+      ).execute(args("""{"query": "room migration"}"""), contextFor(ws()))
+    }
+    assertTrue(result.output, result.success)
+    assertEquals("an empty Jina answer costs one call, then the page is scraped",
+      listOf("s.jina.ai", "html.duckduckgo.com"), sent.map { it.url.host })
+    assertEquals("duckduckgo", result.metadata["via"])
+  }
+
+  @Test
+  fun `both engines refusing says which one did what`() {
+    val result = runBlocking {
+      WebSearchTool(
+        pool(
+          StubAnswer(429, """{"code":429,"name":"RateLimitExceedError","status":42900,"message":"Rate limit exceeded"}"""),
+          StubAnswer(403, "<html>blocked</html>", "text/html"),
+          userKeys = listOf("jina_user_key")
+        )
+      ).execute(args("""{"query": "room migration"}"""), contextFor(ws()))
+    }
+    assertFalse(result.success)
+    assertTrue(result.error!!, result.error.contains("HTTP 403"))
+    assertTrue(result.error!!.contains("Jina.ai search did not answer"))
+    assertEquals("0", result.metadata["results"])
   }
 }
