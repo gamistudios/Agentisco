@@ -6,6 +6,7 @@ import com.awaki.data.local.LocalModelStore
 import com.awaki.data.repository.HttpUpdateStreamSource
 import com.awaki.data.repository.LocalModelInstallState
 import com.awaki.data.repository.LocalModelRepository
+import com.awaki.data.repository.ResumableFileTransfer
 import com.awaki.data.repository.UpdateStream
 import com.awaki.data.repository.UpdateStreamSource
 import com.awaki.local.LocalModelAssetSource
@@ -186,6 +187,18 @@ class LocalModelRepositoryTest {
 
     private fun partialFile(name: String = "lfm-test") = File(File(modelsDir, "partials"), "$name.part")
 
+    /**
+     * Puts [bytes] on disk as an interrupted transfer of the asset named by [identity]
+     * would have left them, marker included: a partial nobody can name is a stale file,
+     * not a resume candidate.
+     */
+    private fun plantPartial(bytes: ByteArray, identity: String?, name: String = "lfm-test") {
+        val partial = partialFile(name)
+        partial.parentFile?.mkdirs()
+        partial.writeBytes(bytes)
+        identity?.let { ResumableFileTransfer.assetMarkerFor(partial).writeText(it) }
+    }
+
     private fun assertSameBytes(expected: ByteArray, file: File) {
         val actual = file.readBytes()
         assertEquals(expected.size, actual.size)
@@ -239,9 +252,21 @@ class LocalModelRepositoryTest {
 
         assertEquals(LocalModelInstallStatus.FAILED, stateOf(repo, model.id).status)
         assertTrue(stateOf(repo, model.id).error!!.contains("expected"))
-        assertFalse(installedFile().exists())
-        assertFalse("a failed transfer must not leave a partial to be adopted", partialFile().exists())
+        assertFalse("only a finished, verified file is an install", installedFile().exists())
         assertTrue(repo.installedModels().isEmpty())
+
+        // The bytes a stalled transfer did receive are work, not garbage, so they stay
+        // put under the marker naming the asset they were started for. They are never
+        // adopted as an install: they only save the next press from starting over.
+        assertEquals(1500L, stateOf(repo, model.id).resumableBytes)
+        assertEquals(1500L, partialFile().length())
+        assertEquals("rev-1", ResumableFileTransfer.assetMarkerFor(partialFile()).readText())
+
+        val resuming = ServingSource(payload)
+        assertTrue(repository(resuming).install(model))
+
+        assertEquals(1500L, resuming.requestedOffsets.first())
+        assertSameBytes(payload, installedFile())
     }
 
     @Test
@@ -303,8 +328,7 @@ class LocalModelRepositoryTest {
     @Test
     fun `a server that ignores Range restarts rather than duplicating bytes`() = runTest {
         val payload = ggufBytes(4096)
-        partialFile().parentFile?.mkdirs()
-        partialFile().writeBytes(payload.copyOfRange(0, 1024))
+        plantPartial(payload.copyOfRange(0, 1024), identity = "rev-1")
 
         val ignoring = ServingSource(payload, rangeIgnored = true)
         val repo = repository(ignoring)
@@ -321,8 +345,7 @@ class LocalModelRepositoryTest {
     @Test
     fun `an interrupted transfer is still resumable after the process restarts`() = runTest {
         val payload = ggufBytes(4096)
-        partialFile().parentFile?.mkdirs()
-        partialFile().writeBytes(payload.copyOfRange(0, 2048))
+        plantPartial(payload.copyOfRange(0, 2048), identity = "rev-1")
         val model = record(remoteSize = payload.size.toLong(), digest = sha256(payload))
         store.upsert(model)
 
@@ -334,6 +357,49 @@ class LocalModelRepositoryTest {
         val completing = repository(ServingSource(payload))
         assertTrue(completing.install(model))
         assertEquals(LocalModelInstallStatus.INSTALLED, stateOf(completing, model.id).status)
+    }
+
+    @Test
+    fun `a partial left by another revision is re-fetched, never continued`() = runTest {
+        val payload = ggufBytes(4096)
+        // Same URL, same length, same GGUF header: the only thing that differs is the
+        // bytes, which is exactly how a weights file is republished.
+        val superseded = payload.copyOf().also { it[600] = 0x55.toByte() }
+        plantPartial(superseded.copyOfRange(0, 2048), identity = "rev-1")
+
+        val model = record(remoteSize = payload.size.toLong(), version = "rev-2")
+        store.upsert(model)
+        assertEquals(
+            "bytes from another revision are not an offer to resume",
+            0L,
+            repository(ServingSource(payload)).partialBytes(model.id)
+        )
+
+        val source = ServingSource(payload)
+        assertTrue(repository(source).install(model))
+
+        // Half of the old revision would have reached the expected size and carried the
+        // GGUF magic, and this model publishes no digest to catch it: the marker naming
+        // the bytes is the whole defence.
+        assertEquals(listOf(0L), source.requestedOffsets)
+        assertSameBytes(payload, installedFile())
+        assertFalse(ResumableFileTransfer.assetMarkerFor(partialFile()).exists())
+    }
+
+    @Test
+    fun `partial bytes that nothing names are re-fetched from zero`() = runTest {
+        val payload = ggufBytes(4096)
+        plantPartial(payload.copyOfRange(0, 2048), identity = null)
+
+        val model = record(remoteSize = payload.size.toLong())
+        store.upsert(model)
+        assertEquals(0L, repository(ServingSource(payload)).partialBytes(model.id))
+
+        val source = ServingSource(payload)
+        assertTrue(repository(source).install(model))
+
+        assertEquals(listOf(0L), source.requestedOffsets)
+        assertSameBytes(payload, installedFile())
     }
 
     @Test

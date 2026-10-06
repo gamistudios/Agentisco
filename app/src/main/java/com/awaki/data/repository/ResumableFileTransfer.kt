@@ -23,7 +23,9 @@ import java.io.RandomAccessFile
  *    asset, and a file that cannot be one is deleted, so nothing foreign or
  *    oversized survives to be mistaken for a finished download;
  *  - a transfer that runs out of attempts keeps the bytes it did get, because
- *    giving up on the network is not the same as the bytes being wrong.
+ *    giving up on the network is not the same as the bytes being wrong — and those
+ *    bytes are only ever continued into the asset they were started for, so a kept
+ *    partial can not be half of one release and half of the next.
  *
  * What differs per artifact is passed in: [Spec.acceptedContents] decides whether
  * the bytes are the right *kind* of file (an APK's ZIP header and package, a
@@ -45,6 +47,12 @@ class ResumableFileTransfer(
    * @param assetSignaturePresent the cheap check: do the first bytes say this could
    *        be our asset at all? Decides which partial files may be resumed, so it
    *        must not read a whole file.
+   * @param assetIdentity names the exact asset these bytes belong to — a release's
+   *        version code, a model's catalog version. Keeping a partial only helps if
+   *        continuing it is safe, and bytes from a different version of the same URL
+   *        can reach the expected size, carry our magic, and still be the wrong file.
+   *        Null means the caller cannot name its asset, and the resume is then judged
+   *        by [assetSignaturePresent] alone.
    * @param acceptedContents returns null when the finished file is usable, otherwise
    *        the reason it is not. Only a positive mismatch should fail here — a fact
    *        the platform cannot read (a manifest it cannot parse) must not.
@@ -58,6 +66,7 @@ class ResumableFileTransfer(
     val expectedSizeBytes: Long = 0L,
     val expectedDigest: String? = null,
     val assetSignaturePresent: (File) -> Boolean = { true },
+    val assetIdentity: String? = null,
     val acceptedContents: (File) -> String? = { null },
     val onProgress: (bytesOnDisk: Long, totalBytes: Long, verified: Boolean) -> Unit = { _, _, _ -> },
     val isCancelled: () -> Boolean = { false }
@@ -79,6 +88,7 @@ class ResumableFileTransfer(
 
   suspend fun run(spec: Spec): Outcome = withContext(Dispatchers.IO) {
     val file = spec.file
+    val assetMarker = assetMarkerFor(file)
     var expectedSize = spec.expectedSizeBytes.takeIf { it > 0L } ?: 0L
     var lastError: String? = null
     var attempt = 0
@@ -101,7 +111,13 @@ class ResumableFileTransfer(
               existingPrefixIsApk = spec.assetSignaturePresent(file)
             )
           }
-          if (offset == 0L) file.delete()
+          // The prefix check says these bytes could be our asset; only the marker
+          // says they are this version of it.
+          if (offset > 0L && !continuesAsset(file, spec.assetIdentity)) offset = 0L
+          if (offset == 0L) {
+            file.delete()
+            assetMarker.delete()
+          }
         }
 
         streamSource.open(spec.url, offset).use { stream ->
@@ -117,6 +133,10 @@ class ResumableFileTransfer(
 
           val startOffset = offset
           val startedAtZero = startOffset == 0L
+          // The marker always says what these bytes currently are: the asset this run
+          // is fetching, or nothing at all when the run cannot name its asset.
+          spec.assetIdentity?.let { identity -> runCatching { assetMarker.writeText(identity) } }
+            ?: assetMarker.delete()
           spec.onProgress(startOffset, expectedSize, false)
 
           RandomAccessFile(file, "rw").use { raf ->
@@ -155,6 +175,7 @@ class ResumableFileTransfer(
           spec.acceptedContents(file)?.let { reason -> throw Exception(reason) }
 
           spec.onProgress(bytesOnDisk, expectedSize, true)
+          assetMarker.delete()
           return@withContext Outcome.Completed(bytesOnDisk, expectedSize)
         }
       } catch (e: AbortedException) {
@@ -178,7 +199,10 @@ class ResumableFileTransfer(
     val resumable = expectedSize > 0L &&
       bytesOnDisk in 1L until expectedSize &&
       spec.assetSignaturePresent(file)
-    if (!resumable) file.delete()
+    if (!resumable) {
+      file.delete()
+      assetMarker.delete()
+    }
     Outcome.Failed(lastError ?: "Download failed", if (resumable) bytesOnDisk else 0L)
   }
 
@@ -186,5 +210,22 @@ class ResumableFileTransfer(
     const val MAX_ATTEMPTS = 3
     const val RETRY_DELAY_MS = 2000L
     private const val BUFFER_SIZE = 64 * 1024
+
+    /**
+     * The sidecar that names the asset a transfer's file belongs to; callers remove it
+     * wherever they remove the file itself, so no partial outlives its own marker.
+     */
+    fun assetMarkerFor(file: File): File = File(file.parentFile, "${file.name}.asset")
+
+    /**
+     * Whether [file]'s bytes were started for the asset named by [assetIdentity], and
+     * so may be continued into it. A run that cannot name its asset has nothing to
+     * compare, so the marker is not asked; a marker that is missing or disagrees means
+     * the partial belongs to some other version. Anyone reporting resumable bytes uses
+     * this same rule, so an offer to resume is an offer to actually resume.
+     */
+    fun continuesAsset(file: File, assetIdentity: String?): Boolean =
+      assetIdentity == null ||
+        runCatching { assetMarkerFor(file).readText() }.getOrNull() == assetIdentity
   }
 }

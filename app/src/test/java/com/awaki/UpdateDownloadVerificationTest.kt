@@ -2,6 +2,7 @@ package com.awaki
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import com.awaki.data.repository.ResumableFileTransfer
 import com.awaki.data.repository.UpdateRelease
 import com.awaki.data.repository.UpdateReleaseSource
 import com.awaki.data.repository.UpdateRepository
@@ -42,6 +43,9 @@ class UpdateDownloadVerificationTest {
     private companion object {
         /** The asset the fake service advertises, named by both URL and metadata. */
         const val APK_NAME = "awaki-debug.apk"
+
+        /** The release [update] describes; its code is what a kept partial is named by. */
+        const val UPDATE_ASSET_CODE = 9_09_09L
     }
 
     private lateinit var context: Context
@@ -53,6 +57,9 @@ class UpdateDownloadVerificationTest {
     private val offsetSidecar: File
         get() = File(updateFile.parentFile, "${updateFile.name}.offset")
 
+    private val assetSidecar: File
+        get() = ResumableFileTransfer.assetMarkerFor(updateFile)
+
     /** Mirrors UpdateRepository's private UPDATE_META_NAME completion marker. */
     private val markerFile: File
         get() = File(context.filesDir, "awaki-update.meta.json")
@@ -62,7 +69,18 @@ class UpdateDownloadVerificationTest {
         context = ApplicationProvider.getApplicationContext()
         updateFile.delete()
         offsetSidecar.delete()
+        assetSidecar.delete()
         markerFile.delete()
+    }
+
+    /**
+     * Puts [bytes] on disk the way an interrupted download of the release named by
+     * [versionCode] leaves them, asset marker included: a partial that names no asset
+     * is a stale file, not a resume candidate.
+     */
+    private fun plantPartial(bytes: ByteArray, versionCode: Long = UPDATE_ASSET_CODE) {
+        updateFile.writeBytes(bytes)
+        assetSidecar.writeText(versionCode.toString())
     }
 
     // ——— the reported bug: early completion ———
@@ -170,7 +188,7 @@ class UpdateDownloadVerificationTest {
         val payload = apkPayload(8192)
         // Only 10 real bytes on disk, while the legacy sidecar claims 5000. The old
         // code seeked to 5000 on the fresh file and produced a sparse, oversized APK.
-        updateFile.writeBytes(payload.copyOfRange(0, 10))
+        plantPartial(payload.copyOfRange(0, 10))
         offsetSidecar.writeText("5000")
 
         val source = InMemoryStreamSource(payload)
@@ -204,7 +222,7 @@ class UpdateDownloadVerificationTest {
     @Test
     fun `a server that ignores the Range header restarts from zero instead of appending`() = runTest {
         val payload = apkPayload(8192)
-        updateFile.writeBytes(payload.copyOfRange(0, 4096))
+        plantPartial(payload.copyOfRange(0, 4096))
 
         val source = InMemoryStreamSource(payload, ignoreRange = true)
         val repository = repository(source)
@@ -279,6 +297,30 @@ class UpdateDownloadVerificationTest {
         assertEquals("nothing may be re-fetched below the resume point", listOf(5120L), recovered.requestedOffsets)
         assertEquals(UpdateRepository.UpdateState.DOWNLOADED, second.updateState.value)
         assertArrayEquals(payload, updateFile.readBytes())
+    }
+
+    @Test
+    fun `a partial left by another release is re-fetched, never continued`() = runTest {
+        val payload = apkPayload(4096).also { it[600] = 0x55.toByte() }
+        // Half of the previous release, under the same fixed file name: an APK keeps
+        // one path, so nothing but the marker says whose bytes these are.
+        plantPartial(apkPayload(4096).copyOfRange(0, 2048), versionCode = 10_000L)
+
+        val source = InMemoryStreamSource(payload)
+        val repository = repository(source)
+        repository.adoptAvailableUpdate(update(assetSize = payload.size.toLong()))
+
+        assertTrue(repository.downloadUpdate())
+
+        assertEquals(
+            "an old release's bytes may not be continued into the new one",
+            listOf(0L),
+            source.requestedOffsets
+        )
+        // This release publishes no digest, so appending would have produced a
+        // right-sized, magic-carrying APK that is the wrong file.
+        assertArrayEquals(payload, updateFile.readBytes())
+        assertFalse("the marker must not outlive the file it names", assetSidecar.exists())
     }
 
     @Test
@@ -587,7 +629,7 @@ class UpdateDownloadVerificationTest {
     private fun update(assetSize: Long, assetDigest: String? = null) = UpdateRepository.AvailableUpdate(
         tagName = "v9.9.9",
         versionName = "9.9.9",
-        versionCode = 9_09_09L,
+        versionCode = UPDATE_ASSET_CODE,
         downloadUrl = "https://example.invalid/awaki-debug.apk",
         releaseNotes = "",
         assetName = APK_NAME,

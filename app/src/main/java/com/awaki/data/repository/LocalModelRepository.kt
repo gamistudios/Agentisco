@@ -118,7 +118,15 @@ class LocalModelRepository(
   /** Bytes on disk for a transfer that has not finished, used to offer a resume. */
   fun partialBytes(modelId: String): Long {
     val model = _models.value.firstOrNull { it.id == modelId } ?: store.model(modelId) ?: return 0L
-    return runCatching { partialFile(model).length() }.getOrDefault(0L)
+    val partial = partialFile(model)
+    val bytes = runCatching { partial.length() }.getOrDefault(0L)
+    if (bytes == 0L) return 0L
+    // Bytes left by another revision will be re-fetched from zero, so calling them
+    // resumable would promise a resume the transfer then refuses to do.
+    if (!ResumableFileTransfer.continuesAsset(partial, model.version.takeIf { it.isNotBlank() })) {
+      return 0L
+    }
+    return bytes
   }
 
   /**
@@ -513,6 +521,7 @@ class LocalModelRepository(
     model?.let {
       cancelled.remove(it.id)
       runCatching { partialFile(it).delete() }
+      runCatching { ResumableFileTransfer.assetMarkerFor(partialFile(it)).delete() }
       store.delete(it.id)
     }
     publish(recomputeRecords())
@@ -557,6 +566,9 @@ class LocalModelRepository(
           expectedSizeBytes = totalBytes,
           expectedDigest = model.checksum,
           assetSignaturePresent = { GgufInspector.looksLikeGguf(it) },
+          // A weights file keeps one name across revisions, so this is the only thing
+          // that tells a resumed prefix it is resuming the wrong model.
+          assetIdentity = model.version.takeIf { it.isNotBlank() },
           acceptedContents = { file ->
             when (val inspection = GgufInspector.inspect(file)) {
               is GgufInspection.Valid -> null
@@ -813,7 +825,9 @@ class LocalModelRepository(
 
   /** Removes a model's bytes and its partial; false only when the model file refused. */
   private fun deleteModelAndPartial(model: LocalModel): Boolean {
-    partialFile(model).delete()
+    val partial = partialFile(model)
+    partial.delete()
+    ResumableFileTransfer.assetMarkerFor(partial).delete()
     val file = installedFile(model)
     return !file.isFile || file.delete()
   }

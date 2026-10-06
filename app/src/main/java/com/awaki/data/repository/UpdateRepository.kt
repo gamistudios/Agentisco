@@ -327,6 +327,10 @@ class UpdateRepository(
                 expectedSizeBytes = update.assetSize,
                 expectedDigest = update.assetDigest,
                 assetSignaturePresent = { UpdateDownloadVerifier.hasApkMagic(it) },
+                // A kept partial may only be continued into the release it was started
+                // for: the APK name is fixed, so bytes from an older release would
+                // otherwise be resumed into a newer one and pass every cheap check.
+                assetIdentity = update.versionCode.toString(),
                 acceptedContents = { apkContentsReason(it) },
                 isCancelled = { downloadCancelled },
                 onProgress = { bytesOnDisk, totalBytes, verified ->
@@ -451,14 +455,16 @@ class UpdateRepository(
 
     /**
      * Throws away everything the update download has written: the APK, the legacy
-     * resume marker and the completion marker. Any in-flight download is aborted,
-     * and the state falls back so the UI offers a fresh download again.
+     * resume marker, the marker naming the asset its bytes belong to, and the
+     * completion marker. Any in-flight download is aborted, and the state falls back
+     * so the UI offers a fresh download again.
      */
     fun deleteDownloadedUpdate() {
         downloadCancelled = true
         val file = updateFile()
         file.delete()
         File(file.parentFile, "${file.name}.offset").delete()
+        ResumableFileTransfer.assetMarkerFor(file).delete()
         clearMarker()
         _downloadedApkPath.value = null
         _updateProgress.value = 0f
