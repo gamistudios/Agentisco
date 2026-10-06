@@ -18,6 +18,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -38,19 +39,7 @@ import androidx.compose.ui.unit.sp
 import com.awaki.ui.AgentPlan
 import com.awaki.ui.PlanStep
 import com.awaki.ui.PlanStepState
-import com.awaki.ui.theme.DarkBackground
-import com.awaki.ui.theme.DarkBorderSubtle
-import com.awaki.ui.theme.DarkSurface
-import com.awaki.ui.theme.DarkSurfaceElevated
-import com.awaki.ui.theme.DarkSurfaceHighlight
-import com.awaki.ui.theme.DangerRed
-import com.awaki.ui.theme.ElectricBlue
-import com.awaki.ui.theme.ElectricBlueGlow
-import com.awaki.ui.theme.IndigoAccent
-import com.awaki.ui.theme.TerminalGreen
-import com.awaki.ui.theme.TextMuted
-import com.awaki.ui.theme.TextPrimary
-import com.awaki.ui.theme.TextSecondary
+import com.awaki.ui.theme.AwakiTheme
 import java.util.Locale
 import kotlin.math.max
 import kotlinx.coroutines.delay
@@ -90,11 +79,11 @@ fun PlanCard(
     modifier = modifier
       .fillMaxWidth()
       .clip(RoundedCornerShape(12.dp))
-      .background(DarkSurfaceElevated)
+      .background(MaterialTheme.colorScheme.surfaceContainer)
       .border(
         width = 1.dp,
         brush = Brush.linearGradient(
-          listOf(ElectricBlue.copy(alpha = 0.55f), IndigoAccent.copy(alpha = 0.45f))
+          listOf(MaterialTheme.colorScheme.primary.copy(alpha = 0.55f), MaterialTheme.colorScheme.tertiary.copy(alpha = 0.45f))
         ),
         shape = RoundedCornerShape(12.dp)
       )
@@ -113,7 +102,7 @@ fun PlanCard(
           if (plan.title.isNotBlank()) {
             Text(
               text = plan.title,
-              color = TextPrimary,
+              color = MaterialTheme.colorScheme.onSurface,
               fontSize = 13.sp,
               fontWeight = FontWeight.SemiBold,
               maxLines = 2,
@@ -123,7 +112,7 @@ fun PlanCard(
           if (plan.note.isNotBlank()) {
             Text(
               text = plan.note,
-              color = TextMuted,
+              color = AwakiTheme.extra.textMuted,
               fontSize = 11.sp,
               lineHeight = 14.sp,
               maxLines = 2,
@@ -139,8 +128,8 @@ fun PlanCard(
             .fillMaxWidth()
             .heightIn(max = 232.dp)
             .clip(RoundedCornerShape(10.dp))
-            .background(DarkSurface.copy(alpha = 0.65f))
-            .border(1.dp, DarkBorderSubtle, RoundedCornerShape(10.dp))
+            .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.65f))
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
         ) {
           LazyColumn(modifier = Modifier.fillMaxWidth().testTag("plan_steps")) {
             items(plan.steps, key = { it.number }) { step ->
@@ -151,7 +140,7 @@ fun PlanCard(
                 } else 0.0
               )
               if (step.number < plan.total) {
-                Box(Modifier.fillMaxWidth().height(1.dp).background(DarkBorderSubtle.copy(alpha = 0.6f)))
+                Box(Modifier.fillMaxWidth().height(1.dp).background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)))
               }
             }
           }
@@ -180,7 +169,7 @@ fun PlanCard(
         Icon(
           imageVector = Icons.Default.KeyboardArrowDown,
           contentDescription = "Expand plan",
-          tint = TextMuted,
+          tint = AwakiTheme.extra.textMuted,
           modifier = Modifier.size(18.dp)
         )
       }
@@ -208,14 +197,14 @@ private fun PlanHeaderRow(plan: AgentPlan, expanded: Boolean, onToggle: () -> Un
     Spacer(modifier = Modifier.width(8.dp))
     Text(
       text = if (expanded) "Collapse" else "Expand",
-      color = TextMuted,
+      color = AwakiTheme.extra.textMuted,
       fontSize = 11.sp,
       fontWeight = FontWeight.Medium
     )
     Icon(
       imageVector = if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
       contentDescription = null,
-      tint = TextMuted,
+      tint = AwakiTheme.extra.textMuted,
       modifier = Modifier.size(18.dp)
     )
   }
@@ -227,13 +216,13 @@ private fun PlanBadge() {
     modifier = Modifier
       .size(26.dp)
       .clip(RoundedCornerShape(9.dp))
-      .background(Brush.linearGradient(listOf(ElectricBlue.copy(alpha = 0.28f), IndigoAccent.copy(alpha = 0.28f)))),
+      .background(Brush.linearGradient(listOf(MaterialTheme.colorScheme.primary.copy(alpha = 0.28f), MaterialTheme.colorScheme.tertiary.copy(alpha = 0.28f)))),
     contentAlignment = Alignment.Center
   ) {
     Icon(
       imageVector = Icons.Default.AutoAwesome,
       contentDescription = null,
-      tint = ElectricBlueGlow,
+      tint = MaterialTheme.colorScheme.primary,
       modifier = Modifier.size(15.dp)
     )
   }
@@ -243,7 +232,7 @@ private fun PlanBadge() {
 private fun PlanLabel() {
   Text(
     text = "Plan",
-    color = TextPrimary,
+    color = MaterialTheme.colorScheme.onSurface,
     fontSize = 13.sp,
     fontWeight = FontWeight.Bold
   )
@@ -254,12 +243,12 @@ private fun PlanCountPill(plan: AgentPlan) {
   Box(
     modifier = Modifier
       .clip(RoundedCornerShape(8.dp))
-      .background(DarkSurfaceHighlight)
+      .background(MaterialTheme.colorScheme.surfaceContainerHigh)
       .padding(horizontal = 7.dp, vertical = 2.dp)
   ) {
     Text(
       text = "${plan.done} / ${plan.total}",
-      color = TextSecondary,
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
       fontSize = 11.sp,
       fontWeight = FontWeight.SemiBold,
       maxLines = 1
@@ -278,14 +267,14 @@ private fun PlanProgressBar(progress: Float, modifier: Modifier = Modifier) {
     modifier = modifier
       .height(5.dp)
       .clip(RoundedCornerShape(3.dp))
-      .background(DarkSurfaceHighlight)
+      .background(MaterialTheme.colorScheme.surfaceContainerHigh)
   ) {
     Box(
       modifier = Modifier
         .fillMaxWidth(animated)
         .fillMaxHeight()
         .clip(RoundedCornerShape(3.dp))
-        .background(Brush.horizontalGradient(listOf(ElectricBlue, IndigoAccent)))
+        .background(Brush.horizontalGradient(listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.tertiary)))
     )
   }
 }
@@ -296,7 +285,7 @@ private fun PlanStepRow(step: PlanStep, elapsedSeconds: Double) {
   Row(
     modifier = Modifier
       .fillMaxWidth()
-      .background(if (step.state == PlanStepState.RUNNING) ElectricBlue.copy(alpha = 0.08f) else Color.Transparent)
+      .background(if (step.state == PlanStepState.RUNNING) MaterialTheme.colorScheme.primary.copy(alpha = 0.08f) else Color.Transparent)
       .padding(horizontal = 9.dp, vertical = 7.dp)
       .testTag("plan_step_${step.number}"),
     verticalAlignment = Alignment.CenterVertically
@@ -305,7 +294,7 @@ private fun PlanStepRow(step: PlanStep, elapsedSeconds: Double) {
     Spacer(modifier = Modifier.width(8.dp))
     Text(
       text = "${step.number}.",
-      color = TextMuted,
+      color = AwakiTheme.extra.textMuted,
       fontSize = 11.sp,
       fontWeight = FontWeight.Medium,
       maxLines = 1
@@ -313,7 +302,7 @@ private fun PlanStepRow(step: PlanStep, elapsedSeconds: Double) {
     Spacer(modifier = Modifier.width(6.dp))
     Text(
       text = step.content,
-      color = if (step.state == PlanStepState.SKIPPED) TextMuted else TextPrimary,
+      color = if (step.state == PlanStepState.SKIPPED) AwakiTheme.extra.textMuted else MaterialTheme.colorScheme.onSurface,
       fontSize = 12.sp,
       lineHeight = 15.sp,
       maxLines = 2,
@@ -354,13 +343,13 @@ private fun PlanStepMarker(state: PlanStepState) {
       PlanStepState.DONE -> Icon(
         imageVector = Icons.Default.Check,
         contentDescription = null,
-        tint = DarkBackground,
+        tint = MaterialTheme.colorScheme.background,
         modifier = Modifier.size(12.dp)
       )
       PlanStepState.FAILED -> Icon(
         imageVector = Icons.Default.Close,
         contentDescription = null,
-        tint = DarkBackground,
+        tint = MaterialTheme.colorScheme.background,
         modifier = Modifier.size(12.dp)
       )
       PlanStepState.RUNNING -> Box(
@@ -380,11 +369,12 @@ private fun PlanStepMarker(state: PlanStepState) {
   }
 }
 
+@Composable
 private fun planStepColor(state: PlanStepState): Color = when (state) {
-  PlanStepState.DONE -> TerminalGreen
-  PlanStepState.RUNNING -> ElectricBlueGlow
-  PlanStepState.FAILED -> DangerRed
-  PlanStepState.SKIPPED, PlanStepState.PENDING -> TextMuted
+  PlanStepState.DONE -> AwakiTheme.extra.success
+  PlanStepState.RUNNING -> MaterialTheme.colorScheme.primary
+  PlanStepState.FAILED -> MaterialTheme.colorScheme.error
+  PlanStepState.SKIPPED, PlanStepState.PENDING -> AwakiTheme.extra.textMuted
 }
 
 private fun planStepLabel(state: PlanStepState): String = when (state) {

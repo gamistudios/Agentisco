@@ -1,6 +1,21 @@
 package com.awaki.editor.syntax
 
 import androidx.compose.ui.graphics.Color
+import com.awaki.ui.theme.DarkBackground
+import com.awaki.ui.theme.DarkError
+import com.awaki.ui.theme.DarkPrimary
+import com.awaki.ui.theme.DarkSurfaceContainer
+import com.awaki.ui.theme.DarkSurfaceContainerLow
+import com.awaki.ui.theme.DarkSurfaceContainerLowest
+import com.awaki.ui.theme.DarkSyntaxFunction
+import com.awaki.ui.theme.DarkSyntaxKeyword
+import com.awaki.ui.theme.DarkSyntaxNumber
+import com.awaki.ui.theme.DarkSyntaxPunctuation
+import com.awaki.ui.theme.DarkSyntaxString
+import com.awaki.ui.theme.DarkSyntaxType
+import com.awaki.ui.theme.DarkTertiary
+import com.awaki.ui.theme.DarkTextCode
+import com.awaki.ui.theme.DarkTextMuted
 
 data class SyntaxTheme(
   val name: String,
@@ -33,35 +48,36 @@ data class SyntaxTheme(
   val errorWave: Color
 ) {
   companion object {
+    /** The built-in palette is the app palette, so it reads the tokens rather than copying them. */
     val AwakiDark = SyntaxTheme(
       name = "Awaki Dark",
-      background = Color(0xFF090D16),
-      surface = Color(0xFF111726),
-      activeLineBg = Color(0xFF151D2F),
-      selectionBg = Color(0x403B82F6),
-      gutterBg = Color(0xFF0D121E),
-      gutterText = Color(0xFF475569),
-      text = Color(0xFFE2E8F0),
-      keyword = Color(0xFFF43F5E),     // Rose-red
-      function = Color(0xFF60A5FA),    // Electric Blue Glow
-      classType = Color(0xFFFBBF24),   // Amber
-      variable = Color(0xFF38BDF8),    // Sky
-      string = Color(0xFF34D399),      // Emerald
-      number = Color(0xFFA78BFA),      // Purple
-      comment = Color(0xFF64748B),     // Slate Muted
-      operator = Color(0xFF94A3B8),    // Slate
-      constant = Color(0xFFF97316),    // Orange
-      decorator = Color(0xFF818CF8),   // Indigo
-      tag = Color(0xFFF43F5E),         // Rose
-      attribute = Color(0xFF38BDF8),   // Sky
-      cssProperty = Color(0xFF60A5FA), // Blue
-      jsonKey = Color(0xFF38BDF8),     // Sky
-      markdownHeading = Color(0xFF60A5FA),
-      markdownBold = Color(0xFFFBBF24),
-      markdownCode = Color(0xFF34D399),
-      bracketMatchBg = Color(0x3360A5FA),
-      bracketMatchBorder = Color(0xFF60A5FA),
-      errorWave = Color(0xFFEF4444)
+      background = DarkBackground,
+      surface = DarkSurfaceContainerLow,
+      activeLineBg = DarkSurfaceContainer,
+      selectionBg = DarkPrimary.copy(alpha = 0.25f),
+      gutterBg = DarkSurfaceContainerLowest,
+      gutterText = DarkTextMuted,
+      text = DarkTextCode,
+      keyword = DarkSyntaxKeyword,     // Rose
+      function = DarkSyntaxFunction,   // Azure
+      classType = DarkSyntaxType,      // Amber
+      variable = DarkTertiary,         // Periwinkle
+      string = DarkSyntaxString,       // Emerald
+      number = DarkSyntaxNumber,       // Violet
+      comment = DarkTextMuted,         // Blue-tinted slate
+      operator = DarkSyntaxPunctuation,
+      constant = DarkSyntaxType,
+      decorator = DarkTertiary,
+      tag = DarkSyntaxKeyword,
+      attribute = DarkTertiary,
+      cssProperty = DarkSyntaxFunction,
+      jsonKey = DarkTertiary,
+      markdownHeading = DarkSyntaxFunction,
+      markdownBold = DarkSyntaxType,
+      markdownCode = DarkSyntaxString,
+      bracketMatchBg = DarkSyntaxFunction.copy(alpha = 0.2f),
+      bracketMatchBorder = DarkSyntaxFunction,
+      errorWave = DarkError
     )
 
     val OneDark = SyntaxTheme(

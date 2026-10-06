@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.Psychology
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -42,7 +43,6 @@ import com.awaki.ui.screens.settings.SettingsItem
 import com.awaki.ui.screens.settings.SettingsRowGroup
 import com.awaki.ui.screens.settings.ValueTone
 import com.awaki.ui.theme.AwakiTheme
-import com.awaki.ui.theme.DarkBackground
 import com.github.takahirom.roborazzi.RobolectricDeviceQualifiers
 import com.github.takahirom.roborazzi.captureRoboImage
 import kotlinx.coroutines.Dispatchers
@@ -110,7 +110,7 @@ class LocalModelsScreenshotTest {
         Column(
           modifier = Modifier
             .fillMaxSize()
-            .background(DarkBackground)
+            .background(MaterialTheme.colorScheme.background)
             .padding(14.dp)
         ) {
           LocalModelCard(
@@ -176,7 +176,7 @@ class LocalModelsScreenshotTest {
         Column(
           modifier = Modifier
             .fillMaxSize()
-            .background(DarkBackground)
+            .background(MaterialTheme.colorScheme.background)
             .padding(14.dp)
         ) {
           // No source, so no download, no update and no second copy — only what the
@@ -290,7 +290,7 @@ class LocalModelsScreenshotTest {
         Column(
           modifier = Modifier
             .fillMaxSize()
-            .background(DarkBackground)
+            .background(MaterialTheme.colorScheme.background)
             .padding(16.dp)
         ) {
           SettingsRowGroup(

@@ -27,6 +27,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -47,13 +48,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 import com.awaki.AwakiApplication
-import com.awaki.ui.theme.DangerRed
-import com.awaki.ui.theme.DarkBorder
-import com.awaki.ui.theme.DarkSurface
-import com.awaki.ui.theme.DarkSurfaceElevated
-import com.awaki.ui.theme.ElectricBlue
-import com.awaki.ui.theme.TextPrimary
-import com.awaki.ui.theme.TextSecondary
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -101,14 +95,14 @@ fun CrashLogDialog(
   AlertDialog(
     onDismissRequest = onDismiss,
     modifier = modifier,
-    icon = { Icon(Icons.Outlined.BugReport, contentDescription = null, tint = DangerRed) },
-    title = { Text("Crash Log (debug)", color = TextPrimary, fontWeight = FontWeight.Bold) },
+    icon = { Icon(Icons.Outlined.BugReport, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+    title = { Text("Crash Log (debug)", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) },
     text = {
       Column {
         Text(
           "The app captured an uncaught exception from its last run. " +
             "Copy or export the trace below to inspect why it crashed.",
-          color = TextSecondary,
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
           fontSize = 12.sp
         )
 
@@ -118,8 +112,8 @@ fun CrashLogDialog(
           modifier = Modifier
             .fillMaxWidth()
             .heightIn(max = 340.dp)
-            .background(DarkSurfaceElevated)
-            .border(1.dp, DarkBorder, RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainer)
+            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp))
         ) {
           if (!logLoaded) {
             Box(
@@ -128,12 +122,12 @@ fun CrashLogDialog(
                 .height(90.dp),
               contentAlignment = Alignment.Center
             ) {
-              CircularProgressIndicator(color = ElectricBlue, strokeWidth = 2.dp, modifier = Modifier.height(20.dp))
+              CircularProgressIndicator(color = MaterialTheme.colorScheme.primary, strokeWidth = 2.dp, modifier = Modifier.height(20.dp))
             }
           } else {
             Text(
               text = crashLog ?: "",
-              color = TextPrimary,
+              color = MaterialTheme.colorScheme.onSurface,
               fontSize = 10.sp,
               lineHeight = 14.sp,
               fontFamily = FontFamily.Monospace,
@@ -172,11 +166,11 @@ fun CrashLogDialog(
             }
           },
           enabled = logLoaded,
-          border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder)
+          border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
         ) {
-          Icon(Icons.Outlined.Download, contentDescription = null, modifier = Modifier.height(14.dp), tint = TextSecondary)
+          Icon(Icons.Outlined.Download, contentDescription = null, modifier = Modifier.height(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
           Spacer(modifier = Modifier.width(4.dp))
-          Text("Download", fontSize = 12.sp, color = TextPrimary)
+          Text("Download", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface)
         }
 
         Button(
@@ -185,7 +179,7 @@ fun CrashLogDialog(
             Toast.makeText(context, "Crash log copied", Toast.LENGTH_SHORT).show()
           },
           enabled = logLoaded,
-          colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue)
+          colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
         ) {
           Icon(Icons.Outlined.ContentCopy, contentDescription = null, modifier = Modifier.height(14.dp))
           Spacer(modifier = Modifier.width(4.dp))
@@ -202,17 +196,17 @@ fun CrashLogDialog(
             onDismiss()
           }
         }) {
-          Icon(Icons.Outlined.Delete, contentDescription = null, modifier = Modifier.height(14.dp), tint = DangerRed)
+          Icon(Icons.Outlined.Delete, contentDescription = null, modifier = Modifier.height(14.dp), tint = MaterialTheme.colorScheme.error)
           Spacer(modifier = Modifier.width(4.dp))
-          Text("Clear", fontSize = 12.sp, color = DangerRed)
+          Text("Clear", fontSize = 12.sp, color = MaterialTheme.colorScheme.error)
         }
 
         OutlinedButton(onClick = onDismiss) {
-          Text("Close", fontSize = 12.sp, color = TextSecondary)
+          Text("Close", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
       }
     },
-    containerColor = DarkSurface,
+    containerColor = MaterialTheme.colorScheme.surface,
     shape = RoundedCornerShape(12.dp)
   )
 }

@@ -10,6 +10,7 @@ import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalTextStyle
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -27,6 +28,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.awaki.ui.theme.*
+import com.awaki.ui.theme.AwakiTheme
 import kotlinx.coroutines.launch
 
 // ---- lightweight markdown parsing ----
@@ -115,7 +117,7 @@ private fun AnnotatedString.Builder.forEachInline() = Unit
 fun MarkdownText(
   text: String,
   modifier: Modifier = Modifier,
-  textColor: androidx.compose.ui.graphics.Color = TextPrimary,
+  textColor: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.onSurface,
   streaming: Boolean = false
 ) {
   val blocks = remember(text) { parseMarkdown(text) }
@@ -125,7 +127,7 @@ fun MarkdownText(
         is MdBlock.Code -> CodeBlockView(block)
         is MdBlock.Heading -> Text(
           text = inlineMarkdown(block.text),
-          color = TextPrimary,
+          color = MaterialTheme.colorScheme.onSurface,
           fontSize = when (block.level) {
             1 -> 17.sp; 2 -> 15.sp; else -> 14.sp
           },
@@ -136,14 +138,14 @@ fun MarkdownText(
           modifier = Modifier
             .fillMaxWidth()
             .height(1.dp)
-            .background(DarkBorderSubtle)
+            .background(MaterialTheme.colorScheme.outlineVariant)
         )
         is MdBlock.ListItems -> Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
           block.items.forEachIndexed { index, item ->
             Row {
               Text(
                 text = if (block.ordered) "${index + 1}." else "•",
-                color = ElectricBlueGlow,
+                color = MaterialTheme.colorScheme.primary,
                 fontSize = 13.sp,
                 modifier = Modifier.width(18.dp)
               )
@@ -161,12 +163,12 @@ fun MarkdownText(
             modifier = Modifier
               .width(2.dp)
               .heightIn(min = 8.dp)
-              .background(DarkBorder)
+              .background(MaterialTheme.colorScheme.outline)
           )
           Spacer(modifier = Modifier.width(8.dp))
           Text(
             text = inlineMarkdown(block.lines.joinToString("\n")),
-            color = TextSecondary,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             fontSize = 13.sp,
             lineHeight = 18.sp
           )
@@ -189,7 +191,7 @@ private fun CodeBlockView(block: MdBlock.Code) {
     modifier = Modifier
       .fillMaxWidth()
       .clip(RoundedCornerShape(8.dp))
-      .background(DarkBackground)
+      .background(MaterialTheme.colorScheme.background)
   ) {
     Row(
       modifier = Modifier
@@ -199,7 +201,7 @@ private fun CodeBlockView(block: MdBlock.Code) {
     ) {
       Text(
         text = block.language.ifBlank { "code" },
-        color = TextMuted,
+        color = AwakiTheme.extra.textMuted,
         fontSize = 9.sp,
         fontFamily = FontFamily.Monospace,
         modifier = Modifier.weight(1f)
@@ -213,7 +215,7 @@ private fun CodeBlockView(block: MdBlock.Code) {
         Icon(
           Icons.Outlined.ContentCopy,
           contentDescription = "Copy code",
-          tint = TextMuted,
+          tint = AwakiTheme.extra.textMuted,
           modifier = Modifier.size(13.dp)
         )
       }
@@ -226,7 +228,7 @@ private fun CodeBlockView(block: MdBlock.Code) {
     ) {
       Text(
         text = block.code,
-        color = TextCode,
+        color = AwakiTheme.extra.textCode,
         fontSize = 11.sp,
         lineHeight = 15.sp,
         fontFamily = FontFamily.Monospace
@@ -237,6 +239,7 @@ private fun CodeBlockView(block: MdBlock.Code) {
 
 // ---- inline formatting: `code`, **bold**, *italic*, ~~strike~~, [text](url) ----
 
+@Composable
 private fun inlineMarkdown(text: String): AnnotatedString = buildAnnotatedString {
   var i = 0
   while (i < text.length) {
@@ -247,8 +250,8 @@ private fun inlineMarkdown(text: String): AnnotatedString = buildAnnotatedString
           withStyle(
             SpanStyle(
               fontFamily = FontFamily.Monospace,
-              color = CyanAccent,
-              background = DarkBackground
+              color = MaterialTheme.colorScheme.secondary,
+              background = MaterialTheme.colorScheme.background
             )
           ) { append(text.substring(i + 1, end)) }
           i = end + 1
@@ -259,7 +262,7 @@ private fun inlineMarkdown(text: String): AnnotatedString = buildAnnotatedString
       text.startsWith("**", i) -> {
         val end = text.indexOf("**", i + 2)
         if (end > i) {
-          withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = TextPrimary)) {
+          withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)) {
             append(text.substring(i + 2, end))
           }
           i = end + 2
@@ -283,7 +286,7 @@ private fun inlineMarkdown(text: String): AnnotatedString = buildAnnotatedString
         if (close > i && text.startsWith("(", close + 1)) {
           val urlEnd = text.indexOf(')', close + 2)
           if (urlEnd > close) {
-            withStyle(SpanStyle(color = ElectricBlueGlow, fontWeight = FontWeight.Medium)) {
+            withStyle(SpanStyle(color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Medium)) {
               append(text.substring(i + 1, close))
             }
             i = urlEnd + 1

@@ -20,6 +20,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -38,14 +39,7 @@ import com.awaki.agent.skill.AgentSkill
 import com.awaki.agent.skill.SkillScope
 import com.awaki.agent.skill.SkillStore
 import com.awaki.ui.WorkspaceViewModel
-import com.awaki.ui.theme.DarkBorder
-import com.awaki.ui.theme.DarkBorderSubtle
-import com.awaki.ui.theme.DangerRed
-import com.awaki.ui.theme.DarkSurface
-import com.awaki.ui.theme.ElectricBlue
-import com.awaki.ui.theme.TextMuted
-import com.awaki.ui.theme.TextPrimary
-import com.awaki.ui.theme.TextSecondary
+import com.awaki.ui.theme.AwakiTheme
 
 /**
  * The know-how this workspace can hand the agent.
@@ -76,9 +70,9 @@ fun SkillSection(viewModel: WorkspaceViewModel, modifier: Modifier = Modifier) {
         onClick = { creating = true },
         modifier = Modifier.testTag("btn_new_skill")
       ) {
-        Icon(Icons.Default.Add, contentDescription = null, tint = ElectricBlue, modifier = Modifier.size(14.dp))
+        Icon(Icons.Default.Add, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(14.dp))
         Spacer(modifier = Modifier.width(4.dp))
-        Text("New skill", color = ElectricBlue, fontSize = 12.sp)
+        Text("New skill", color = MaterialTheme.colorScheme.primary, fontSize = 12.sp)
       }
     }
 
@@ -86,7 +80,7 @@ fun SkillSection(viewModel: WorkspaceViewModel, modifier: Modifier = Modifier) {
       Text(
         "No skills yet. One page of instructions is usually enough to change how the agent works " +
           "in a project you know.",
-        color = TextMuted,
+        color = AwakiTheme.extra.textMuted,
         fontSize = 11.sp,
         modifier = Modifier.testTag("txt_no_skills")
       )
@@ -100,11 +94,11 @@ fun SkillSection(viewModel: WorkspaceViewModel, modifier: Modifier = Modifier) {
           verticalAlignment = Alignment.Top
         ) {
           Column(modifier = Modifier.weight(1f)) {
-            Text(skill.displayName, color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-            Text(skill.description, color = TextMuted, fontSize = 11.sp, lineHeight = 14.sp)
+            Text(skill.displayName, color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            Text(skill.description, color = AwakiTheme.extra.textMuted, fontSize = 11.sp, lineHeight = 14.sp)
             Text(
               if (skill.scope == SkillScope.PROJECT) "this project · ${skill.path}" else "every project · ${skill.path}",
-              color = TextSecondary,
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
               fontSize = 10.sp
             )
           }
@@ -114,7 +108,7 @@ fun SkillSection(viewModel: WorkspaceViewModel, modifier: Modifier = Modifier) {
               .size(28.dp)
               .testTag("btn_edit_skill_${skill.name}")
           ) {
-            Icon(Icons.Default.Edit, contentDescription = "Edit", tint = TextMuted, modifier = Modifier.size(14.dp))
+            Icon(Icons.Default.Edit, contentDescription = "Edit", tint = AwakiTheme.extra.textMuted, modifier = Modifier.size(14.dp))
           }
           IconButton(
             onClick = { deleting = skill },
@@ -122,10 +116,10 @@ fun SkillSection(viewModel: WorkspaceViewModel, modifier: Modifier = Modifier) {
               .size(28.dp)
               .testTag("btn_delete_skill_${skill.name}")
           ) {
-            Icon(Icons.Default.Delete, contentDescription = "Delete", tint = DangerRed, modifier = Modifier.size(14.dp))
+            Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(14.dp))
           }
         }
-        if (skill != skills.last()) HorizontalDivider(color = DarkBorderSubtle)
+        if (skill != skills.last()) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
       }
     }
   }
@@ -160,13 +154,13 @@ fun SkillSection(viewModel: WorkspaceViewModel, modifier: Modifier = Modifier) {
   deleting?.let { skill ->
     AlertDialog(
       onDismissRequest = { deleting = null },
-      containerColor = DarkSurface,
-      title = { Text("Delete ${skill.displayName}?", color = TextPrimary, fontSize = 16.sp) },
+      containerColor = MaterialTheme.colorScheme.surface,
+      title = { Text("Delete ${skill.displayName}?", color = MaterialTheme.colorScheme.onSurface, fontSize = 16.sp) },
       text = {
         Text(
           "This removes ${skill.path} from ${if (skill.scope == SkillScope.PROJECT) "the project" else "the app's skills"}. " +
             "Conversations that already followed it keep their work.",
-          color = TextSecondary,
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
           fontSize = 12.sp
         )
       },
@@ -178,10 +172,10 @@ fun SkillSection(viewModel: WorkspaceViewModel, modifier: Modifier = Modifier) {
             refresh++
           },
           modifier = Modifier.testTag("btn_confirm_delete_skill")
-        ) { Text("Delete", color = DangerRed, fontSize = 13.sp) }
+        ) { Text("Delete", color = MaterialTheme.colorScheme.error, fontSize = 13.sp) }
       },
       dismissButton = {
-        TextButton(onClick = { deleting = null }) { Text("Keep", color = TextMuted, fontSize = 13.sp) }
+        TextButton(onClick = { deleting = null }) { Text("Keep", color = AwakiTheme.extra.textMuted, fontSize = 13.sp) }
       }
     )
   }
@@ -205,12 +199,12 @@ private fun SkillEditorDialog(
 
   AlertDialog(
     onDismissRequest = onDismiss,
-    containerColor = DarkSurface,
+    containerColor = MaterialTheme.colorScheme.surface,
     shape = RoundedCornerShape(16.dp),
     title = {
       Text(
         if (original == null) "New skill" else "Edit ${original.displayName}",
-        color = TextPrimary,
+        color = MaterialTheme.colorScheme.onSurface,
         fontSize = 16.sp,
         fontWeight = FontWeight.SemiBold
       )
@@ -250,7 +244,7 @@ private fun SkillEditorDialog(
           minLines = 6
         )
 
-        Text("Where it lives", color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+        Text("Where it lives", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
         Spacer(modifier = Modifier.height(4.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
           ScopeChoice(
@@ -288,11 +282,11 @@ private fun SkillEditorDialog(
         },
         enabled = valid,
         modifier = Modifier.testTag("btn_save_skill")
-      ) { Text("Save", color = if (valid) ElectricBlue else TextMuted, fontSize = 13.sp) }
+      ) { Text("Save", color = if (valid) MaterialTheme.colorScheme.primary else AwakiTheme.extra.textMuted, fontSize = 13.sp) }
     },
     dismissButton = {
       TextButton(onClick = onDismiss, modifier = Modifier.testTag("btn_cancel_skill")) {
-        Text("Cancel", color = TextMuted, fontSize = 13.sp)
+        Text("Cancel", color = AwakiTheme.extra.textMuted, fontSize = 13.sp)
       }
     }
   )
@@ -310,12 +304,12 @@ private fun ScopeChoice(
   Column(
     modifier = modifier
       .clip(RoundedCornerShape(8.dp))
-      .border(1.dp, if (selected) ElectricBlue else DarkBorder, RoundedCornerShape(8.dp))
+      .border(1.dp, if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp))
       .clickable(onClick = onClick)
       .padding(10.dp)
       .testTag(testTag)
   ) {
-    Text(label, color = if (selected) ElectricBlue else TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-    Text(caption, color = TextMuted, fontSize = 10.sp, lineHeight = 13.sp)
+    Text(label, color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+    Text(caption, color = AwakiTheme.extra.textMuted, fontSize = 10.sp, lineHeight = 13.sp)
   }
 }

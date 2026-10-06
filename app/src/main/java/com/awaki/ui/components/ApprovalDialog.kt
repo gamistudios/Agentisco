@@ -7,6 +7,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -21,6 +22,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.awaki.agent.model.PendingApproval
 import com.awaki.ui.theme.*
+import com.awaki.ui.theme.AwakiTheme
 
 /**
  * A protected action awaiting the user's decision.
@@ -56,8 +58,8 @@ fun ApprovalDialog(
       modifier = Modifier
         .fillMaxWidth()
         .clip(RoundedCornerShape(16.dp))
-        .border(1.dp, if (approval.isDestructive) DangerRed.copy(alpha = 0.5f) else DarkBorder, RoundedCornerShape(16.dp)),
-      color = DarkSurface,
+        .border(1.dp, if (approval.isDestructive) MaterialTheme.colorScheme.error.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outline, RoundedCornerShape(16.dp)),
+      color = MaterialTheme.colorScheme.surface,
       tonalElevation = 10.dp
     ) {
       Column(
@@ -70,20 +72,20 @@ fun ApprovalDialog(
             Icon(
               imageVector = Icons.Default.Warning,
               contentDescription = "Warning",
-              tint = DangerRed,
+              tint = MaterialTheme.colorScheme.error,
               modifier = Modifier.size(20.dp)
             )
             Spacer(modifier = Modifier.width(8.dp))
             Text(
               text = "⚠ Destructive command",
-              color = DangerRed,
+              color = MaterialTheme.colorScheme.error,
               fontSize = 14.sp,
               fontWeight = FontWeight.Bold
             )
           } else {
             Text(
               text = approval.title,
-              color = TextPrimary,
+              color = MaterialTheme.colorScheme.onSurface,
               fontSize = 14.sp,
               fontWeight = FontWeight.SemiBold
             )
@@ -97,16 +99,16 @@ fun ApprovalDialog(
           modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
-            .background(DarkBackground)
-            .border(1.dp, DarkBorderSubtle, RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.background)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp))
             .padding(12.dp)
         ) {
           Text(
             text = if (approval.isQuestion) approval.command else "$ ${approval.command}",
             color = when {
-              approval.isQuestion -> TextPrimary
-              approval.isDestructive -> DangerRed
-              else -> ElectricBlueGlow
+              approval.isQuestion -> MaterialTheme.colorScheme.onSurface
+              approval.isDestructive -> MaterialTheme.colorScheme.error
+              else -> MaterialTheme.colorScheme.primary
             },
             fontFamily = FontFamily.Monospace,
             fontSize = 13.sp,
@@ -119,7 +121,7 @@ fun ApprovalDialog(
         if (approval.impactDescription != approval.command) {
           Text(
             text = approval.impactDescription,
-            color = TextSecondary,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             fontSize = 12.sp,
             lineHeight = 18.sp
           )
@@ -139,7 +141,7 @@ fun ApprovalDialog(
                 modifier = Modifier
                   .fillMaxWidth()
                   .testTag("dialog_answer_option_$index"),
-                colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue)
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
               ) {
                 Text(option, fontSize = 13.sp, fontWeight = FontWeight.Medium)
               }
@@ -156,11 +158,11 @@ fun ApprovalDialog(
                 textStyle = LocalTextStyle.current.copy(fontSize = 13.sp),
                 singleLine = true,
                 colors = OutlinedTextFieldDefaults.colors(
-                  focusedBorderColor = ElectricBlue,
-                  unfocusedBorderColor = DarkBorder,
-                  cursorColor = ElectricBlueGlow,
-                  focusedLabelColor = TextSecondary,
-                  unfocusedLabelColor = TextMuted
+                  focusedBorderColor = MaterialTheme.colorScheme.primary,
+                  unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                  cursorColor = MaterialTheme.colorScheme.primary,
+                  focusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                  unfocusedLabelColor = AwakiTheme.extra.textMuted
                 )
               )
               Button(
@@ -169,7 +171,7 @@ fun ApprovalDialog(
                 modifier = Modifier
                   .fillMaxWidth()
                   .testTag("dialog_answer_submit"),
-                colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue)
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
               ) {
                 Text("Send answer", fontSize = 13.sp, fontWeight = FontWeight.Medium)
               }
@@ -181,7 +183,7 @@ fun ApprovalDialog(
                 .fillMaxWidth()
                 .testTag("dialog_answer_skip")
             ) {
-              Text("Close and decide later", color = TextMuted, fontSize = 12.sp)
+              Text("Close and decide later", color = AwakiTheme.extra.textMuted, fontSize = 12.sp)
             }
           }
 
@@ -194,8 +196,8 @@ fun ApprovalDialog(
               modifier = Modifier
                 .weight(1f)
                 .testTag("dialog_cancel_destructive"),
-              colors = ButtonDefaults.outlinedButtonColors(contentColor = TextPrimary),
-              border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder)
+              colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface),
+              border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
             ) {
               Text("Cancel", fontSize = 12.sp)
             }
@@ -205,7 +207,7 @@ fun ApprovalDialog(
               modifier = Modifier
                 .weight(1f)
                 .testTag("dialog_allow_destructive"),
-              colors = ButtonDefaults.buttonColors(containerColor = DangerRed)
+              colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
             ) {
               Text("Allow", fontSize = 12.sp, fontWeight = FontWeight.Bold)
             }
@@ -220,7 +222,7 @@ fun ApprovalDialog(
               modifier = Modifier
                 .fillMaxWidth()
                 .testTag("dialog_allow_once"),
-              colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue)
+              colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
             ) {
               Text("Allow once", fontSize = 13.sp, fontWeight = FontWeight.Medium)
             }
@@ -230,8 +232,8 @@ fun ApprovalDialog(
               modifier = Modifier
                 .fillMaxWidth()
                 .testTag("dialog_allow_session"),
-              colors = ButtonDefaults.outlinedButtonColors(contentColor = TextPrimary),
-              border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder)
+              colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface),
+              border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
             ) {
               Text("Allow for this session", fontSize = 12.sp)
             }
@@ -248,11 +250,11 @@ fun ApprovalDialog(
               textStyle = LocalTextStyle.current.copy(fontSize = 13.sp),
               singleLine = true,
               colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = DangerRed,
-                unfocusedBorderColor = DarkBorder,
-                cursorColor = DangerRed,
-                focusedLabelColor = TextSecondary,
-                unfocusedLabelColor = TextMuted
+                focusedBorderColor = MaterialTheme.colorScheme.error,
+                unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+                cursorColor = MaterialTheme.colorScheme.error,
+                focusedLabelColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                unfocusedLabelColor = AwakiTheme.extra.textMuted
               )
             )
 
@@ -262,7 +264,7 @@ fun ApprovalDialog(
                 .fillMaxWidth()
                 .testTag("dialog_decide_later")
             ) {
-              Text("Decide later", color = TextMuted, fontSize = 12.sp)
+              Text("Decide later", color = AwakiTheme.extra.textMuted, fontSize = 12.sp)
             }
 
             TextButton(
@@ -271,7 +273,7 @@ fun ApprovalDialog(
                 .fillMaxWidth()
                 .testTag("dialog_deny")
             ) {
-              Text("Deny", color = DangerRed, fontSize = 12.sp)
+              Text("Deny", color = MaterialTheme.colorScheme.error, fontSize = 12.sp)
             }
           }
         }

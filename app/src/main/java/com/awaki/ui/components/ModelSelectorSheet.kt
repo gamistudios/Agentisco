@@ -11,6 +11,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.*
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -24,6 +25,7 @@ import androidx.compose.ui.unit.sp
 import com.awaki.settings.model.AIModel
 import com.awaki.settings.model.AIProvider
 import com.awaki.ui.theme.*
+import com.awaki.ui.theme.AwakiTheme
 
 /**
  * Model selector listing every configured model grouped by its provider.
@@ -45,7 +47,7 @@ fun ModelSelectorSheet(
 
   ModalBottomSheet(
     onDismissRequest = onDismiss,
-    containerColor = DarkSurface,
+    containerColor = MaterialTheme.colorScheme.surface,
     tonalElevation = 8.dp,
     dragHandle = {
       Box(
@@ -54,7 +56,7 @@ fun ModelSelectorSheet(
           .width(36.dp)
           .height(4.dp)
           .clip(CircleShape)
-          .background(DarkBorder)
+          .background(MaterialTheme.colorScheme.outline)
       )
     }
   ) {
@@ -67,13 +69,13 @@ fun ModelSelectorSheet(
       Column {
         Text(
           text = "Select AI Model",
-          color = TextPrimary,
+          color = MaterialTheme.colorScheme.onSurface,
           fontSize = 17.sp,
           fontWeight = FontWeight.Bold
         )
         Text(
           text = "Models grouped by provider · manage providers in Settings",
-          color = TextSecondary,
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
           fontSize = 12.sp
         )
       }
@@ -85,13 +87,13 @@ fun ModelSelectorSheet(
           modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .background(DarkBackground)
-            .border(1.dp, DarkBorderSubtle, RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.background)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
             .padding(16.dp)
         ) {
           Text(
             text = "No models configured yet.\nAdd a provider in Settings → AI Providers, or install a model in Settings → Local Models.",
-            color = TextMuted,
+            color = AwakiTheme.extra.textMuted,
             fontSize = 12.sp
           )
         }
@@ -114,12 +116,12 @@ fun ModelSelectorSheet(
                   modifier = Modifier
                     .size(8.dp)
                     .clip(CircleShape)
-                    .background(if (provider.hasApiKey) TerminalGreen else TextMuted)
+                    .background(if (provider.hasApiKey) AwakiTheme.extra.success else AwakiTheme.extra.textMuted)
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
                   text = provider.name,
-                  color = TextSecondary,
+                  color = MaterialTheme.colorScheme.onSurfaceVariant,
                   fontSize = 12.sp,
                   fontWeight = FontWeight.SemiBold,
                   letterSpacing = 0.5.sp
@@ -133,24 +135,24 @@ fun ModelSelectorSheet(
                     provider.hasApiKey -> "Key set"
                     else -> "No API key"
                   },
-                  color = TextMuted,
+                  color = AwakiTheme.extra.textMuted,
                   fontSize = 10.sp
                 )
               }
-              HorizontalDivider(color = DarkBorderSubtle, thickness = 0.5.dp)
+              HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
               Spacer(modifier = Modifier.height(4.dp))
 
               Column(
                 modifier = Modifier
                   .fillMaxWidth()
                   .clip(RoundedCornerShape(12.dp))
-                  .background(DarkBackground)
-                  .border(1.dp, DarkBorderSubtle, RoundedCornerShape(12.dp))
+                  .background(MaterialTheme.colorScheme.background)
+                  .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
               ) {
                 if (providerModels.isEmpty()) {
                   Text(
                     text = "No models configured for ${provider.name}. Add models in Settings.",
-                    color = TextMuted,
+                    color = AwakiTheme.extra.textMuted,
                     fontSize = 11.sp,
                     modifier = Modifier.padding(12.dp)
                   )
@@ -164,7 +166,7 @@ fun ModelSelectorSheet(
                       onSelect = { onSelectModel(model) }
                     )
                     if (index < providerModels.size - 1) {
-                      HorizontalDivider(color = DarkBorderSubtle, thickness = 0.5.dp)
+                      HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
                     }
                   }
                 }
@@ -197,14 +199,14 @@ private fun ModelRow(
       Row(verticalAlignment = Alignment.CenterVertically) {
         Text(
           text = model.displayName,
-          color = if (isSelected) ElectricBlueGlow else TextPrimary,
+          color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
           fontSize = 13.sp,
           fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
         )
         Spacer(modifier = Modifier.width(6.dp))
         Text(
           text = providerName,
-          color = TextMuted,
+          color = AwakiTheme.extra.textMuted,
           fontSize = 10.sp
         )
       }
@@ -213,7 +215,7 @@ private fun ModelRow(
 
       Text(
         text = model.modelId,
-        color = TextMuted,
+        color = AwakiTheme.extra.textMuted,
         fontSize = 10.sp,
         fontFamily = FontFamily.Monospace
       )
@@ -238,7 +240,7 @@ private fun ModelRow(
       Icon(
         imageVector = Icons.Default.Check,
         contentDescription = "Selected",
-        tint = ElectricBlueGlow,
+        tint = MaterialTheme.colorScheme.primary,
         modifier = Modifier.size(18.dp)
       )
     }
@@ -250,12 +252,12 @@ private fun CapabilityPill(text: String) {
   Box(
     modifier = Modifier
       .clip(RoundedCornerShape(4.dp))
-      .background(DarkSurfaceElevated)
+      .background(MaterialTheme.colorScheme.surfaceContainer)
       .padding(horizontal = 5.dp, vertical = 1.dp)
   ) {
     Text(
       text = text,
-      color = TextMuted,
+      color = AwakiTheme.extra.textMuted,
       fontSize = 9.sp,
       fontFamily = FontFamily.Monospace
     )

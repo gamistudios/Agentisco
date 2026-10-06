@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -29,8 +30,6 @@ import com.awaki.ui.PlanStep
 import com.awaki.ui.PlanStepState
 import com.awaki.ui.components.PlanCard
 import com.awaki.ui.theme.AwakiTheme
-import com.awaki.ui.theme.DarkBackground
-import com.awaki.ui.theme.DarkSurfaceElevated
 import com.github.takahirom.roborazzi.RobolectricDeviceQualifiers
 import com.github.takahirom.roborazzi.captureRoboImage
 import org.junit.Assert.assertTrue
@@ -84,7 +83,7 @@ class PlanCardTest {
     composeTestRule.setContent {
       AwakiTheme {
         Column(
-          modifier = Modifier.fillMaxSize().background(DarkBackground).padding(12.dp),
+          modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(12.dp),
           verticalArrangement = Arrangement.Bottom
         ) {
           var expanded by remember { mutableStateOf(startExpanded) }
@@ -97,7 +96,7 @@ class PlanCardTest {
             modifier = Modifier
               .fillMaxWidth()
               .height(64.dp)
-              .background(DarkSurfaceElevated)
+              .background(MaterialTheme.colorScheme.surfaceContainer)
           )
         }
       }

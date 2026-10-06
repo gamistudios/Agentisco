@@ -25,6 +25,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -48,16 +49,7 @@ import com.awaki.local.model.LocalModel
 import com.awaki.ui.WorkspaceViewModel
 import com.awaki.ui.components.LocalModelsSection
 import com.awaki.ui.components.MiniAction
-import com.awaki.ui.theme.DarkBackground
-import com.awaki.ui.theme.DarkBorder
-import com.awaki.ui.theme.DarkBorderSubtle
-import com.awaki.ui.theme.DarkSurface
-import com.awaki.ui.theme.ElectricBlue
-import com.awaki.ui.theme.ElectricBlueGlow
-import com.awaki.ui.theme.TextMuted
-import com.awaki.ui.theme.TextPrimary
-import com.awaki.ui.theme.TextSecondary
-import com.awaki.ui.theme.WarningAmber
+import com.awaki.ui.theme.AwakiTheme
 
 /**
  * Management surface for the models that run on this device.
@@ -83,7 +75,7 @@ fun LocalModelsScreen(
   LazyColumn(
     modifier = modifier
       .fillMaxSize()
-      .background(DarkBackground)
+      .background(MaterialTheme.colorScheme.background)
       .padding(horizontal = 16.dp),
     verticalArrangement = Arrangement.spacedBy(16.dp)
   ) {
@@ -94,10 +86,10 @@ fun LocalModelsScreen(
           onClick = { onNavigate(AppDestination.SETTINGS) },
           modifier = Modifier.size(32.dp).testTag("btn_local_models_back")
         ) {
-          Icon(Icons.Default.ChevronLeft, contentDescription = "Back to settings", tint = TextMuted)
+          Icon(Icons.Default.ChevronLeft, contentDescription = "Back to settings", tint = AwakiTheme.extra.textMuted)
         }
         Spacer(modifier = Modifier.width(6.dp))
-        Text("Local Models", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        Text("Local Models", color = MaterialTheme.colorScheme.onSurface, fontSize = 18.sp, fontWeight = FontWeight.Bold)
       }
     }
 
@@ -136,8 +128,8 @@ private fun LocalModelsCard(content: @Composable () -> Unit) {
     modifier = Modifier
       .fillMaxWidth()
       .clip(RoundedCornerShape(12.dp))
-      .border(1.dp, DarkBorder, RoundedCornerShape(12.dp)),
-    colors = CardDefaults.cardColors(containerColor = DarkSurface)
+      .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(12.dp)),
+    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
   ) {
     content()
   }
@@ -172,17 +164,17 @@ internal fun LocalToolPicker(
       verticalAlignment = Alignment.CenterVertically
     ) {
       Column(modifier = Modifier.weight(1f)) {
-        Text("Tools offered", color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+        Text("Tools offered", color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
         Text(
           "${selected.size} of ${choices.size} · ~$cost tokens of $window context",
-          color = if (cost > window / 2) ElectricBlueGlow else TextMuted,
+          color = if (cost > window / 2) MaterialTheme.colorScheme.primary else AwakiTheme.extra.textMuted,
           fontSize = 10.sp,
           fontFamily = FontFamily.Monospace
         )
       }
       Text(
         if (selected == model.configuration.toolsOrDefault()) "Saved" else "Not saved",
-        color = if (selected == model.configuration.toolsOrDefault()) TextMuted else WarningAmber,
+        color = if (selected == model.configuration.toolsOrDefault()) AwakiTheme.extra.textMuted else AwakiTheme.extra.warning,
         fontSize = 10.sp
       )
     }
@@ -199,8 +191,8 @@ internal fun LocalToolPicker(
           verticalAlignment = Alignment.CenterVertically,
           modifier = Modifier
             .clip(RoundedCornerShape(6.dp))
-            .border(1.dp, if (on) ElectricBlue else DarkBorderSubtle, RoundedCornerShape(6.dp))
-            .background(if (on) ElectricBlue.copy(alpha = 0.12f) else DarkBackground)
+            .border(1.dp, if (on) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(6.dp))
+            .background(if (on) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.background)
             .clickable {
               selected = if (on) selected - offering.name else selected + offering.name
             }
@@ -211,12 +203,12 @@ internal fun LocalToolPicker(
             modifier = Modifier
               .size(7.dp)
               .clip(CircleShape)
-              .background(if (on) ElectricBlue else DarkBorderSubtle)
+              .background(if (on) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant)
           )
           Spacer(modifier = Modifier.width(5.dp))
-          Text(offering.name, color = if (on) ElectricBlueGlow else TextSecondary, fontSize = 10.sp)
+          Text(offering.name, color = if (on) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp)
           Spacer(modifier = Modifier.width(5.dp))
-          Text("~${offering.estimatedTokens}", color = TextMuted, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
+          Text("~${offering.estimatedTokens}", color = AwakiTheme.extra.textMuted, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
         }
       }
     }
@@ -239,7 +231,7 @@ internal fun LocalToolPicker(
       Spacer(modifier = Modifier.weight(1f))
       MiniAction(
         label = "Save",
-        tint = ElectricBlueGlow,
+        tint = MaterialTheme.colorScheme.primary,
         modifier = Modifier.testTag("btn_local_tools_save"),
         onClick = { onSave(if (selected == OnDeviceTools.DEFAULT) null else selected) }
       )

@@ -3,6 +3,7 @@ package com.awaki
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.width
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.assertIsDisplayed
@@ -15,7 +16,6 @@ import androidx.compose.ui.unit.dp
 import com.awaki.ui.screens.ChangesHeader
 import com.awaki.ui.screens.ChangesViewMode
 import com.awaki.ui.theme.AwakiTheme
-import com.awaki.ui.theme.DarkBackground
 import com.github.takahirom.roborazzi.RobolectricDeviceQualifiers
 import com.github.takahirom.roborazzi.captureRoboImage
 import org.junit.Assert.assertTrue
@@ -45,7 +45,7 @@ class ChangesHeaderTest {
   private fun render(widthDp: Int, branch: String = longBranch) {
     composeTestRule.setContent {
       AwakiTheme {
-        Box(Modifier.background(DarkBackground)) {
+        Box(Modifier.background(MaterialTheme.colorScheme.background)) {
           Box(Modifier.width(widthDp.dp)) {
             ChangesHeader(
               branch = branch,

@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.ScaffoldDefaults
 import androidx.compose.runtime.*
@@ -37,7 +38,6 @@ import com.awaki.ui.WorkspaceViewModel
 import com.awaki.ui.components.*
 import com.awaki.ui.screens.*
 import com.awaki.ui.screens.settings.SettingsScreen
-import com.awaki.ui.theme.DarkBackground
 import com.awaki.ui.theme.AwakiTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -186,7 +186,7 @@ fun AgentIDEApp(
 
   Scaffold(
     modifier = Modifier.fillMaxSize(),
-    containerColor = DarkBackground,
+    containerColor = MaterialTheme.colorScheme.background,
     contentWindowInsets = if (isImeVisible) {
       ScaffoldDefaults.contentWindowInsets.exclude(WindowInsets.navigationBars)
     } else {
@@ -231,7 +231,7 @@ fun AgentIDEApp(
     Box(
       modifier = Modifier
         .fillMaxSize()
-        .background(DarkBackground)
+        .background(MaterialTheme.colorScheme.background)
         .padding(innerPadding)
     ) {
       Crossfade(targetState = currentDestination, label = "ScreenTransition") { destination ->

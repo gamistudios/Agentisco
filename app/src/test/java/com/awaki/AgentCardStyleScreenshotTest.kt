@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -24,7 +25,6 @@ import com.awaki.ui.screens.ApprovalCard
 import com.awaki.ui.screens.ErrorCard
 import com.awaki.ui.screens.ToolCallRow
 import com.awaki.ui.theme.AwakiTheme
-import com.awaki.ui.theme.DarkBackground
 import com.github.takahirom.roborazzi.RobolectricDeviceQualifiers
 import com.github.takahirom.roborazzi.captureRoboImage
 import org.junit.Assert.assertEquals
@@ -109,7 +109,7 @@ class AgentCardStyleScreenshotTest {
         Column(
           modifier = Modifier
             .fillMaxSize()
-            .background(DarkBackground)
+            .background(MaterialTheme.colorScheme.background)
             .padding(12.dp),
           verticalArrangement = Arrangement.spacedBy(10.dp, Alignment.Top)
         ) {
@@ -143,7 +143,7 @@ class AgentCardStyleScreenshotTest {
   fun `sub-agent work stays collapsed until opened, then closes again`() {
     composeTestRule.setContent {
       AwakiTheme {
-        Column(modifier = Modifier.fillMaxSize().background(DarkBackground).padding(12.dp)) {
+        Column(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(12.dp)) {
           ToolCallRow(item = delegation)
         }
       }
@@ -171,7 +171,7 @@ class AgentCardStyleScreenshotTest {
     var releases = 0
     composeTestRule.setContent {
       AwakiTheme {
-        Column(modifier = Modifier.fillMaxSize().background(DarkBackground).padding(12.dp)) {
+        Column(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(12.dp)) {
           ToolCallRow(
             item = delegation,
             pausedDelegations = if (paused) setOf(delegation.callId) else emptySet(),

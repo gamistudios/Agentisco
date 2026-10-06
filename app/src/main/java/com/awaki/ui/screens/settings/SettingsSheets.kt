@@ -35,6 +35,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -66,20 +67,7 @@ import com.awaki.ui.WorkspaceViewModel
 import com.awaki.ui.UpdateViewModel
 import com.awaki.ui.components.AgentTeamSection
 import com.awaki.ui.components.SkillSection
-import com.awaki.ui.theme.DarkBorder
-import com.awaki.ui.theme.DarkBorderSubtle
-import com.awaki.ui.theme.DarkSurface
-import com.awaki.ui.theme.DarkSurfaceElevated
-import com.awaki.ui.theme.DarkSurfaceHighlight
-import com.awaki.ui.theme.DangerRed
-import com.awaki.ui.theme.ElectricBlue
-import com.awaki.ui.theme.ElectricBlueGlow
-import com.awaki.ui.theme.TerminalGreen
-import com.awaki.ui.theme.TextMuted
-import com.awaki.ui.theme.TextPrimary
-import com.awaki.ui.theme.TextSecondary
-import com.awaki.ui.theme.WarningAmber
-import com.awaki.ui.theme.WarningAmberBg
+import com.awaki.ui.theme.AwakiTheme
 
 /**
  * The detail half of the compact settings screen: anything that is more than one
@@ -101,7 +89,7 @@ fun SettingsSheetHost(
   ModalBottomSheet(
     onDismissRequest = onDismiss,
     sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-    containerColor = DarkSurface,
+    containerColor = MaterialTheme.colorScheme.surface,
     tonalElevation = 8.dp,
     dragHandle = {
       Box(
@@ -110,7 +98,7 @@ fun SettingsSheetHost(
           .width(36.dp)
           .height(4.dp)
           .clip(CircleShape)
-          .background(DarkBorder)
+          .background(MaterialTheme.colorScheme.outline)
       )
     }
   ) {
@@ -145,14 +133,14 @@ private fun SheetHeading(title: String, subtitle: String, tag: String? = null) {
   Column(modifier = Modifier.padding(bottom = 12.dp)) {
     Text(
       text = title,
-      color = TextPrimary,
+      color = MaterialTheme.colorScheme.onSurface,
       fontSize = 16.sp,
       fontWeight = FontWeight.Bold,
       modifier = Modifier.then(if (tag != null) Modifier.testTag(tag) else Modifier)
     )
     if (subtitle.isNotEmpty()) {
       Spacer(modifier = Modifier.height(4.dp))
-      Text(subtitle, color = TextMuted, fontSize = 11.sp, lineHeight = 15.sp)
+      Text(subtitle, color = AwakiTheme.extra.textMuted, fontSize = 11.sp, lineHeight = 15.sp)
     }
   }
 }
@@ -161,14 +149,14 @@ private fun SheetHeading(title: String, subtitle: String, tag: String? = null) {
 private fun SheetNote(text: String, modifier: Modifier = Modifier) {
   Text(
     text = text,
-    color = TextMuted,
+    color = AwakiTheme.extra.textMuted,
     fontSize = 11.5.sp,
     lineHeight = 15.sp,
     modifier = modifier
       .fillMaxWidth()
       .clip(RoundedCornerShape(10.dp))
-      .background(DarkSurfaceElevated)
-      .border(1.dp, DarkBorderSubtle, RoundedCornerShape(10.dp))
+      .background(MaterialTheme.colorScheme.surfaceContainer)
+      .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
       .padding(12.dp)
   )
 }
@@ -477,10 +465,10 @@ private fun CompactionBody(viewModel: WorkspaceViewModel) {
 @Composable
 private fun ContextUsageBar(usage: com.awaki.agent.compact.ContextTokenUsage, contextWindow: Int?) {
   val tint = when {
-    usage.isAboveThreshold -> DangerRed
-    usage.pressurePercent >= 85 -> WarningAmber
-    usage.pressurePercent >= 60 -> ElectricBlueGlow
-    else -> TextSecondary
+    usage.isAboveThreshold -> MaterialTheme.colorScheme.error
+    usage.pressurePercent >= 85 -> AwakiTheme.extra.warning
+    usage.pressurePercent >= 60 -> MaterialTheme.colorScheme.primary
+    else -> MaterialTheme.colorScheme.onSurfaceVariant
   }
   Column(modifier = Modifier.fillMaxWidth()) {
     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -494,7 +482,7 @@ private fun ContextUsageBar(usage: com.awaki.agent.compact.ContextTokenUsage, co
       Spacer(modifier = Modifier.width(8.dp))
       Text(
         text = usage.detail() + (contextWindow?.let { " · model window $it" } ?: ""),
-        color = TextMuted,
+        color = AwakiTheme.extra.textMuted,
         fontSize = 10.sp,
         maxLines = 1
       )
@@ -503,7 +491,7 @@ private fun ContextUsageBar(usage: com.awaki.agent.compact.ContextTokenUsage, co
     LinearProgressIndicator(
       progress = { (usage.percent / 100f).coerceIn(0f, 1f) },
       color = tint,
-      trackColor = DarkSurfaceHighlight,
+      trackColor = MaterialTheme.colorScheme.surfaceContainerHigh,
       modifier = Modifier
         .fillMaxWidth()
         .height(4.dp)
@@ -530,25 +518,25 @@ private fun SliderRow(
       horizontalArrangement = Arrangement.SpaceBetween,
       verticalAlignment = Alignment.CenterVertically
     ) {
-      Text(label, color = TextPrimary, fontSize = 13.sp)
+      Text(label, color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp)
       Text(
         text = value,
-        color = ElectricBlue,
+        color = MaterialTheme.colorScheme.primary,
         fontSize = 13.sp,
         fontWeight = FontWeight.SemiBold,
         modifier = Modifier.then(if (valueTag != null) Modifier.testTag(valueTag) else Modifier)
       )
     }
-    Text(detail, color = TextMuted, fontSize = 11.sp, lineHeight = 14.sp)
+    Text(detail, color = AwakiTheme.extra.textMuted, fontSize = 11.sp, lineHeight = 14.sp)
     Slider(
       value = sliderValue,
       onValueChange = onValueChange,
       valueRange = range,
       steps = steps,
       colors = SliderDefaults.colors(
-        thumbColor = ElectricBlue,
-        activeTrackColor = ElectricBlue,
-        inactiveTrackColor = DarkSurfaceHighlight
+        thumbColor = MaterialTheme.colorScheme.primary,
+        activeTrackColor = MaterialTheme.colorScheme.primary,
+        inactiveTrackColor = MaterialTheme.colorScheme.surfaceContainerHigh
       ),
       modifier = Modifier
         .fillMaxWidth()
@@ -569,8 +557,8 @@ private fun SheetAction(
     modifier = Modifier
       .fillMaxWidth()
       .clip(RoundedCornerShape(10.dp))
-      .background(if (enabled) DarkSurfaceElevated else DarkSurface)
-      .border(1.dp, if (enabled) DarkBorder else DarkBorderSubtle, RoundedCornerShape(10.dp))
+      .background(if (enabled) MaterialTheme.colorScheme.surfaceContainer else MaterialTheme.colorScheme.surface)
+      .border(1.dp, if (enabled) MaterialTheme.colorScheme.outline else MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
       .clickable(enabled = enabled, onClick = onClick)
       .padding(horizontal = 12.dp, vertical = 12.dp)
       .testTag(tag),
@@ -579,11 +567,11 @@ private fun SheetAction(
     Icon(
       icon,
       contentDescription = null,
-      tint = if (enabled) ElectricBlueGlow else TextMuted,
+      tint = if (enabled) MaterialTheme.colorScheme.primary else AwakiTheme.extra.textMuted,
       modifier = Modifier.size(15.dp)
     )
     Spacer(modifier = Modifier.width(9.dp))
-    Text(label, color = if (enabled) TextPrimary else TextMuted, fontSize = 12.5.sp)
+    Text(label, color = if (enabled) MaterialTheme.colorScheme.onSurface else AwakiTheme.extra.textMuted, fontSize = 12.5.sp)
   }
 }
 
@@ -612,8 +600,8 @@ private fun BackgroundChecksBody(viewModel: WorkspaceViewModel) {
     modifier = Modifier
       .fillMaxWidth()
       .clip(RoundedCornerShape(14.dp))
-      .background(DarkSurface)
-      .border(1.dp, DarkBorderSubtle, RoundedCornerShape(14.dp))
+      .background(MaterialTheme.colorScheme.surface)
+      .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(14.dp))
       .padding(horizontal = 12.dp)
   ) {
     requirements.forEachIndexed { index, requirement ->
@@ -628,7 +616,7 @@ private fun BackgroundChecksBody(viewModel: WorkspaceViewModel) {
         }
       )
       if (index < requirements.lastIndex) {
-        HorizontalDivider(color = DarkBorderSubtle, thickness = 0.5.dp)
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
       }
     }
   }
@@ -639,28 +627,28 @@ private fun BackgroundChecksBody(viewModel: WorkspaceViewModel) {
       modifier = Modifier
         .fillMaxWidth()
         .clip(RoundedCornerShape(10.dp))
-        .background(WarningAmberBg.copy(alpha = 0.45f))
+        .background(AwakiTheme.extra.warningContainer.copy(alpha = 0.45f))
         .padding(12.dp)
         .testTag("card_interrupted_work")
     ) {
       Text(
         "Interrupted while Awaki was closed",
-        color = WarningAmber,
+        color = AwakiTheme.extra.warning,
         fontSize = 12.sp,
         fontWeight = FontWeight.SemiBold
       )
       interrupted.forEach { entry ->
-        Text(entry.label, color = TextSecondary, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+        Text(entry.label, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
       }
       Text(
         "Nothing was restarted automatically — resuming spends your data and your API quota.",
-        color = TextMuted,
+        color = AwakiTheme.extra.textMuted,
         fontSize = 11.sp,
         lineHeight = 14.sp
       )
       Text(
         "Dismiss",
-        color = ElectricBlueGlow,
+        color = MaterialTheme.colorScheme.primary,
         fontSize = 12.sp,
         fontWeight = FontWeight.Bold,
         modifier = Modifier
@@ -678,10 +666,10 @@ private fun RequirementRow(
   onAction: (RequirementAction) -> Unit
 ) {
   val statusColor = when {
-    requirement.status == RequirementStatus.GRANTED -> TerminalGreen
-    requirement.status == RequirementStatus.ACTION_REQUIRED && requirement.blocking -> DangerRed
-    requirement.status == RequirementStatus.ACTION_REQUIRED -> WarningAmber
-    else -> TextMuted
+    requirement.status == RequirementStatus.GRANTED -> AwakiTheme.extra.success
+    requirement.status == RequirementStatus.ACTION_REQUIRED && requirement.blocking -> MaterialTheme.colorScheme.error
+    requirement.status == RequirementStatus.ACTION_REQUIRED -> AwakiTheme.extra.warning
+    else -> AwakiTheme.extra.textMuted
   }
   Row(
     modifier = Modifier
@@ -692,7 +680,7 @@ private fun RequirementRow(
   ) {
     Column(modifier = Modifier.weight(1f)) {
       Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(requirement.title, color = TextPrimary, fontSize = 13.sp)
+        Text(requirement.title, color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp)
         Spacer(modifier = Modifier.width(6.dp))
         Text(
           when (requirement.status) {
@@ -706,19 +694,19 @@ private fun RequirementRow(
           fontWeight = FontWeight.Bold
         )
       }
-      Text(requirement.description, color = TextMuted, fontSize = 11.sp, lineHeight = 14.sp)
+      Text(requirement.description, color = AwakiTheme.extra.textMuted, fontSize = 11.sp, lineHeight = 14.sp)
     }
     if (requirement.action != RequirementAction.NONE) {
       Spacer(modifier = Modifier.width(8.dp))
       Text(
         if (requirement.status == RequirementStatus.GRANTED) "Settings" else "Fix",
-        color = ElectricBlueGlow,
+        color = MaterialTheme.colorScheme.primary,
         fontSize = 12.sp,
         fontWeight = FontWeight.Bold,
         modifier = Modifier
           .clip(RoundedCornerShape(6.dp))
-          .border(1.dp, DarkBorder, RoundedCornerShape(6.dp))
-          .background(DarkSurfaceElevated)
+          .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(6.dp))
+          .background(MaterialTheme.colorScheme.surfaceContainer)
           .padding(horizontal = 8.dp, vertical = 4.dp)
           .clickable { onAction(requirement.action) }
           .testTag("btn_requirement_${requirement.key.name.lowercase()}")
@@ -741,8 +729,8 @@ private fun SyntaxThemeBody(viewModel: WorkspaceViewModel) {
     modifier = Modifier
       .fillMaxWidth()
       .clip(RoundedCornerShape(14.dp))
-      .background(DarkSurface)
-      .border(1.dp, DarkBorderSubtle, RoundedCornerShape(14.dp))
+      .background(MaterialTheme.colorScheme.surface)
+      .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(14.dp))
   ) {
     SyntaxTheme.allThemes.forEachIndexed { index, theme ->
       val selected = theme.name == settings.syntaxThemeName
@@ -758,7 +746,7 @@ private fun SyntaxThemeBody(viewModel: WorkspaceViewModel) {
         Column(modifier = Modifier.weight(1f)) {
           Text(
             theme.name,
-            color = if (selected) ElectricBlueGlow else TextPrimary,
+            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
             fontSize = 13.5.sp,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium
           )
@@ -774,10 +762,10 @@ private fun SyntaxThemeBody(viewModel: WorkspaceViewModel) {
             }
           }
         }
-        if (selected) Text("In use", color = TextMuted, fontSize = 11.sp)
+        if (selected) Text("In use", color = AwakiTheme.extra.textMuted, fontSize = 11.sp)
       }
       if (index < SyntaxTheme.allThemes.lastIndex) {
-        HorizontalDivider(color = DarkBorderSubtle, thickness = 0.5.dp)
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
       }
     }
   }
@@ -867,7 +855,7 @@ private fun UpdatesBody(updateViewModel: UpdateViewModel) {
       if (state.updateState == UpdateRepository.UpdateState.CHECKING ||
         state.updateState == UpdateRepository.UpdateState.DOWNLOADING
       ) {
-        CircularProgressIndicator(color = ElectricBlue, strokeWidth = 2.dp, modifier = Modifier.size(14.dp))
+        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary, strokeWidth = 2.dp, modifier = Modifier.size(14.dp))
         Spacer(modifier = Modifier.width(8.dp))
       }
       Text(
@@ -879,7 +867,7 @@ private fun UpdatesBody(updateViewModel: UpdateViewModel) {
           UpdateRepository.UpdateState.AVAILABLE -> "An update is available"
           else -> ""
         },
-        color = if (state.updateState == UpdateRepository.UpdateState.ERROR) DangerRed else TextSecondary,
+        color = if (state.updateState == UpdateRepository.UpdateState.ERROR) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
         fontSize = 11.5.sp,
         fontFamily = FontFamily.Monospace,
         modifier = Modifier.testTag("txt_update_state")

@@ -19,6 +19,7 @@ import androidx.compose.material.icons.automirrored.outlined.*
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -40,6 +41,7 @@ import com.awaki.data.model.ProjectFile
 import com.awaki.data.repository.WorkspaceRepository
 import com.awaki.ui.WorkspaceViewModel
 import com.awaki.ui.theme.*
+import com.awaki.ui.theme.AwakiTheme
 import com.awaki.workspace.git.DiffCopyType
 import com.awaki.workspace.git.GitFileStatus
 import com.awaki.workspace.git.GitRepoStatus
@@ -93,14 +95,14 @@ internal fun ChangesHeader(
           .size(32.dp)
           .testTag("btn_changes_back")
       ) {
-        Icon(Icons.Default.ChevronLeft, contentDescription = "Back", tint = TextPrimary)
+        Icon(Icons.Default.ChevronLeft, contentDescription = "Back", tint = MaterialTheme.colorScheme.onSurface)
       }
       Spacer(modifier = Modifier.width(6.dp))
       Column(modifier = Modifier.horizontalScroll(rememberScrollState())) {
         Row(verticalAlignment = Alignment.CenterVertically) {
           Text(
             text = "Changes",
-            color = TextPrimary,
+            color = MaterialTheme.colorScheme.onSurface,
             fontSize = 16.sp,
             fontWeight = FontWeight.Bold,
             maxLines = 1
@@ -109,8 +111,8 @@ internal fun ChangesHeader(
           // Branch chip
           Surface(
             shape = RoundedCornerShape(4.dp),
-            color = DarkSurfaceHighlight,
-            border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorderSubtle)
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
           ) {
             Row(
               modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
@@ -119,13 +121,13 @@ internal fun ChangesHeader(
               Icon(
                 imageVector = Icons.Outlined.Commit,
                 contentDescription = null,
-                tint = ElectricBlueGlow,
+                tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.size(11.dp)
               )
               Spacer(modifier = Modifier.width(3.dp))
               Text(
                 text = branch.ifBlank { "main" },
-                color = ElectricBlueGlow,
+                color = MaterialTheme.colorScheme.primary,
                 fontSize = 10.sp,
                 fontFamily = FontFamily.Monospace,
                 fontWeight = FontWeight.SemiBold,
@@ -140,7 +142,7 @@ internal fun ChangesHeader(
         Row(verticalAlignment = Alignment.CenterVertically) {
           Text(
             text = "$filesChanged files changed",
-            color = TextSecondary,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             fontSize = 11.sp,
             maxLines = 1
           )
@@ -148,7 +150,7 @@ internal fun ChangesHeader(
             Spacer(modifier = Modifier.width(6.dp))
             Text(
               text = "+$additions",
-              color = TerminalGreen,
+              color = AwakiTheme.extra.success,
               fontSize = 11.sp,
               fontWeight = FontWeight.Bold,
               fontFamily = FontFamily.Monospace,
@@ -157,7 +159,7 @@ internal fun ChangesHeader(
             Spacer(modifier = Modifier.width(4.dp))
             Text(
               text = "-$deletions",
-              color = DangerRed,
+              color = MaterialTheme.colorScheme.error,
               fontSize = 11.sp,
               fontWeight = FontWeight.Bold,
               fontFamily = FontFamily.Monospace,
@@ -180,7 +182,7 @@ internal fun ChangesHeader(
           .size(32.dp)
           .testTag("btn_refresh_changes")
       ) {
-        Icon(Icons.Default.Refresh, contentDescription = "Refresh changes", tint = TextSecondary, modifier = Modifier.size(18.dp))
+        Icon(Icons.Default.Refresh, contentDescription = "Refresh changes", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
       }
 
       // Search toggle
@@ -191,7 +193,7 @@ internal fun ChangesHeader(
         Icon(
           if (isSearchOpen) Icons.Default.Close else Icons.Default.Search,
           contentDescription = "Search files",
-          tint = if (isSearchOpen) ElectricBlue else TextSecondary,
+          tint = if (isSearchOpen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
           modifier = Modifier.size(18.dp)
         )
       }
@@ -199,29 +201,29 @@ internal fun ChangesHeader(
       // View mode toggle (Files List vs Diff Viewer)
       Surface(
         shape = RoundedCornerShape(6.dp),
-        color = DarkSurfaceHighlight,
-        border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorderSubtle),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         modifier = Modifier.padding(start = 2.dp)
       ) {
         Row(modifier = Modifier.padding(2.dp)) {
           Box(
             modifier = Modifier
               .clip(RoundedCornerShape(4.dp))
-              .background(if (viewMode == ChangesViewMode.FILES_LIST) ElectricBlue else Color.Transparent)
+              .background(if (viewMode == ChangesViewMode.FILES_LIST) MaterialTheme.colorScheme.primary else Color.Transparent)
               .clickable { onViewModeChange(ChangesViewMode.FILES_LIST) }
               .padding(horizontal = 7.dp, vertical = 4.dp)
           ) {
             Icon(
               Icons.AutoMirrored.Outlined.FormatListBulleted,
               contentDescription = "Files List",
-              tint = if (viewMode == ChangesViewMode.FILES_LIST) Color.White else TextSecondary,
+              tint = if (viewMode == ChangesViewMode.FILES_LIST) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
               modifier = Modifier.size(15.dp)
             )
           }
           Box(
             modifier = Modifier
               .clip(RoundedCornerShape(4.dp))
-              .background(if (viewMode == ChangesViewMode.DIFF_VIEWER) ElectricBlue else Color.Transparent)
+              .background(if (viewMode == ChangesViewMode.DIFF_VIEWER) MaterialTheme.colorScheme.primary else Color.Transparent)
               .clickable {
                 if (canShowDiff) {
                   onViewModeChange(ChangesViewMode.DIFF_VIEWER)
@@ -232,7 +234,7 @@ internal fun ChangesHeader(
             Icon(
               Icons.Outlined.Difference,
               contentDescription = "Diff Viewer",
-              tint = if (viewMode == ChangesViewMode.DIFF_VIEWER) Color.White else TextSecondary,
+              tint = if (viewMode == ChangesViewMode.DIFF_VIEWER) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
               modifier = Modifier.size(15.dp)
             )
           }
@@ -246,11 +248,11 @@ internal fun ChangesHeader(
           .height(30.dp)
           .testTag("btn_goto_git"),
         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder)
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
       ) {
-        Icon(Icons.Outlined.ForkRight, contentDescription = null, tint = ElectricBlueGlow, modifier = Modifier.size(13.dp))
+        Icon(Icons.Outlined.ForkRight, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(13.dp))
         Spacer(modifier = Modifier.width(3.dp))
-        Text("Git", color = TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+        Text("Git", color = MaterialTheme.colorScheme.onSurface, fontSize = 11.sp, fontWeight = FontWeight.Medium)
       }
     }
   }
@@ -377,15 +379,15 @@ fun DiffScreen(
   Column(
     modifier = modifier
       .fillMaxSize()
-      .background(DarkBackground)
+      .background(MaterialTheme.colorScheme.background)
   ) {
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     // TOP HEADER
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     Surface(
       modifier = Modifier.fillMaxWidth(),
-      color = DarkSurface,
-      border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorderSubtle)
+      color = MaterialTheme.colorScheme.surface,
+      border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
     ) {
       Column {
         ChangesHeader(
@@ -415,16 +417,16 @@ fun DiffScreen(
           Row(
             modifier = Modifier
               .fillMaxWidth()
-              .background(DarkSurfaceElevated)
+              .background(MaterialTheme.colorScheme.surfaceContainer)
               .padding(horizontal = 12.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
           ) {
-            Icon(Icons.Default.Search, contentDescription = null, tint = TextMuted, modifier = Modifier.size(16.dp))
+            Icon(Icons.Default.Search, contentDescription = null, tint = AwakiTheme.extra.textMuted, modifier = Modifier.size(16.dp))
             Spacer(modifier = Modifier.width(8.dp))
             OutlinedTextField(
               value = searchQuery,
               onValueChange = { searchQuery = it },
-              placeholder = { Text("Filter changed files...", color = TextMuted, fontSize = 12.sp) },
+              placeholder = { Text("Filter changed files...", color = AwakiTheme.extra.textMuted, fontSize = 12.sp) },
               singleLine = true,
               modifier = Modifier
                 .weight(1f)
@@ -432,14 +434,14 @@ fun DiffScreen(
               colors = OutlinedTextFieldDefaults.colors(
                 focusedBorderColor = Color.Transparent,
                 unfocusedBorderColor = Color.Transparent,
-                focusedTextColor = TextPrimary,
-                unfocusedTextColor = TextPrimary
+                focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                unfocusedTextColor = MaterialTheme.colorScheme.onSurface
               ),
               textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp)
             )
             if (searchQuery.isNotEmpty()) {
               IconButton(onClick = { searchQuery = "" }, modifier = Modifier.size(28.dp)) {
-                Icon(Icons.Default.Clear, contentDescription = "Clear", tint = TextMuted, modifier = Modifier.size(15.dp))
+                Icon(Icons.Default.Clear, contentDescription = "Clear", tint = AwakiTheme.extra.textMuted, modifier = Modifier.size(15.dp))
               }
             }
           }
@@ -453,8 +455,8 @@ fun DiffScreen(
     if (activeGitOp != null) {
       Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = ElectricBlue.copy(alpha = 0.15f),
-        border = androidx.compose.foundation.BorderStroke(1.dp, ElectricBlue.copy(alpha = 0.4f))
+        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f))
       ) {
         Row(
           modifier = Modifier
@@ -465,12 +467,12 @@ fun DiffScreen(
           CircularProgressIndicator(
             modifier = Modifier.size(14.dp),
             strokeWidth = 2.dp,
-            color = ElectricBlueGlow
+            color = MaterialTheme.colorScheme.primary
           )
           Spacer(modifier = Modifier.width(10.dp))
           Text(
             text = activeGitOp!!,
-            color = ElectricBlueGlow,
+            color = MaterialTheme.colorScheme.primary,
             fontSize = 12.sp,
             fontWeight = FontWeight.Medium
           )
@@ -481,8 +483,8 @@ fun DiffScreen(
     if (gitFeedback != null) {
       Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = TerminalGreenBg.copy(alpha = 0.25f),
-        border = androidx.compose.foundation.BorderStroke(1.dp, TerminalGreen.copy(alpha = 0.4f))
+        color = AwakiTheme.extra.successContainer.copy(alpha = 0.25f),
+        border = androidx.compose.foundation.BorderStroke(1.dp, AwakiTheme.extra.success.copy(alpha = 0.4f))
       ) {
         Row(
           modifier = Modifier
@@ -492,11 +494,11 @@ fun DiffScreen(
           horizontalArrangement = Arrangement.SpaceBetween
         ) {
           Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Outlined.CheckCircle, contentDescription = null, tint = TerminalGreen, modifier = Modifier.size(15.dp))
+            Icon(Icons.Outlined.CheckCircle, contentDescription = null, tint = AwakiTheme.extra.success, modifier = Modifier.size(15.dp))
             Spacer(modifier = Modifier.width(8.dp))
             Text(
               text = gitFeedback!!,
-              color = TerminalGreen,
+              color = AwakiTheme.extra.success,
               fontSize = 12.sp
             )
           }
@@ -504,7 +506,7 @@ fun DiffScreen(
             onClick = { viewModel.clearGitOperationFeedback() },
             modifier = Modifier.size(24.dp)
           ) {
-            Icon(Icons.Default.Close, contentDescription = "Dismiss", tint = TextMuted, modifier = Modifier.size(14.dp))
+            Icon(Icons.Default.Close, contentDescription = "Dismiss", tint = AwakiTheme.extra.textMuted, modifier = Modifier.size(14.dp))
           }
         }
       }
@@ -513,8 +515,8 @@ fun DiffScreen(
     if (gitError != null) {
       Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = DangerRedBg.copy(alpha = 0.25f),
-        border = androidx.compose.foundation.BorderStroke(1.dp, DangerRed.copy(alpha = 0.5f))
+        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.25f),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f))
       ) {
         Row(
           modifier = Modifier
@@ -522,31 +524,31 @@ fun DiffScreen(
             .padding(horizontal = 14.dp, vertical = 8.dp),
           verticalAlignment = Alignment.CenterVertically
         ) {
-          Icon(Icons.Outlined.Warning, contentDescription = null, tint = DangerRed, modifier = Modifier.size(16.dp))
+          Icon(Icons.Outlined.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
           Spacer(modifier = Modifier.width(8.dp))
           Text(
             text = gitError!!,
-            color = DangerRed,
+            color = MaterialTheme.colorScheme.error,
             fontSize = 11.sp,
             lineHeight = 15.sp,
             modifier = Modifier.weight(1f)
           )
           if (gitError!!.contains("index.lock", ignoreCase = true)) {
             TextButton(onClick = { viewModel.clearGitIndexLock() }) {
-              Text("Remove lock", fontSize = 11.sp, color = DangerRed)
+              Text("Remove lock", fontSize = 11.sp, color = MaterialTheme.colorScheme.error)
             }
           }
           IconButton(
             onClick = { clipboard.setText(AnnotatedString(gitError!!)) },
             modifier = Modifier.size(26.dp)
           ) {
-            Icon(Icons.Outlined.ContentCopy, contentDescription = "Copy error", tint = TextMuted, modifier = Modifier.size(13.dp))
+            Icon(Icons.Outlined.ContentCopy, contentDescription = "Copy error", tint = AwakiTheme.extra.textMuted, modifier = Modifier.size(13.dp))
           }
           IconButton(
             onClick = { viewModel.dismissGitError() },
             modifier = Modifier.size(26.dp)
           ) {
-            Icon(Icons.Default.Close, contentDescription = "Dismiss", tint = TextMuted, modifier = Modifier.size(14.dp))
+            Icon(Icons.Default.Close, contentDescription = "Dismiss", tint = AwakiTheme.extra.textMuted, modifier = Modifier.size(14.dp))
           }
         }
       }
@@ -560,7 +562,7 @@ fun DiffScreen(
         state = listState,
         modifier = Modifier
           .fillMaxSize()
-          .background(DarkBackground),
+          .background(MaterialTheme.colorScheme.background),
         contentPadding = PaddingValues(bottom = 32.dp)
       ) {
         // ── 1. QUICK COMMIT BOX (VS Code style) ──
@@ -635,13 +637,13 @@ fun DiffScreen(
                 Icon(
                   if (isMultiSelectMode) Icons.Default.Close else Icons.Outlined.Checklist,
                   contentDescription = null,
-                  tint = if (isMultiSelectMode) ElectricBlue else TextMuted,
+                  tint = if (isMultiSelectMode) MaterialTheme.colorScheme.primary else AwakiTheme.extra.textMuted,
                   modifier = Modifier.size(14.dp)
                 )
                 Spacer(modifier = Modifier.width(4.dp))
                 Text(
                   if (isMultiSelectMode) "Exit Multi-select" else "Select Files",
-                  color = if (isMultiSelectMode) ElectricBlue else TextSecondary,
+                  color = if (isMultiSelectMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                   fontSize = 11.sp
                 )
               }
@@ -654,7 +656,7 @@ fun DiffScreen(
               ChangesSectionHeader(
                 title = "CONFLICTED FILES",
                 count = filteredConflicted.size,
-                badgeColor = DangerRed,
+                badgeColor = MaterialTheme.colorScheme.error,
                 actionLabel = null,
                 onAction = null
               )
@@ -698,7 +700,7 @@ fun DiffScreen(
               ChangesSectionHeader(
                 title = "STAGED CHANGES",
                 count = filteredStaged.size,
-                badgeColor = TerminalGreen,
+                badgeColor = AwakiTheme.extra.success,
                 actionLabel = "Unstage All",
                 onAction = { viewModel.unstageAll() }
               )
@@ -737,7 +739,7 @@ fun DiffScreen(
               ChangesSectionHeader(
                 title = "CHANGES",
                 count = filteredUnstaged.size,
-                badgeColor = WarningAmber,
+                badgeColor = AwakiTheme.extra.warning,
                 actionLabel = "Stage All",
                 onAction = { viewModel.stageAll() },
                 secondaryActionLabel = "Discard All",
@@ -778,7 +780,7 @@ fun DiffScreen(
               ChangesSectionHeader(
                 title = "UNTRACKED FILES",
                 count = filteredUntracked.size,
-                badgeColor = CyanAccent,
+                badgeColor = MaterialTheme.colorScheme.secondary,
                 actionLabel = "Stage All",
                 onAction = { viewModel.stageAll() }
               )
@@ -870,12 +872,12 @@ fun DiffScreen(
   if (fileToDiscard != null) {
     AlertDialog(
       onDismissRequest = { fileToDiscard = null },
-      icon = { Icon(Icons.Outlined.Warning, contentDescription = null, tint = DangerRed) },
-      title = { Text("Discard Changes?", color = TextPrimary, fontWeight = FontWeight.Bold) },
+      icon = { Icon(Icons.Outlined.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+      title = { Text("Discard Changes?", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) },
       text = {
         Text(
           "Are you sure you want to discard all working-tree changes to \"${fileToDiscard}\"?\n\nThis cannot be undone.",
-          color = TextSecondary,
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
           fontSize = 13.sp
         )
       },
@@ -886,17 +888,17 @@ fun DiffScreen(
             fileToDiscard = null
             viewModel.rejectDiff(path)
           },
-          colors = ButtonDefaults.buttonColors(containerColor = DangerRed)
+          colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
         ) {
-          Text("Discard Changes", color = Color.White)
+          Text("Discard Changes", color = MaterialTheme.colorScheme.onError)
         }
       },
       dismissButton = {
         OutlinedButton(onClick = { fileToDiscard = null }) {
-          Text("Cancel", color = TextSecondary)
+          Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
       },
-      containerColor = DarkSurface,
+      containerColor = MaterialTheme.colorScheme.surface,
       shape = RoundedCornerShape(12.dp)
     )
   }
@@ -905,12 +907,12 @@ fun DiffScreen(
   if (fileToDeleteUntracked != null) {
     AlertDialog(
       onDismissRequest = { fileToDeleteUntracked = null },
-      icon = { Icon(Icons.Outlined.Delete, contentDescription = null, tint = DangerRed) },
-      title = { Text("Delete Untracked File?", color = TextPrimary, fontWeight = FontWeight.Bold) },
+      icon = { Icon(Icons.Outlined.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+      title = { Text("Delete Untracked File?", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) },
       text = {
         Text(
           "Are you sure you want to permanently delete \"${fileToDeleteUntracked}\"?\n\nThe file will be deleted from your storage.",
-          color = TextSecondary,
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
           fontSize = 13.sp
         )
       },
@@ -921,17 +923,17 @@ fun DiffScreen(
             fileToDeleteUntracked = null
             viewModel.deleteUntrackedFile(path)
           },
-          colors = ButtonDefaults.buttonColors(containerColor = DangerRed)
+          colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
         ) {
-          Text("Delete File", color = Color.White)
+          Text("Delete File", color = MaterialTheme.colorScheme.onError)
         }
       },
       dismissButton = {
         OutlinedButton(onClick = { fileToDeleteUntracked = null }) {
-          Text("Cancel", color = TextSecondary)
+          Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
       },
-      containerColor = DarkSurface,
+      containerColor = MaterialTheme.colorScheme.surface,
       shape = RoundedCornerShape(12.dp)
     )
   }
@@ -940,12 +942,12 @@ fun DiffScreen(
   if (showDiscardAllConfirm) {
     AlertDialog(
       onDismissRequest = { showDiscardAllConfirm = false },
-      icon = { Icon(Icons.Outlined.Warning, contentDescription = null, tint = DangerRed) },
-      title = { Text("Discard ALL Changes?", color = TextPrimary, fontWeight = FontWeight.Bold) },
+      icon = { Icon(Icons.Outlined.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+      title = { Text("Discard ALL Changes?", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) },
       text = {
         Text(
           "This will revert ALL unstaged changes across your entire project back to the last commit.\n\nAll uncommitted work will be permanently lost.",
-          color = TextSecondary,
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
           fontSize = 13.sp
         )
       },
@@ -955,17 +957,17 @@ fun DiffScreen(
             showDiscardAllConfirm = false
             viewModel.rejectAllDiffs()
           },
-          colors = ButtonDefaults.buttonColors(containerColor = DangerRed)
+          colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
         ) {
-          Text("Discard All Changes", color = Color.White)
+          Text("Discard All Changes", color = MaterialTheme.colorScheme.onError)
         }
       },
       dismissButton = {
         OutlinedButton(onClick = { showDiscardAllConfirm = false }) {
-          Text("Cancel", color = TextSecondary)
+          Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
       },
-      containerColor = DarkSurface,
+      containerColor = MaterialTheme.colorScheme.surface,
       shape = RoundedCornerShape(12.dp)
     )
   }
@@ -979,7 +981,7 @@ fun DiffScreen(
         aiAnalysisTitle = null
         aiAnalysisContent = null
       },
-      containerColor = DarkSurface,
+      containerColor = MaterialTheme.colorScheme.surface,
       shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
     ) {
       Column(
@@ -993,11 +995,11 @@ fun DiffScreen(
           verticalAlignment = Alignment.CenterVertically
         ) {
           Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Outlined.AutoAwesome, contentDescription = null, tint = ElectricBlueGlow, modifier = Modifier.size(18.dp))
+            Icon(Icons.Outlined.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
             Spacer(modifier = Modifier.width(8.dp))
             Text(
               text = aiAnalysisTitle!!,
-              color = TextPrimary,
+              color = MaterialTheme.colorScheme.onSurface,
               fontSize = 15.sp,
               fontWeight = FontWeight.Bold
             )
@@ -1007,7 +1009,7 @@ fun DiffScreen(
               onClick = { clipboard.setText(AnnotatedString(aiAnalysisContent!!)) },
               modifier = Modifier.size(30.dp)
             ) {
-              Icon(Icons.Outlined.ContentCopy, contentDescription = "Copy", tint = TextSecondary, modifier = Modifier.size(16.dp))
+              Icon(Icons.Outlined.ContentCopy, contentDescription = "Copy", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
             }
           }
         }
@@ -1022,9 +1024,9 @@ fun DiffScreen(
             contentAlignment = Alignment.Center
           ) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-              CircularProgressIndicator(color = ElectricBlue, modifier = Modifier.size(28.dp), strokeWidth = 2.5.dp)
+              CircularProgressIndicator(color = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp), strokeWidth = 2.5.dp)
               Spacer(modifier = Modifier.height(12.dp))
-              Text("Analyzing diff with AI…", color = TextSecondary, fontSize = 12.sp)
+              Text("Analyzing diff with AI…", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
             }
           }
         } else if (aiAnalysisContent != null) {
@@ -1032,15 +1034,15 @@ fun DiffScreen(
             modifier = Modifier
               .fillMaxWidth()
               .heightIn(max = 420.dp),
-            color = DarkSurfaceElevated,
+            color = MaterialTheme.colorScheme.surfaceContainer,
             shape = RoundedCornerShape(8.dp),
-            border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorderSubtle)
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
           ) {
             LazyColumn(modifier = Modifier.padding(14.dp)) {
               item {
                 Text(
                   text = aiAnalysisContent!!,
-                  color = TextPrimary,
+                  color = MaterialTheme.colorScheme.onSurface,
                   fontSize = 13.sp,
                   lineHeight = 19.sp
                 )
@@ -1056,9 +1058,9 @@ fun DiffScreen(
             aiAnalysisContent = null
           },
           modifier = Modifier.fillMaxWidth(),
-          colors = ButtonDefaults.buttonColors(containerColor = DarkSurfaceHighlight)
+          colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
         ) {
-          Text("Close", color = TextPrimary)
+          Text("Close", color = MaterialTheme.colorScheme.onSurface)
         }
         Spacer(modifier = Modifier.height(12.dp))
       }
@@ -1088,8 +1090,8 @@ private fun QuickCommitCard(
       .fillMaxWidth()
       .padding(horizontal = 14.dp, vertical = 8.dp),
     shape = RoundedCornerShape(10.dp),
-    colors = CardDefaults.cardColors(containerColor = DarkSurface),
-    border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorderSubtle)
+    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
   ) {
     Column(modifier = Modifier.padding(12.dp)) {
       // Input Row
@@ -1103,7 +1105,7 @@ private fun QuickCommitCard(
           placeholder = {
             Text(
               "Commit message (type or generate with ✨)…",
-              color = TextMuted,
+              color = AwakiTheme.extra.textMuted,
               fontSize = 12.sp
             )
           },
@@ -1112,12 +1114,12 @@ private fun QuickCommitCard(
             .heightIn(min = 52.dp, max = 100.dp)
             .testTag("input_commit_message"),
           colors = OutlinedTextFieldDefaults.colors(
-            focusedBorderColor = ElectricBlue,
-            unfocusedBorderColor = DarkBorder,
-            focusedTextColor = TextPrimary,
-            unfocusedTextColor = TextPrimary,
-            focusedContainerColor = DarkSurfaceElevated,
-            unfocusedContainerColor = DarkSurfaceElevated
+            focusedBorderColor = MaterialTheme.colorScheme.primary,
+            unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+            focusedTextColor = MaterialTheme.colorScheme.onSurface,
+            unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainer
           ),
           textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp, fontFamily = FontFamily.Monospace),
           maxLines = 3
@@ -1132,21 +1134,21 @@ private fun QuickCommitCard(
           modifier = Modifier
             .size(44.dp)
             .clip(RoundedCornerShape(8.dp))
-            .background(DarkSurfaceHighlight)
-            .border(1.dp, IndigoAccent.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .border(1.dp, MaterialTheme.colorScheme.tertiary.copy(alpha = 0.6f), RoundedCornerShape(8.dp))
             .testTag("btn_ai_generate_commit")
         ) {
           if (commitGenState is WorkspaceRepository.CommitGenState.Generating) {
             CircularProgressIndicator(
               modifier = Modifier.size(16.dp),
               strokeWidth = 2.dp,
-              color = IndigoAccent
+              color = MaterialTheme.colorScheme.tertiary
             )
           } else {
             Icon(
               Icons.Outlined.AutoAwesome,
               contentDescription = "AI Generate Commit Message",
-              tint = IndigoAccent,
+              tint = MaterialTheme.colorScheme.tertiary,
               modifier = Modifier.size(18.dp)
             )
           }
@@ -1165,7 +1167,7 @@ private fun QuickCommitCard(
         Row(verticalAlignment = Alignment.CenterVertically) {
           Surface(
             shape = RoundedCornerShape(4.dp),
-            color = if (stagedCount > 0) TerminalGreenBg.copy(alpha = 0.4f) else DarkSurfaceHighlight
+            color = if (stagedCount > 0) AwakiTheme.extra.successContainer.copy(alpha = 0.4f) else MaterialTheme.colorScheme.surfaceContainerHigh
           ) {
             Row(
               modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
@@ -1175,12 +1177,12 @@ private fun QuickCommitCard(
                 modifier = Modifier
                   .size(6.dp)
                   .clip(CircleShape)
-                  .background(if (stagedCount > 0) TerminalGreen else TextMuted)
+                  .background(if (stagedCount > 0) AwakiTheme.extra.success else AwakiTheme.extra.textMuted)
               )
               Spacer(modifier = Modifier.width(4.dp))
               Text(
                 text = if (stagedCount > 0) "$stagedCount staged" else "0 staged",
-                color = if (stagedCount > 0) TerminalGreen else TextMuted,
+                color = if (stagedCount > 0) AwakiTheme.extra.success else AwakiTheme.extra.textMuted,
                 fontSize = 11.sp,
                 fontFamily = FontFamily.Monospace,
                 fontWeight = FontWeight.Medium
@@ -1210,8 +1212,8 @@ private fun QuickCommitCard(
               .testTag("btn_commit"),
             contentPadding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
             colors = ButtonDefaults.buttonColors(
-              containerColor = if (stagedCount > 0) ElectricBlue else WarningAmber,
-              disabledContainerColor = DarkSurfaceHighlight
+              containerColor = if (stagedCount > 0) MaterialTheme.colorScheme.primary else AwakiTheme.extra.warning,
+              disabledContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh
             )
           ) {
             Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(13.dp))
@@ -1229,22 +1231,22 @@ private fun QuickCommitCard(
               onClick = { showDropdown = true },
               modifier = Modifier.size(32.dp),
               contentPadding = PaddingValues(0.dp),
-              border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder)
+              border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
             ) {
-              Icon(Icons.Default.KeyboardArrowDown, contentDescription = "More commit options", tint = TextSecondary, modifier = Modifier.size(16.dp))
+              Icon(Icons.Default.KeyboardArrowDown, contentDescription = "More commit options", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
             }
 
             DropdownMenu(
               expanded = showDropdown,
               onDismissRequest = { showDropdown = false },
-              modifier = Modifier.background(DarkSurfaceElevated)
+              modifier = Modifier.background(MaterialTheme.colorScheme.surfaceContainer)
             ) {
               DropdownMenuItem(
                 text = {
                   Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Outlined.Upload, contentDescription = null, tint = ElectricBlue, modifier = Modifier.size(14.dp))
+                    Icon(Icons.Outlined.Upload, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(14.dp))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Commit & Push", color = TextPrimary, fontSize = 12.sp)
+                    Text("Commit & Push", color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp)
                   }
                 },
                 onClick = {
@@ -1255,9 +1257,9 @@ private fun QuickCommitCard(
               DropdownMenuItem(
                 text = {
                   Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Outlined.Edit, contentDescription = null, tint = WarningAmber, modifier = Modifier.size(14.dp))
+                    Icon(Icons.Outlined.Edit, contentDescription = null, tint = AwakiTheme.extra.warning, modifier = Modifier.size(14.dp))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Amend Previous Commit", color = TextPrimary, fontSize = 12.sp)
+                    Text("Amend Previous Commit", color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp)
                   }
                 },
                 onClick = {
@@ -1268,9 +1270,9 @@ private fun QuickCommitCard(
               DropdownMenuItem(
                 text = {
                   Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Add, contentDescription = null, tint = TerminalGreen, modifier = Modifier.size(14.dp))
+                    Icon(Icons.Default.Add, contentDescription = null, tint = AwakiTheme.extra.success, modifier = Modifier.size(14.dp))
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Stage All & Commit", color = TextPrimary, fontSize = 12.sp)
+                    Text("Stage All & Commit", color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp)
                   }
                 },
                 onClick = {
@@ -1303,8 +1305,8 @@ private fun MultiSelectActionBar(
       .fillMaxWidth()
       .padding(horizontal = 14.dp, vertical = 4.dp),
     shape = RoundedCornerShape(8.dp),
-    color = DarkSurfaceElevated,
-    border = androidx.compose.foundation.BorderStroke(1.dp, ElectricBlue.copy(alpha = 0.5f))
+    color = MaterialTheme.colorScheme.surfaceContainer,
+    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
   ) {
     Row(
       modifier = Modifier
@@ -1316,7 +1318,7 @@ private fun MultiSelectActionBar(
       Row(verticalAlignment = Alignment.CenterVertically) {
         Text(
           text = "$selectedCount selected",
-          color = TextPrimary,
+          color = MaterialTheme.colorScheme.onSurface,
           fontSize = 12.sp,
           fontWeight = FontWeight.Bold
         )
@@ -1326,14 +1328,14 @@ private fun MultiSelectActionBar(
           contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
           modifier = Modifier.height(26.dp)
         ) {
-          Text("All", color = ElectricBlueGlow, fontSize = 11.sp)
+          Text("All", color = MaterialTheme.colorScheme.primary, fontSize = 11.sp)
         }
         TextButton(
           onClick = onDeselectAll,
           contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
           modifier = Modifier.height(26.dp)
         ) {
-          Text("None", color = TextMuted, fontSize = 11.sp)
+          Text("None", color = AwakiTheme.extra.textMuted, fontSize = 11.sp)
         }
       }
 
@@ -1346,7 +1348,10 @@ private fun MultiSelectActionBar(
           enabled = selectedCount > 0,
           modifier = Modifier.height(28.dp),
           contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-          colors = ButtonDefaults.buttonColors(containerColor = TerminalGreen)
+          colors = ButtonDefaults.buttonColors(
+            containerColor = AwakiTheme.extra.success,
+            contentColor = AwakiTheme.extra.onSuccess
+          )
         ) {
           Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(12.dp))
           Spacer(modifier = Modifier.width(3.dp))
@@ -1358,15 +1363,15 @@ private fun MultiSelectActionBar(
           enabled = selectedCount > 0,
           modifier = Modifier.height(28.dp),
           contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-          border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder)
+          border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
         ) {
-          Icon(Icons.Default.Remove, contentDescription = null, modifier = Modifier.size(12.dp), tint = TextSecondary)
+          Icon(Icons.Default.Remove, contentDescription = null, modifier = Modifier.size(12.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
           Spacer(modifier = Modifier.width(3.dp))
-          Text("Unstage", fontSize = 11.sp, color = TextSecondary)
+          Text("Unstage", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
 
         IconButton(onClick = onCancel, modifier = Modifier.size(28.dp)) {
-          Icon(Icons.Default.Close, contentDescription = "Cancel", tint = TextMuted, modifier = Modifier.size(15.dp))
+          Icon(Icons.Default.Close, contentDescription = "Cancel", tint = AwakiTheme.extra.textMuted, modifier = Modifier.size(15.dp))
         }
       }
     }
@@ -1396,7 +1401,7 @@ private fun ChangesSectionHeader(
     Row(verticalAlignment = Alignment.CenterVertically) {
       Text(
         text = title,
-        color = TextSecondary,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
         fontSize = 11.sp,
         fontWeight = FontWeight.Bold,
         letterSpacing = 0.8.sp
@@ -1426,7 +1431,7 @@ private fun ChangesSectionHeader(
           contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
           modifier = Modifier.height(24.dp)
         ) {
-          Text(secondaryActionLabel, color = DangerRed, fontSize = 10.sp, fontWeight = FontWeight.Medium)
+          Text(secondaryActionLabel, color = MaterialTheme.colorScheme.error, fontSize = 10.sp, fontWeight = FontWeight.Medium)
         }
       }
 
@@ -1436,7 +1441,7 @@ private fun ChangesSectionHeader(
           contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
           modifier = Modifier.height(24.dp)
         ) {
-          Text(actionLabel, color = ElectricBlueGlow, fontSize = 10.sp, fontWeight = FontWeight.Medium)
+          Text(actionLabel, color = MaterialTheme.colorScheme.primary, fontSize = 10.sp, fontWeight = FontWeight.Medium)
         }
       }
     }
@@ -1464,13 +1469,13 @@ private fun ChangeFileRow(
 ) {
   val statusCode = file.status
   val statusColor = when (statusCode) {
-    GitStatusCode.MODIFIED -> WarningAmber
-    GitStatusCode.ADDED -> TerminalGreen
-    GitStatusCode.DELETED -> DangerRed
-    GitStatusCode.UNTRACKED -> CyanAccent
-    GitStatusCode.CONFLICTED -> DangerRed
-    GitStatusCode.RENAMED -> ElectricBlue
-    else -> TextSecondary
+    GitStatusCode.MODIFIED -> AwakiTheme.extra.warning
+    GitStatusCode.ADDED -> AwakiTheme.extra.success
+    GitStatusCode.DELETED -> MaterialTheme.colorScheme.error
+    GitStatusCode.UNTRACKED -> MaterialTheme.colorScheme.secondary
+    GitStatusCode.CONFLICTED -> MaterialTheme.colorScheme.error
+    GitStatusCode.RENAMED -> MaterialTheme.colorScheme.primary
+    else -> MaterialTheme.colorScheme.onSurfaceVariant
   }
 
   Surface(
@@ -1478,8 +1483,8 @@ private fun ChangeFileRow(
       .fillMaxWidth()
       .padding(horizontal = 14.dp, vertical = 2.dp),
     shape = RoundedCornerShape(8.dp),
-    color = if (isSelected) DarkSurfaceHighlight else DarkSurface,
-    border = androidx.compose.foundation.BorderStroke(1.dp, if (isSelected) ElectricBlue else DarkBorderSubtle)
+    color = if (isSelected) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surface,
+    border = androidx.compose.foundation.BorderStroke(1.dp, if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant)
   ) {
     Row(
       modifier = Modifier
@@ -1493,7 +1498,7 @@ private fun ChangeFileRow(
           checked = isSelected,
           onCheckedChange = { onToggleSelect() },
           modifier = Modifier.size(24.dp),
-          colors = CheckboxDefaults.colors(checkedColor = ElectricBlue)
+          colors = CheckboxDefaults.colors(checkedColor = MaterialTheme.colorScheme.primary)
         )
         Spacer(modifier = Modifier.width(6.dp))
       }
@@ -1521,7 +1526,7 @@ private fun ChangeFileRow(
       Column(modifier = Modifier.weight(1f)) {
         Text(
           text = file.fileName,
-          color = TextPrimary,
+          color = MaterialTheme.colorScheme.onSurface,
           fontSize = 12.sp,
           fontWeight = FontWeight.SemiBold,
           fontFamily = FontFamily.Monospace,
@@ -1531,7 +1536,7 @@ private fun ChangeFileRow(
         if (file.directory.isNotBlank()) {
           Text(
             text = file.directory,
-            color = TextMuted,
+            color = AwakiTheme.extra.textMuted,
             fontSize = 10.sp,
             fontFamily = FontFamily.Monospace,
             maxLines = 1,
@@ -1549,7 +1554,7 @@ private fun ChangeFileRow(
           if (file.additions > 0) {
             Text(
               text = "+${file.additions}",
-              color = TerminalGreen,
+              color = AwakiTheme.extra.success,
               fontSize = 10.sp,
               fontFamily = FontFamily.Monospace,
               fontWeight = FontWeight.Bold
@@ -1559,7 +1564,7 @@ private fun ChangeFileRow(
             Spacer(modifier = Modifier.width(3.dp))
             Text(
               text = "-${file.deletions}",
-              color = DangerRed,
+              color = MaterialTheme.colorScheme.error,
               fontSize = 10.sp,
               fontFamily = FontFamily.Monospace,
               fontWeight = FontWeight.Bold
@@ -1578,7 +1583,7 @@ private fun ChangeFileRow(
           onClick = onPrimaryAction,
           modifier = Modifier.size(28.dp)
         ) {
-          Icon(primaryIcon, contentDescription = primaryTooltip, tint = TextSecondary, modifier = Modifier.size(15.dp))
+          Icon(primaryIcon, contentDescription = primaryTooltip, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(15.dp))
         }
 
         // Revert / Discard Action
@@ -1590,7 +1595,7 @@ private fun ChangeFileRow(
             Icon(
               if (isUntracked) Icons.Outlined.Delete else Icons.AutoMirrored.Outlined.Undo,
               contentDescription = if (isUntracked) "Delete" else "Discard",
-              tint = if (isUntracked) DangerRed.copy(alpha = 0.8f) else TextMuted,
+              tint = if (isUntracked) MaterialTheme.colorScheme.error.copy(alpha = 0.8f) else AwakiTheme.extra.textMuted,
               modifier = Modifier.size(14.dp)
             )
           }
@@ -1601,7 +1606,7 @@ private fun ChangeFileRow(
           onClick = onOpenEditor,
           modifier = Modifier.size(28.dp)
         ) {
-          Icon(Icons.Outlined.Edit, contentDescription = "Open in Editor", tint = TextMuted, modifier = Modifier.size(14.dp))
+          Icon(Icons.Outlined.Edit, contentDescription = "Open in Editor", tint = AwakiTheme.extra.textMuted, modifier = Modifier.size(14.dp))
         }
       }
     }
@@ -1622,14 +1627,14 @@ private fun EmptyChangesView(onNavigate: (AppDestination) -> Unit) {
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
       Surface(
         shape = CircleShape,
-        color = TerminalGreenBg.copy(alpha = 0.25f),
+        color = AwakiTheme.extra.successContainer.copy(alpha = 0.25f),
         modifier = Modifier.size(64.dp)
       ) {
         Box(contentAlignment = Alignment.Center) {
           Icon(
             imageVector = Icons.Outlined.CheckCircleOutline,
             contentDescription = null,
-            tint = TerminalGreen,
+            tint = AwakiTheme.extra.success,
             modifier = Modifier.size(36.dp)
           )
         }
@@ -1637,14 +1642,14 @@ private fun EmptyChangesView(onNavigate: (AppDestination) -> Unit) {
       Spacer(modifier = Modifier.height(16.dp))
       Text(
         text = "Working Tree Clean",
-        color = TextPrimary,
+        color = MaterialTheme.colorScheme.onSurface,
         fontSize = 16.sp,
         fontWeight = FontWeight.Bold
       )
       Spacer(modifier = Modifier.height(6.dp))
       Text(
         text = "No changes detected. Files are synchronized with the git index.",
-        color = TextMuted,
+        color = AwakiTheme.extra.textMuted,
         fontSize = 12.sp,
         textAlign = androidx.compose.ui.text.style.TextAlign.Center
       )
@@ -1652,15 +1657,15 @@ private fun EmptyChangesView(onNavigate: (AppDestination) -> Unit) {
       Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         OutlinedButton(
           onClick = { onNavigate(AppDestination.EDITOR) },
-          border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder)
+          border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
         ) {
-          Icon(Icons.Outlined.Edit, contentDescription = null, modifier = Modifier.size(14.dp), tint = TextSecondary)
+          Icon(Icons.Outlined.Edit, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
           Spacer(modifier = Modifier.width(6.dp))
-          Text("Open Editor", color = TextSecondary, fontSize = 12.sp)
+          Text("Open Editor", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
         }
         Button(
           onClick = { onNavigate(AppDestination.GIT) },
-          colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue)
+          colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
         ) {
           Icon(Icons.Outlined.History, contentDescription = null, modifier = Modifier.size(14.dp))
           Spacer(modifier = Modifier.width(6.dp))
@@ -1696,7 +1701,7 @@ private fun DiffViewerContent(
       contentAlignment = Alignment.Center
     ) {
       Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("No diffs available to inspect.", color = TextMuted, fontSize = 13.sp)
+        Text("No diffs available to inspect.", color = AwakiTheme.extra.textMuted, fontSize = 13.sp)
         Spacer(modifier = Modifier.height(12.dp))
         Button(onClick = onBackToList) { Text("Back to Changes List") }
       }
@@ -1713,7 +1718,7 @@ private fun DiffViewerContent(
       modifier = Modifier
         .fillMaxWidth()
         .horizontalScroll(rememberScrollState())
-        .background(DarkSurfaceElevated)
+        .background(MaterialTheme.colorScheme.surfaceContainer)
         .padding(horizontal = 10.dp, vertical = 6.dp),
       horizontalArrangement = Arrangement.spacedBy(6.dp),
       verticalAlignment = Alignment.CenterVertically
@@ -1724,8 +1729,8 @@ private fun DiffViewerContent(
 
         Surface(
           shape = RoundedCornerShape(6.dp),
-          color = if (isSelected) DarkSurfaceHighlight else DarkSurface,
-          border = androidx.compose.foundation.BorderStroke(1.dp, if (isSelected) ElectricBlue else DarkBorderSubtle),
+          color = if (isSelected) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surface,
+          border = androidx.compose.foundation.BorderStroke(1.dp, if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant),
           modifier = Modifier.clickable { onSelectIndex(index) }
         ) {
           Row(
@@ -1734,7 +1739,7 @@ private fun DiffViewerContent(
           ) {
             Text(
               text = fileName,
-              color = if (isSelected) TextPrimary else TextSecondary,
+              color = if (isSelected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
               fontSize = 11.sp,
               fontFamily = FontFamily.Monospace,
               fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
@@ -1742,14 +1747,14 @@ private fun DiffViewerContent(
             Spacer(modifier = Modifier.width(5.dp))
             Text(
               text = "+${diff.additionsCount}",
-              color = TerminalGreen,
+              color = AwakiTheme.extra.success,
               fontSize = 10.sp,
               fontFamily = FontFamily.Monospace
             )
             Spacer(modifier = Modifier.width(2.dp))
             Text(
               text = "-${diff.deletionsCount}",
-              color = DangerRed,
+              color = MaterialTheme.colorScheme.error,
               fontSize = 10.sp,
               fontFamily = FontFamily.Monospace
             )
@@ -1761,8 +1766,8 @@ private fun DiffViewerContent(
     // 2. File Action Toolbar
     Surface(
       modifier = Modifier.fillMaxWidth(),
-      color = DarkSurface,
-      border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorderSubtle)
+      color = MaterialTheme.colorScheme.surface,
+      border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
     ) {
       Row(
         modifier = Modifier
@@ -1774,7 +1779,7 @@ private fun DiffViewerContent(
         Column(modifier = Modifier.weight(1f)) {
           Text(
             text = currentDiff.filePath,
-            color = TextPrimary,
+            color = MaterialTheme.colorScheme.onSurface,
             fontSize = 12.sp,
             fontFamily = FontFamily.Monospace,
             fontWeight = FontWeight.Medium,
@@ -1792,7 +1797,7 @@ private fun DiffViewerContent(
             onClick = { onExplainAI(currentDiff) },
             modifier = Modifier.size(30.dp)
           ) {
-            Icon(Icons.Outlined.AutoAwesome, contentDescription = "Explain with AI", tint = IndigoAccent, modifier = Modifier.size(15.dp))
+            Icon(Icons.Outlined.AutoAwesome, contentDescription = "Explain with AI", tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(15.dp))
           }
 
           // AI Review
@@ -1800,7 +1805,7 @@ private fun DiffViewerContent(
             onClick = { onReviewAI(currentDiff) },
             modifier = Modifier.size(30.dp)
           ) {
-            Icon(Icons.Outlined.Psychology, contentDescription = "Review with AI", tint = CyanAccent, modifier = Modifier.size(16.dp))
+            Icon(Icons.Outlined.Psychology, contentDescription = "Review with AI", tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(16.dp))
           }
 
           // Copy Diff
@@ -1808,7 +1813,7 @@ private fun DiffViewerContent(
             onClick = { onCopyDiff(currentDiff) },
             modifier = Modifier.size(30.dp)
           ) {
-            Icon(Icons.Outlined.ContentCopy, contentDescription = "Copy diff", tint = TextSecondary, modifier = Modifier.size(14.dp))
+            Icon(Icons.Outlined.ContentCopy, contentDescription = "Copy diff", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(14.dp))
           }
 
           // Stage / Unstage toggle
@@ -1816,12 +1821,12 @@ private fun DiffViewerContent(
             onClick = { onToggleStage(currentDiff.filePath) },
             modifier = Modifier.height(28.dp),
             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-            border = androidx.compose.foundation.BorderStroke(1.dp, if (isStaged) TerminalGreen else DarkBorder)
+            border = androidx.compose.foundation.BorderStroke(1.dp, if (isStaged) AwakiTheme.extra.success else MaterialTheme.colorScheme.outline)
           ) {
             Text(
               if (isStaged) "Unstage" else "Stage",
               fontSize = 11.sp,
-              color = if (isStaged) TerminalGreen else TextSecondary
+              color = if (isStaged) AwakiTheme.extra.success else MaterialTheme.colorScheme.onSurfaceVariant
             )
           }
 
@@ -1830,9 +1835,9 @@ private fun DiffViewerContent(
             onClick = { onRevert(currentDiff.filePath) },
             modifier = Modifier.height(28.dp),
             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-            border = androidx.compose.foundation.BorderStroke(1.dp, DangerRed.copy(alpha = 0.5f))
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f))
           ) {
-            Text("Revert", fontSize = 11.sp, color = DangerRed)
+            Text("Revert", fontSize = 11.sp, color = MaterialTheme.colorScheme.error)
           }
 
           // Open in Editor
@@ -1840,7 +1845,7 @@ private fun DiffViewerContent(
             onClick = { onOpenEditor(currentDiff.filePath) },
             modifier = Modifier.size(30.dp)
           ) {
-            Icon(Icons.Outlined.Edit, contentDescription = "Open editor", tint = TextSecondary, modifier = Modifier.size(15.dp))
+            Icon(Icons.Outlined.Edit, contentDescription = "Open editor", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(15.dp))
           }
         }
       }
@@ -1850,7 +1855,7 @@ private fun DiffViewerContent(
     LazyColumn(
       modifier = Modifier
         .fillMaxSize()
-        .background(DarkBackground)
+        .background(MaterialTheme.colorScheme.background)
     ) {
       items(currentDiff.lines) { line ->
         DiffViewerLineRow(line = line)
@@ -1871,17 +1876,17 @@ private fun DiffViewerLineRow(line: DiffLine) {
   val isHunkHeader = line.text.startsWith("@@")
 
   val bgColor = when {
-    isHunkHeader -> DarkSurfaceHighlight.copy(alpha = 0.8f)
-    line.type == DiffLineType.ADDED -> TerminalGreenBg.copy(alpha = 0.35f)
-    line.type == DiffLineType.REMOVED -> DangerRedBg.copy(alpha = 0.35f)
+    isHunkHeader -> MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.8f)
+    line.type == DiffLineType.ADDED -> AwakiTheme.extra.successContainer.copy(alpha = 0.35f)
+    line.type == DiffLineType.REMOVED -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f)
     else -> Color.Transparent
   }
 
   val textColor = when {
-    isHunkHeader -> CyanAccent
-    line.type == DiffLineType.ADDED -> TerminalGreen
-    line.type == DiffLineType.REMOVED -> DangerRed
-    else -> TextSecondary
+    isHunkHeader -> MaterialTheme.colorScheme.secondary
+    line.type == DiffLineType.ADDED -> AwakiTheme.extra.success
+    line.type == DiffLineType.REMOVED -> MaterialTheme.colorScheme.error
+    else -> MaterialTheme.colorScheme.onSurfaceVariant
   }
 
   Row(
@@ -1895,7 +1900,7 @@ private fun DiffViewerLineRow(line: DiffLine) {
       // Hunk header full width
       Text(
         text = line.text,
-        color = CyanAccent,
+        color = MaterialTheme.colorScheme.secondary,
         fontSize = 11.sp,
         fontFamily = FontFamily.Monospace,
         fontWeight = FontWeight.SemiBold,
@@ -1907,7 +1912,7 @@ private fun DiffViewerLineRow(line: DiffLine) {
       // Old line number
       Text(
         text = line.oldLineNo?.toString() ?: "",
-        color = TextMuted,
+        color = AwakiTheme.extra.textMuted,
         fontSize = 10.sp,
         fontFamily = FontFamily.Monospace,
         modifier = Modifier.width(30.dp)
@@ -1916,7 +1921,7 @@ private fun DiffViewerLineRow(line: DiffLine) {
       // New line number
       Text(
         text = line.newLineNo?.toString() ?: "",
-        color = TextMuted,
+        color = AwakiTheme.extra.textMuted,
         fontSize = 10.sp,
         fontFamily = FontFamily.Monospace,
         modifier = Modifier.width(30.dp)

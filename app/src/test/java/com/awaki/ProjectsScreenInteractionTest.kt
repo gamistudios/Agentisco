@@ -2,6 +2,7 @@ package com.awaki
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -16,7 +17,6 @@ import com.awaki.data.model.WorkspaceStorageInfo
 import com.awaki.ui.screens.ProjectOverflowAction
 import com.awaki.ui.screens.ProjectsScreenContent
 import com.awaki.ui.theme.AwakiTheme
-import com.awaki.ui.theme.DarkBackground
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -80,7 +80,7 @@ class ProjectsScreenInteractionTest {
           onProjectClick = { selectedProject = it },
           onCopyPath = {},
           onProjectAction = { _, _ -> },
-          modifier = Modifier.fillMaxSize().background(DarkBackground)
+          modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
         )
       }
     }
@@ -138,7 +138,7 @@ class ProjectsScreenInteractionTest {
             targetProject = proj
             triggeredAction = action
           },
-          modifier = Modifier.fillMaxSize().background(DarkBackground)
+          modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)
         )
       }
     }

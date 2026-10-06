@@ -10,6 +10,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -31,6 +32,7 @@ import com.awaki.core.model.AppDestination
 import com.awaki.data.model.Project
 import com.awaki.data.repository.UpdateRepository
 import com.awaki.ui.theme.*
+import com.awaki.ui.theme.AwakiTheme
 import com.awaki.workspace.git.GitBranch
 
 /**
@@ -61,8 +63,8 @@ fun AgentIDETopAppBar(
     modifier = modifier
       .fillMaxWidth()
       .statusBarsPadding(),
-    color = DarkBackground,
-    border = androidx.compose.foundation.BorderStroke(0.dp, DarkBorderSubtle)
+    color = MaterialTheme.colorScheme.background,
+    border = androidx.compose.foundation.BorderStroke(0.dp, MaterialTheme.colorScheme.outlineVariant)
   ) {
     Box(modifier = Modifier.fillMaxWidth()) {
       Column(modifier = Modifier.fillMaxWidth()) {
@@ -81,9 +83,9 @@ fun AgentIDETopAppBar(
             modifier = Modifier.weight(1f, fill = false)
           ) {
             val statusColor = when {
-              activeProject.isMissing -> DangerRed
-              activeProject.isDirty -> WarningAmber
-              else -> TerminalGreen
+              activeProject.isMissing -> MaterialTheme.colorScheme.error
+              activeProject.isDirty -> AwakiTheme.extra.warning
+              else -> AwakiTheme.extra.success
             }
             Box(
               modifier = Modifier
@@ -95,7 +97,7 @@ fun AgentIDETopAppBar(
 
             Text(
               text = activeProject.name.ifBlank { "Awaki" },
-              color = TextPrimary,
+              color = MaterialTheme.colorScheme.onSurface,
               fontSize = 15.sp,
               fontWeight = FontWeight.Bold,
               maxLines = 1,
@@ -116,8 +118,8 @@ fun AgentIDETopAppBar(
                 modifier = Modifier
                   .widthIn(max = 150.dp)
                   .clip(RoundedCornerShape(8.dp))
-                  .background(DarkSurfaceElevated)
-                  .border(1.dp, DarkBorderSubtle, RoundedCornerShape(8.dp))
+                  .background(MaterialTheme.colorScheme.surfaceContainer)
+                  .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp))
                   .clickable {
                     if (canSwitchBranch) branchMenuOpen = true
                     else onNavigate(AppDestination.PROJECTS)
@@ -128,13 +130,13 @@ fun AgentIDETopAppBar(
                 Icon(
                   imageVector = Icons.Outlined.AccountTree,
                   contentDescription = null,
-                  tint = TextMuted,
+                  tint = AwakiTheme.extra.textMuted,
                   modifier = Modifier.size(11.dp)
                 )
                 Spacer(modifier = Modifier.width(5.dp))
                 Text(
                   text = branch,
-                  color = TextSecondary,
+                  color = MaterialTheme.colorScheme.onSurfaceVariant,
                   fontSize = 11.sp,
                   fontFamily = FontFamily.Monospace,
                   fontWeight = FontWeight.Medium,
@@ -145,7 +147,7 @@ fun AgentIDETopAppBar(
                 Icon(
                   imageVector = Icons.Default.ArrowDropDown,
                   contentDescription = if (canSwitchBranch) "Switch branch" else "Switch project",
-                  tint = TextMuted,
+                  tint = AwakiTheme.extra.textMuted,
                   modifier = Modifier.size(14.dp)
                 )
               }
@@ -153,7 +155,7 @@ fun AgentIDETopAppBar(
               DropdownMenu(
                 expanded = branchMenuOpen,
                 onDismissRequest = { branchMenuOpen = false },
-                containerColor = DarkSurfaceElevated
+                containerColor = MaterialTheme.colorScheme.surfaceContainer
               ) {
                 localBranches.forEach { item ->
                   val isCurrent = item.name == branch
@@ -163,7 +165,7 @@ fun AgentIDETopAppBar(
                         text = item.name,
                         fontSize = 12.sp,
                         fontFamily = FontFamily.Monospace,
-                        color = if (isCurrent) TerminalGreen else TextPrimary,
+                        color = if (isCurrent) AwakiTheme.extra.success else MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                       )
@@ -172,7 +174,7 @@ fun AgentIDETopAppBar(
                       Icon(
                         imageVector = if (isCurrent) Icons.Default.Check else Icons.Outlined.AccountTree,
                         contentDescription = null,
-                        tint = if (isCurrent) TerminalGreen else TextMuted,
+                        tint = if (isCurrent) AwakiTheme.extra.success else AwakiTheme.extra.textMuted,
                         modifier = Modifier.size(15.dp)
                       )
                     },
@@ -184,7 +186,7 @@ fun AgentIDETopAppBar(
                             if (item.ahead > 0 && item.behind > 0) append(" ")
                             if (item.behind > 0) append("↓${item.behind}")
                           },
-                          color = TextMuted,
+                          color = AwakiTheme.extra.textMuted,
                           fontSize = 10.sp,
                           fontFamily = FontFamily.Monospace
                         )
@@ -216,7 +218,7 @@ fun AgentIDETopAppBar(
                 Icon(
                   imageVector = Icons.Outlined.BugReport,
                   contentDescription = "Crash log available",
-                  tint = DangerRed,
+                  tint = MaterialTheme.colorScheme.error,
                   modifier = Modifier.size(18.dp)
                 )
               }
@@ -233,7 +235,7 @@ fun AgentIDETopAppBar(
                   Icon(
                     imageVector = Icons.Outlined.FileDownload,
                     contentDescription = if (hasNewUpdate) "Update available" else "Check for updates",
-                    tint = if (hasNewUpdate) WarningAmber else TextSecondary,
+                    tint = if (hasNewUpdate) AwakiTheme.extra.warning else MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(19.dp)
                   )
                   if (hasNewUpdate) {
@@ -242,7 +244,7 @@ fun AgentIDETopAppBar(
                         .size(6.dp)
                         .align(Alignment.TopEnd)
                         .clip(CircleShape)
-                        .background(WarningAmber)
+                        .background(AwakiTheme.extra.warning)
                     )
                   }
                 }
@@ -258,7 +260,7 @@ fun AgentIDETopAppBar(
               Icon(
                 imageVector = Icons.Outlined.Search,
                 contentDescription = "Command palette — search",
-                tint = TextSecondary,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(19.dp)
               )
             }
@@ -272,7 +274,7 @@ fun AgentIDETopAppBar(
               Icon(
                 imageVector = Icons.Outlined.Settings,
                 contentDescription = "Settings",
-                tint = TextSecondary,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.size(19.dp)
               )
             }
@@ -286,7 +288,7 @@ fun AgentIDETopAppBar(
           onNavigate = onNavigate
         )
 
-        HorizontalDivider(color = DarkBorderSubtle, thickness = 1.dp)
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 1.dp)
       }
 
       DownloadProgressIndicator(
@@ -359,7 +361,7 @@ private fun IdeToolTab(
   onClick: () -> Unit,
   modifier: Modifier = Modifier
 ) {
-  val contentColor = if (selected) ElectricBlueGlow else TextSecondary
+  val contentColor = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
 
   Column(
     modifier = modifier
@@ -409,7 +411,7 @@ private fun IdeToolTab(
         .fillMaxWidth(0.85f)
         .height(2.dp)
         .background(
-          if (selected) ElectricBlue else Color.Transparent,
+          if (selected) MaterialTheme.colorScheme.primary else Color.Transparent,
           RoundedCornerShape(1.dp)
         )
     )
@@ -423,7 +425,7 @@ private fun ToolCountBadge(count: String, modifier: Modifier = Modifier) {
     modifier = modifier
       .defaultMinSize(minWidth = 12.dp, minHeight = 12.dp)
       .clip(RoundedCornerShape(6.dp))
-      .background(WarningAmber)
+      .background(AwakiTheme.extra.warning)
       .padding(horizontal = 3.dp),
     contentAlignment = Alignment.Center
   ) {
@@ -432,7 +434,7 @@ private fun ToolCountBadge(count: String, modifier: Modifier = Modifier) {
       fontSize = 8.sp,
       lineHeight = 9.sp,
       fontWeight = FontWeight.Bold,
-      color = DarkBackground,
+      color = AwakiTheme.extra.onWarning,
       maxLines = 1
     )
   }

@@ -21,6 +21,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -39,14 +40,7 @@ import androidx.compose.ui.unit.sp
 import com.awaki.agent.model.AgentRole
 import com.awaki.agent.model.AgentRoles
 import com.awaki.ui.WorkspaceViewModel
-import com.awaki.ui.theme.DarkBackground
-import com.awaki.ui.theme.DarkBorderSubtle
-import com.awaki.ui.theme.DangerRed
-import com.awaki.ui.theme.DarkSurface
-import com.awaki.ui.theme.ElectricBlue
-import com.awaki.ui.theme.TextMuted
-import com.awaki.ui.theme.TextPrimary
-import com.awaki.ui.theme.TextSecondary
+import com.awaki.ui.theme.AwakiTheme
 
 /**
  * Who the agent can hand work to, and the user's own specialists.
@@ -65,12 +59,12 @@ fun AgentTeamSection(viewModel: WorkspaceViewModel, modifier: Modifier = Modifie
   var deleting by remember { mutableStateOf<AgentRole?>(null) }
 
   Column(modifier = modifier.fillMaxWidth()) {
-    Text("Built in", color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+    Text("Built in", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
     Spacer(modifier = Modifier.height(6.dp))
     AgentRoles.builtIn.forEach { role -> AgentRoleRow(role) }
 
     Spacer(modifier = Modifier.height(12.dp))
-    HorizontalDivider(color = DarkBorderSubtle)
+    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
     Spacer(modifier = Modifier.height(12.dp))
 
     Row(
@@ -78,14 +72,14 @@ fun AgentTeamSection(viewModel: WorkspaceViewModel, modifier: Modifier = Modifie
       horizontalArrangement = Arrangement.SpaceBetween,
       verticalAlignment = Alignment.CenterVertically
     ) {
-      Text("My agents", color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+      Text("My agents", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
       TextButton(
         onClick = { editorTarget = null; editorOpen = true },
         modifier = Modifier.testTag("btn_new_agent")
       ) {
-        Icon(Icons.Default.Add, contentDescription = null, tint = ElectricBlue, modifier = Modifier.size(14.dp))
+        Icon(Icons.Default.Add, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(14.dp))
         Spacer(modifier = Modifier.width(4.dp))
-        Text("New agent", color = ElectricBlue, fontSize = 12.sp)
+        Text("New agent", color = MaterialTheme.colorScheme.primary, fontSize = 12.sp)
       }
     }
 
@@ -93,7 +87,7 @@ fun AgentTeamSection(viewModel: WorkspaceViewModel, modifier: Modifier = Modifie
       Text(
         "No agents of your own yet. A specialist you define is delegated to exactly like a " +
           "built-in one - say \"have the DB reviewer check my migration\" and it will be used.",
-        color = TextMuted,
+        color = AwakiTheme.extra.textMuted,
         fontSize = 11.sp,
         lineHeight = 15.sp,
         modifier = Modifier.testTag("txt_no_custom_agents")
@@ -121,13 +115,13 @@ fun AgentTeamSection(viewModel: WorkspaceViewModel, modifier: Modifier = Modifie
   deleting?.let { role ->
     AlertDialog(
       onDismissRequest = { deleting = null },
-      containerColor = DarkSurface,
-      title = { Text("Remove ${role.name}?", color = TextPrimary, fontSize = 16.sp) },
+      containerColor = MaterialTheme.colorScheme.surface,
+      title = { Text("Remove ${role.name}?", color = MaterialTheme.colorScheme.onSurface, fontSize = 16.sp) },
       text = {
         Text(
           "The agent will no longer be one of the seats this workspace can delegate to. " +
             "Conversations that already used it keep their reports.",
-          color = TextSecondary,
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
           fontSize = 12.sp
         )
       },
@@ -138,10 +132,10 @@ fun AgentTeamSection(viewModel: WorkspaceViewModel, modifier: Modifier = Modifie
             deleting = null
           },
           modifier = Modifier.testTag("btn_confirm_delete_agent")
-        ) { Text("Remove", color = DangerRed, fontSize = 13.sp) }
+        ) { Text("Remove", color = MaterialTheme.colorScheme.error, fontSize = 13.sp) }
       },
       dismissButton = {
-        TextButton(onClick = { deleting = null }) { Text("Keep", color = TextMuted, fontSize = 13.sp) }
+        TextButton(onClick = { deleting = null }) { Text("Keep", color = AwakiTheme.extra.textMuted, fontSize = 13.sp) }
       }
     )
   }
@@ -160,26 +154,26 @@ private fun AgentRoleRow(
       .testTag("row_agent_${role.id}")
   ) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-      Text(role.name, color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+      Text(role.name, color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp, fontWeight = FontWeight.Medium)
       Spacer(modifier = Modifier.width(6.dp))
-      if (role.readOnly) RoleBadge("read-only", TerminalGreenLabel)
-      if (role.modelId.isNotBlank()) RoleBadge("own model", ElectricBlue)
-      if (role.toolNames.isNotEmpty()) RoleBadge("${role.toolNames.size} tools", TextSecondary)
+      if (role.readOnly) RoleBadge("read-only", AwakiTheme.extra.success)
+      if (role.modelId.isNotBlank()) RoleBadge("own model", MaterialTheme.colorScheme.primary)
+      if (role.toolNames.isNotEmpty()) RoleBadge("${role.toolNames.size} tools", MaterialTheme.colorScheme.onSurfaceVariant)
       Spacer(modifier = Modifier.weight(1f))
       if (onEdit != null) {
         IconButton(onClick = onEdit, modifier = Modifier.size(28.dp).testTag("btn_edit_agent_${role.id}")) {
-          Icon(Icons.Default.Edit, contentDescription = "Edit", tint = TextMuted, modifier = Modifier.size(14.dp))
+          Icon(Icons.Default.Edit, contentDescription = "Edit", tint = AwakiTheme.extra.textMuted, modifier = Modifier.size(14.dp))
         }
       }
       if (onDelete != null) {
         IconButton(onClick = onDelete, modifier = Modifier.size(28.dp).testTag("btn_delete_agent_${role.id}")) {
-          Icon(Icons.Default.Delete, contentDescription = "Delete", tint = DangerRed, modifier = Modifier.size(14.dp))
+          Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(14.dp))
         }
       }
     }
     Text(
       role.purpose,
-      color = TextMuted,
+      color = AwakiTheme.extra.textMuted,
       fontSize = 11.sp,
       lineHeight = 14.sp,
       modifier = Modifier.padding(top = 2.dp)
@@ -187,7 +181,7 @@ private fun AgentRoleRow(
     if (role.scope.isNotBlank()) {
       Text(
         "Works in: ${role.scope}",
-        color = TextSecondary,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
         fontSize = 10.sp,
         modifier = Modifier.padding(top = 2.dp)
       )
@@ -200,10 +194,8 @@ private fun RoleBadge(label: String, tint: androidx.compose.ui.graphics.Color) {
   Box(
     modifier = Modifier
       .clip(RoundedCornerShape(4.dp))
-      .background(DarkBackground)
-      .border(1.dp, DarkBorderSubtle, RoundedCornerShape(4.dp))
+      .background(MaterialTheme.colorScheme.background)
+      .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(4.dp))
       .padding(horizontal = 5.dp, vertical = 1.dp)
   ) { Text(label, color = tint, fontSize = 9.sp) }
 }
-
-private val TerminalGreenLabel = androidx.compose.ui.graphics.Color(0xFF10B981)

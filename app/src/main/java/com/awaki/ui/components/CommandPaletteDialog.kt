@@ -14,6 +14,7 @@ import androidx.compose.material.icons.automirrored.outlined.*
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -29,6 +30,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.awaki.core.model.AppDestination
 import com.awaki.ui.theme.*
+import com.awaki.ui.theme.AwakiTheme
 
 data class PaletteAction(
   val id: String,
@@ -358,8 +360,8 @@ fun CommandPaletteDialog(
       modifier = Modifier
         .fillMaxWidth()
         .clip(RoundedCornerShape(16.dp))
-        .border(1.dp, DarkBorder, RoundedCornerShape(16.dp)),
-      color = DarkSurface,
+        .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(16.dp)),
+      color = MaterialTheme.colorScheme.surface,
       tonalElevation = 8.dp
     ) {
       Column(
@@ -369,7 +371,7 @@ fun CommandPaletteDialog(
       ) {
         Text(
           text = "What do you want to do?",
-          color = TextPrimary,
+          color = MaterialTheme.colorScheme.onSurface,
           fontSize = 14.sp,
           fontWeight = FontWeight.SemiBold
         )
@@ -381,10 +383,10 @@ fun CommandPaletteDialog(
           value = query,
           onValueChange = { query = it },
           placeholder = {
-            Text("> Type a command, action, or prompt...", color = TextMuted, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
+            Text("> Type a command, action, or prompt...", color = AwakiTheme.extra.textMuted, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
           },
           leadingIcon = {
-            Text(">", color = CyanAccent, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, modifier = Modifier.padding(start = 12.dp))
+            Text(">", color = MaterialTheme.colorScheme.secondary, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, modifier = Modifier.padding(start = 12.dp))
           },
           singleLine = true,
           keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
@@ -396,22 +398,22 @@ fun CommandPaletteDialog(
           modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
-            .background(DarkBackground)
-            .border(1.dp, DarkBorderSubtle, RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.background)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp))
             .testTag("cmd_palette_input"),
           colors = TextFieldDefaults.colors(
-            focusedContainerColor = DarkBackground,
-            unfocusedContainerColor = DarkBackground,
+            focusedContainerColor = MaterialTheme.colorScheme.background,
+            unfocusedContainerColor = MaterialTheme.colorScheme.background,
             focusedIndicatorColor = Color.Transparent,
             unfocusedIndicatorColor = Color.Transparent,
-            focusedTextColor = TextPrimary,
-            unfocusedTextColor = TextPrimary
+            focusedTextColor = MaterialTheme.colorScheme.onSurface,
+            unfocusedTextColor = MaterialTheme.colorScheme.onSurface
           )
         )
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        HorizontalDivider(color = DarkBorderSubtle, thickness = 1.dp)
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 1.dp)
 
         Spacer(modifier = Modifier.height(8.dp))
 
@@ -436,12 +438,12 @@ fun CommandPaletteDialog(
                   imageVector = action.icon,
                   contentDescription = null,
                   tint = when (action.category) {
-                    "Agent" -> CyanAccent
-                    "Changes", "Git" -> TerminalGreen
-                    "Editor" -> ElectricBlue
-                    "Terminal" -> WarningAmber
-                    "Settings" -> TextSecondary
-                    else -> TextSecondary
+                    "Agent" -> MaterialTheme.colorScheme.secondary
+                    "Changes", "Git" -> AwakiTheme.extra.success
+                    "Editor" -> MaterialTheme.colorScheme.primary
+                    "Terminal" -> AwakiTheme.extra.warning
+                    "Settings" -> MaterialTheme.colorScheme.onSurfaceVariant
+                    else -> MaterialTheme.colorScheme.onSurfaceVariant
                   },
                   modifier = Modifier.size(16.dp)
                 )
@@ -449,7 +451,7 @@ fun CommandPaletteDialog(
 
               Text(
                 text = action.title,
-                color = TextPrimary,
+                color = MaterialTheme.colorScheme.onSurface,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier.weight(1f)
@@ -458,12 +460,12 @@ fun CommandPaletteDialog(
               Box(
                 modifier = Modifier
                   .clip(RoundedCornerShape(4.dp))
-                  .background(DarkSurfaceElevated)
+                  .background(MaterialTheme.colorScheme.surfaceContainer)
                   .padding(horizontal = 6.dp, vertical = 2.dp)
               ) {
                 Text(
                   text = action.category,
-                  color = TextMuted,
+                  color = AwakiTheme.extra.textMuted,
                   fontSize = 10.sp,
                   fontFamily = FontFamily.Monospace
                 )

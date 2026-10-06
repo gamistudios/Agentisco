@@ -57,7 +57,9 @@ public final class TerminalColorScheme {
         0xff808080, 0xff8a8a8a, 0xff949494, 0xff9e9e9e, 0xffa8a8a8, 0xffb2b2b2, 0xffbcbcbc, 0xffc6c6c6, 0xffd0d0d0, 0xffdadada, 0xffe4e4e4, 0xffeeeeee,
 
         // COLOR_INDEX_DEFAULT_FOREGROUND, COLOR_INDEX_DEFAULT_BACKGROUND and COLOR_INDEX_DEFAULT_CURSOR:
-        0xffffffff, 0xff000000, 0xffffffff};
+        // Only these three follow the app's Nocturne palette. The 16 ANSI colours and the
+        // 256 cube above stay standard because shell programs emit them by index.
+        0xffe2e8f0, 0xff090d16, 0xff5a94ff};
 
     public final int[] mDefaultColors = new int[TextStyle.NUM_INDEXED_COLORS];
 

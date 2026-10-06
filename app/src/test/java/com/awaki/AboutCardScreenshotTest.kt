@@ -2,6 +2,7 @@ package com.awaki
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -9,7 +10,6 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import com.awaki.ui.screens.settings.AboutCard
 import com.awaki.ui.theme.AwakiTheme
-import com.awaki.ui.theme.DarkBackground
 import com.github.takahirom.roborazzi.RobolectricDeviceQualifiers
 import com.github.takahirom.roborazzi.captureRoboImage
 import org.junit.Rule
@@ -31,7 +31,7 @@ class AboutCardScreenshotTest {
   fun `about card states what the app is and who built it`() {
     composeTestRule.setContent {
       AwakiTheme {
-        AboutCard(modifier = Modifier.fillMaxSize().background(DarkBackground))
+        AboutCard(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background))
       }
     }
 

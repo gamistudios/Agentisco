@@ -23,6 +23,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -43,6 +44,7 @@ import com.awaki.data.model.Project
 import com.awaki.data.model.ProjectKind
 import com.awaki.ui.WorkspaceViewModel
 import com.awaki.ui.theme.*
+import com.awaki.ui.theme.AwakiTheme
 import com.awaki.workspace.buildrun.*
 import com.awaki.workspace.terminal.LinuxEnvironmentState
 import kotlinx.coroutines.delay
@@ -110,7 +112,7 @@ fun BuildRunScreen(
   LazyColumn(
     modifier = modifier
       .fillMaxSize()
-      .background(DarkBackground)
+      .background(MaterialTheme.colorScheme.background)
       .padding(horizontal = 16.dp),
     verticalArrangement = Arrangement.spacedBy(14.dp)
   ) {
@@ -191,10 +193,10 @@ private fun HeaderBlock(project: Project) {
       verticalAlignment = Alignment.CenterVertically
     ) {
       Column(Modifier.weight(1f)) {
-        Text("Run & Build Center", color = TextPrimary, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+        Text("Run & Build Center", color = MaterialTheme.colorScheme.onSurface, fontSize = 20.sp, fontWeight = FontWeight.Bold)
         Text(
           text = "${project.name} · install → build → test → run",
-          color = TextMuted,
+          color = AwakiTheme.extra.textMuted,
           fontSize = 12.sp,
           maxLines = 1,
           overflow = TextOverflow.Ellipsis
@@ -204,10 +206,10 @@ private fun HeaderBlock(project: Project) {
         Box(
           Modifier
             .clip(RoundedCornerShape(6.dp))
-            .background(DarkSurfaceElevated)
+            .background(MaterialTheme.colorScheme.surfaceContainer)
             .padding(horizontal = 8.dp, vertical = 4.dp)
         ) {
-          Text(project.kind.label, color = TextSecondary, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+          Text(project.kind.label, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
         }
       }
     }
@@ -220,11 +222,11 @@ private fun MissingProjectNote(project: Project) {
     modifier = Modifier
       .fillMaxWidth()
       .clip(RoundedCornerShape(12.dp))
-      .border(1.dp, WarningAmber.copy(alpha = 0.5f), RoundedCornerShape(12.dp)),
-    colors = CardDefaults.cardColors(containerColor = DarkSurface)
+      .border(1.dp, AwakiTheme.extra.warning.copy(alpha = 0.5f), RoundedCornerShape(12.dp)),
+    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
   ) {
     Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-      Icon(Icons.Default.Warning, contentDescription = null, tint = WarningAmber, modifier = Modifier.size(18.dp))
+      Icon(Icons.Default.Warning, contentDescription = null, tint = AwakiTheme.extra.warning, modifier = Modifier.size(18.dp))
       Spacer(Modifier.width(8.dp))
       Text(
         text = if (project.path.isBlank()) {
@@ -232,7 +234,7 @@ private fun MissingProjectNote(project: Project) {
         } else {
           "This project's folder is missing on disk — restore it from Projects to run commands."
         },
-        color = TextSecondary,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
         fontSize = 11.sp
       )
     }
@@ -250,27 +252,27 @@ private fun EnvBanner(state: LinuxEnvironmentState, onOpenTerminal: () -> Unit) 
     modifier = Modifier
       .fillMaxWidth()
       .clip(RoundedCornerShape(12.dp))
-      .border(1.dp, WarningAmber.copy(alpha = 0.5f), RoundedCornerShape(12.dp)),
-    colors = CardDefaults.cardColors(containerColor = DarkSurface)
+      .border(1.dp, AwakiTheme.extra.warning.copy(alpha = 0.5f), RoundedCornerShape(12.dp)),
+    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
   ) {
     Column(Modifier.padding(14.dp)) {
       Row(verticalAlignment = Alignment.CenterVertically) {
-        Icon(Icons.Default.Warning, contentDescription = null, tint = WarningAmber, modifier = Modifier.size(18.dp))
+        Icon(Icons.Default.Warning, contentDescription = null, tint = AwakiTheme.extra.warning, modifier = Modifier.size(18.dp))
         Spacer(Modifier.width(8.dp))
-        Text("Linux environment isn't ready", color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+        Text("Linux environment isn't ready", color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
       }
       Spacer(Modifier.height(4.dp))
-      Text(detail, color = TextSecondary, fontSize = 11.sp)
+      Text(detail, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
       Spacer(Modifier.height(8.dp))
       OutlinedButton(
         onClick = onOpenTerminal,
         modifier = Modifier.height(34.dp),
-        border = BorderStroke(1.dp, DarkBorder),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
         shape = RoundedCornerShape(8.dp)
       ) {
-        Icon(Icons.Outlined.Terminal, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(14.dp))
+        Icon(Icons.Outlined.Terminal, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(14.dp))
         Spacer(Modifier.width(6.dp))
-        Text("Open Terminal", color = TextPrimary, fontSize = 11.sp)
+        Text("Open Terminal", color = MaterialTheme.colorScheme.onSurface, fontSize = 11.sp)
       }
     }
   }
@@ -288,8 +290,8 @@ private fun ConfigCard(
     modifier = Modifier
       .fillMaxWidth()
       .clip(RoundedCornerShape(12.dp))
-      .border(1.dp, DarkBorder, RoundedCornerShape(12.dp)),
-    colors = CardDefaults.cardColors(containerColor = DarkSurface)
+      .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(12.dp)),
+    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
   ) {
     Column(Modifier.padding(14.dp)) {
       Row(
@@ -298,12 +300,12 @@ private fun ConfigCard(
         verticalAlignment = Alignment.CenterVertically
       ) {
         Column(Modifier.weight(1f)) {
-          Text("Pipeline Commands", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+          Text("Pipeline Commands", color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
           Spacer(Modifier.height(2.dp))
           Text(
             text = config?.let { "${it.source.label} · ${relativeTime(it.updatedAt)}" }
               ?: "Not configured yet — run Auto-configure or edit each stage.",
-            color = TextMuted,
+            color = AwakiTheme.extra.textMuted,
             fontSize = 11.sp
           )
         }
@@ -314,31 +316,31 @@ private fun ConfigCard(
           modifier = Modifier
             .height(34.dp)
             .testTag("btn_auto_configure"),
-          border = BorderStroke(1.dp, if (editable) ElectricBlue.copy(alpha = 0.6f) else DarkBorder),
+          border = BorderStroke(1.dp, if (editable) MaterialTheme.colorScheme.primary.copy(alpha = 0.6f) else MaterialTheme.colorScheme.outline),
           shape = RoundedCornerShape(8.dp),
           contentPadding = PaddingValues(horizontal = 10.dp)
         ) {
           if (detectState is BuildRunDetectState.Running) {
-            CircularProgressIndicator(Modifier.size(12.dp), color = ElectricBlueGlow, strokeWidth = 1.5.dp)
+            CircularProgressIndicator(Modifier.size(12.dp), color = MaterialTheme.colorScheme.primary, strokeWidth = 1.5.dp)
           } else {
-            Icon(Icons.Outlined.AutoAwesome, contentDescription = null, tint = ElectricBlueGlow, modifier = Modifier.size(14.dp))
+            Icon(Icons.Outlined.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(14.dp))
           }
           Spacer(Modifier.width(6.dp))
           Text(
             text = if (detectState is BuildRunDetectState.Running) "Analyzing…" else "Auto-configure",
-            color = TextPrimary,
+            color = MaterialTheme.colorScheme.onSurface,
             fontSize = 11.sp
           )
         }
       }
       if (detectState is BuildRunDetectState.Done) {
         Spacer(Modifier.height(6.dp))
-        Text(detectState.message, color = TextSecondary, fontSize = 11.sp)
+        Text(detectState.message, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
       }
       Spacer(Modifier.height(6.dp))
       Text(
         "Stages run inside the embedded Linux environment at the project root. AI refinement uses the model selected for background tasks.",
-        color = TextMuted,
+        color = AwakiTheme.extra.textMuted,
         fontSize = 10.sp
       )
       if (config?.detectedCommands != null) {
@@ -348,7 +350,7 @@ private fun ConfigCard(
           contentPadding = PaddingValues(horizontal = 0.dp, vertical = 0.dp),
           modifier = Modifier.height(28.dp)
         ) {
-          Text("Reset to detected", color = TextSecondary, fontSize = 11.sp)
+          Text("Reset to detected", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
         }
       }
     }
@@ -377,8 +379,8 @@ private fun StageCard(
     modifier = Modifier
       .fillMaxWidth()
       .clip(RoundedCornerShape(12.dp))
-      .border(1.dp, if (running) ElectricBlue.copy(alpha = 0.5f) else DarkBorder, RoundedCornerShape(12.dp)),
-    colors = CardDefaults.cardColors(containerColor = DarkSurface)
+      .border(1.dp, if (running) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outline, RoundedCornerShape(12.dp)),
+    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
   ) {
     Column(Modifier.padding(14.dp)) {
       Row(
@@ -390,11 +392,11 @@ private fun StageCard(
           Icon(
             stageIcon(kind),
             contentDescription = kind.label,
-            tint = if (running) ElectricBlueGlow else TextSecondary,
+            tint = if (running) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.size(18.dp)
           )
           Spacer(Modifier.width(8.dp))
-          Text(kind.label, color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+          Text(kind.label, color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
           Spacer(Modifier.width(8.dp))
           StageStatusChip(state)
         }
@@ -406,7 +408,7 @@ private fun StageCard(
                 .size(30.dp)
                 .testTag("btn_stop_stage_${kind.name.lowercase()}")
             ) {
-              Icon(Icons.Default.Stop, contentDescription = "Stop ${kind.label}", tint = DangerRed, modifier = Modifier.size(16.dp))
+              Icon(Icons.Default.Stop, contentDescription = "Stop ${kind.label}", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
             }
           } else {
             IconButton(
@@ -419,7 +421,7 @@ private fun StageCard(
               Icon(
                 Icons.Default.PlayArrow,
                 contentDescription = "Run ${kind.label}",
-                tint = if (editable && configured && !pipelineRunning) TerminalGreen else TextMuted,
+                tint = if (editable && configured && !pipelineRunning) AwakiTheme.extra.success else AwakiTheme.extra.textMuted,
                 modifier = Modifier.size(18.dp)
               )
             }
@@ -431,7 +433,7 @@ private fun StageCard(
               .size(30.dp)
               .testTag("btn_edit_stage_${kind.name.lowercase()}")
           ) {
-            Icon(Icons.Default.Edit, contentDescription = "Edit ${kind.label} command", tint = TextSecondary, modifier = Modifier.size(15.dp))
+            Icon(Icons.Default.Edit, contentDescription = "Edit ${kind.label} command", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(15.dp))
           }
         }
       }
@@ -439,18 +441,18 @@ private fun StageCard(
       if (configured) {
         Text(
           text = command,
-          color = TextCode,
+          color = AwakiTheme.extra.textCode,
           fontFamily = FontFamily.Monospace,
           fontSize = 11.sp,
           maxLines = 1,
           overflow = TextOverflow.Ellipsis
         )
       } else {
-        Text("No command configured — use Auto-configure or tap Edit.", color = TextMuted, fontSize = 11.sp)
+        Text("No command configured — use Auto-configure or tap Edit.", color = AwakiTheme.extra.textMuted, fontSize = 11.sp)
       }
       if (kind == BuildStageKind.RUN && runPort != null && !editorOpen) {
         Spacer(Modifier.height(3.dp))
-        Text("Preview port: $runPort", color = CyanAccent, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+        Text("Preview port: $runPort", color = MaterialTheme.colorScheme.secondary, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
       }
       if (editorOpen) {
         Spacer(Modifier.height(10.dp))
@@ -488,13 +490,13 @@ private fun StageEditor(
       modifier = Modifier
         .fillMaxWidth()
         .testTag("input_stage_${kind.name.lowercase()}"),
-      placeholder = { Text(commandPlaceholder(kind), fontSize = 12.sp, color = TextMuted) },
-      textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = TextCode),
+      placeholder = { Text(commandPlaceholder(kind), fontSize = 12.sp, color = AwakiTheme.extra.textMuted) },
+      textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = AwakiTheme.extra.textCode),
       singleLine = true,
       colors = OutlinedTextFieldDefaults.colors(
-        focusedBorderColor = ElectricBlue,
-        unfocusedBorderColor = DarkBorder,
-        cursorColor = ElectricBlueGlow
+        focusedBorderColor = MaterialTheme.colorScheme.primary,
+        unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+        cursorColor = MaterialTheme.colorScheme.primary
       )
     )
     if (kind == BuildStageKind.RUN) {
@@ -505,24 +507,24 @@ private fun StageEditor(
         modifier = Modifier
           .fillMaxWidth()
           .testTag("input_run_port"),
-        placeholder = { Text("Preview port (optional) — e.g. 5173", fontSize = 12.sp, color = TextMuted) },
-        textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = TextCode),
+        placeholder = { Text("Preview port (optional) — e.g. 5173", fontSize = 12.sp, color = AwakiTheme.extra.textMuted) },
+        textStyle = LocalTextStyle.current.copy(fontFamily = FontFamily.Monospace, fontSize = 12.sp, color = AwakiTheme.extra.textCode),
         singleLine = true,
         colors = OutlinedTextFieldDefaults.colors(
-          focusedBorderColor = ElectricBlue,
-          unfocusedBorderColor = DarkBorder,
-          cursorColor = ElectricBlueGlow
+          focusedBorderColor = MaterialTheme.colorScheme.primary,
+          unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+          cursorColor = MaterialTheme.colorScheme.primary
         )
       )
     }
     Spacer(Modifier.height(8.dp))
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-      TextButton(onClick = onCancel) { Text("Cancel", color = TextMuted, fontSize = 12.sp) }
+      TextButton(onClick = onCancel) { Text("Cancel", color = AwakiTheme.extra.textMuted, fontSize = 12.sp) }
       Spacer(Modifier.width(6.dp))
       Button(
         onClick = onSave,
         modifier = Modifier.testTag("btn_save_stage_${kind.name.lowercase()}"),
-        colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
+        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
         shape = RoundedCornerShape(8.dp),
         contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)
       ) {
@@ -539,25 +541,25 @@ private fun StageStatusChip(state: BuildStageState) {
   val label: String
   when (state.status) {
     BuildStageStatus.NOT_CONFIGURED -> {
-      bg = DarkSurfaceElevated; fg = TextMuted; label = "Not configured"
+      bg = MaterialTheme.colorScheme.surfaceContainer; fg = AwakiTheme.extra.textMuted; label = "Not configured"
     }
     BuildStageStatus.IDLE -> {
-      bg = DarkSurfaceElevated; fg = TextSecondary; label = "Ready"
+      bg = MaterialTheme.colorScheme.surfaceContainer; fg = MaterialTheme.colorScheme.onSurfaceVariant; label = "Ready"
     }
     BuildStageStatus.RUNNING -> {
-      bg = ElectricBlue.copy(alpha = 0.15f); fg = ElectricBlueGlow
+      bg = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f); fg = MaterialTheme.colorScheme.primary
       label = "Running · ${runningElapsed(state.startedAt)}"
     }
     BuildStageStatus.PASSED -> {
-      bg = TerminalGreenBg.copy(alpha = 0.5f); fg = TerminalGreen
+      bg = AwakiTheme.extra.successContainer.copy(alpha = 0.5f); fg = AwakiTheme.extra.success
       label = "Passed" + (state.durationMs?.let { " · ${formatDurationMs(it)}" } ?: "")
     }
     BuildStageStatus.FAILED -> {
-      bg = DangerRedBg.copy(alpha = 0.5f); fg = DangerRed
+      bg = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f); fg = MaterialTheme.colorScheme.error
       label = "Failed · exit ${state.exitCode ?: "?"}"
     }
     BuildStageStatus.STOPPED -> {
-      bg = WarningAmberBg.copy(alpha = 0.5f); fg = WarningAmber; label = "Stopped"
+      bg = AwakiTheme.extra.warningContainer.copy(alpha = 0.5f); fg = AwakiTheme.extra.warning; label = "Stopped"
     }
   }
   Box(
@@ -589,11 +591,11 @@ private fun PipelineActions(
           .weight(1f)
           .height(42.dp)
           .testTag("btn_run_pipeline"),
-        colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
+        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
         shape = RoundedCornerShape(8.dp)
       ) {
         if (pipelineRunning) {
-          CircularProgressIndicator(Modifier.size(14.dp), color = Color.White, strokeWidth = 1.5.dp)
+          CircularProgressIndicator(Modifier.size(14.dp), color = MaterialTheme.colorScheme.onPrimary, strokeWidth = 1.5.dp)
           Spacer(Modifier.width(8.dp))
           Text("Pipeline running…", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
         } else {
@@ -609,18 +611,18 @@ private fun PipelineActions(
           .weight(1f)
           .height(42.dp)
           .testTag("btn_stop_all"),
-        border = BorderStroke(1.dp, DarkBorder),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
         shape = RoundedCornerShape(8.dp)
       ) {
-        Icon(Icons.Default.Stop, contentDescription = null, tint = DangerRed, modifier = Modifier.size(16.dp))
+        Icon(Icons.Default.Stop, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
         Spacer(Modifier.width(6.dp))
-        Text("Stop All", fontSize = 12.sp, color = TextPrimary)
+        Text("Stop All", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface)
       }
     }
     Spacer(Modifier.height(4.dp))
     Text(
       "Install → build → test run in order and stop at the first failure; the run server then starts and stays live.",
-      color = TextMuted,
+      color = AwakiTheme.extra.textMuted,
       fontSize = 10.sp
     )
   }
@@ -645,8 +647,8 @@ private fun ConsoleCard(logs: List<BuildLogLine>, onClear: () -> Unit) {
     modifier = Modifier
       .fillMaxWidth()
       .clip(RoundedCornerShape(12.dp))
-      .border(1.dp, DarkBorder, RoundedCornerShape(12.dp)),
-    colors = CardDefaults.cardColors(containerColor = DarkSurface)
+      .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(12.dp)),
+    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
   ) {
     Column(Modifier.padding(14.dp)) {
       Row(
@@ -655,9 +657,9 @@ private fun ConsoleCard(logs: List<BuildLogLine>, onClear: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically
       ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-          Icon(Icons.Outlined.Terminal, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(16.dp))
+          Icon(Icons.Outlined.Terminal, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
           Spacer(Modifier.width(8.dp))
-          Text("Output Log", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+          Text("Output Log", color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
         }
         TextButton(
           onClick = onClear,
@@ -665,7 +667,7 @@ private fun ConsoleCard(logs: List<BuildLogLine>, onClear: () -> Unit) {
           contentPadding = PaddingValues(horizontal = 8.dp),
           modifier = Modifier.height(28.dp)
         ) {
-          Text("Clear", color = TextSecondary, fontSize = 11.sp)
+          Text("Clear", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
         }
       }
       if (stagesWithLogs.isNotEmpty()) {
@@ -681,8 +683,8 @@ private fun ConsoleCard(logs: List<BuildLogLine>, onClear: () -> Unit) {
             onClick = { filter = null },
             label = { Text("All", fontSize = 10.sp) },
             colors = FilterChipDefaults.filterChipColors(
-              selectedContainerColor = ElectricBlue.copy(alpha = 0.3f),
-              selectedLabelColor = ElectricBlueGlow
+              selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
+              selectedLabelColor = MaterialTheme.colorScheme.primary
             )
           )
           stagesWithLogs.forEach { kind ->
@@ -691,8 +693,8 @@ private fun ConsoleCard(logs: List<BuildLogLine>, onClear: () -> Unit) {
               onClick = { filter = if (filter == kind) null else kind },
               label = { Text(kind.label, fontSize = 10.sp) },
               colors = FilterChipDefaults.filterChipColors(
-                selectedContainerColor = ElectricBlue.copy(alpha = 0.3f),
-                selectedLabelColor = ElectricBlueGlow
+                selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
+                selectedLabelColor = MaterialTheme.colorScheme.primary
               )
             )
           }
@@ -704,13 +706,13 @@ private fun ConsoleCard(logs: List<BuildLogLine>, onClear: () -> Unit) {
           .fillMaxWidth()
           .height(230.dp)
           .clip(RoundedCornerShape(8.dp))
-          .background(DarkBackground)
-          .border(1.dp, DarkBorderSubtle, RoundedCornerShape(8.dp))
+          .background(MaterialTheme.colorScheme.background)
+          .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp))
           .padding(8.dp)
           .testTag("console_log")
       ) {
         if (filtered.isEmpty()) {
-          Text("Run a stage to stream its output here.", color = TextMuted, fontSize = 11.sp)
+          Text("Run a stage to stream its output here.", color = AwakiTheme.extra.textMuted, fontSize = 11.sp)
         } else {
           LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
             items(filtered, key = { it.id }) { line -> LogRow(line) }
@@ -750,8 +752,8 @@ private fun PreviewCard(
     modifier = Modifier
       .fillMaxWidth()
       .clip(RoundedCornerShape(12.dp))
-      .border(1.dp, DarkBorder, RoundedCornerShape(12.dp)),
-    colors = CardDefaults.cardColors(containerColor = DarkSurface)
+      .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(12.dp)),
+    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
   ) {
     Column(Modifier.padding(14.dp)) {
       Row(verticalAlignment = Alignment.CenterVertically) {
@@ -759,16 +761,16 @@ private fun PreviewCard(
           Modifier
             .size(8.dp)
             .clip(CircleShape)
-            .background(if (running) TerminalGreen else TextMuted)
+            .background(if (running) AwakiTheme.extra.success else AwakiTheme.extra.textMuted)
         )
         Spacer(Modifier.width(8.dp))
-        Text("Live Preview", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        Text("Live Preview", color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
       }
       Spacer(Modifier.height(8.dp))
       when {
         !configured -> Text(
           "Configure a Run command to start a server and preview it here.",
-          color = TextMuted,
+          color = AwakiTheme.extra.textMuted,
           fontSize = 11.sp
         )
         endpoints.isNotEmpty() -> {
@@ -782,11 +784,11 @@ private fun PreviewCard(
               Box(
                 Modifier
                   .clip(RoundedCornerShape(6.dp))
-                  .background(DarkBackground)
-                  .border(1.dp, CyanAccent.copy(alpha = 0.35f), RoundedCornerShape(6.dp))
+                  .background(MaterialTheme.colorScheme.background)
+                  .border(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.35f), RoundedCornerShape(6.dp))
                   .padding(horizontal = 8.dp, vertical = 4.dp)
               ) {
-                Text(endpoint.url, color = CyanAccent, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                Text(endpoint.url, color = MaterialTheme.colorScheme.secondary, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
               }
             }
           }
@@ -798,7 +800,7 @@ private fun PreviewCard(
               .fillMaxWidth()
               .height(38.dp)
               .testTag("btn_open_preview"),
-            colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
+            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
             shape = RoundedCornerShape(8.dp)
           ) {
             Icon(Icons.Outlined.Preview, contentDescription = "Preview", modifier = Modifier.size(16.dp))
@@ -809,19 +811,19 @@ private fun PreviewCard(
             Spacer(Modifier.height(4.dp))
             Text(
               "The server is not running — start the Run stage to open the preview.",
-              color = TextMuted,
+              color = AwakiTheme.extra.textMuted,
               fontSize = 10.sp
             )
           }
         }
         running -> Row(verticalAlignment = Alignment.CenterVertically) {
-          CircularProgressIndicator(Modifier.size(13.dp), color = ElectricBlueGlow, strokeWidth = 1.5.dp)
+          CircularProgressIndicator(Modifier.size(13.dp), color = MaterialTheme.colorScheme.primary, strokeWidth = 1.5.dp)
           Spacer(Modifier.width(8.dp))
-          Text("Waiting for the server endpoint…", color = TextSecondary, fontSize = 11.sp)
+          Text("Waiting for the server endpoint…", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
         }
         else -> Text(
           "Start the Run stage — the endpoint appears here and opens automatically.",
-          color = TextMuted,
+          color = AwakiTheme.extra.textMuted,
           fontSize = 11.sp
         )
       }
@@ -840,7 +842,7 @@ private fun PreviewModal(url: String, onDismiss: () -> Unit) {
     var webView by remember { mutableStateOf<WebView?>(null) }
     var loadError by remember { mutableStateOf(false) }
 
-    Surface(color = DarkBackground, modifier = Modifier.fillMaxSize()) {
+    Surface(color = MaterialTheme.colorScheme.background, modifier = Modifier.fillMaxSize()) {
       Column(Modifier.fillMaxSize()) {
         Row(
           Modifier
@@ -852,12 +854,12 @@ private fun PreviewModal(url: String, onDismiss: () -> Unit) {
             Modifier
               .size(8.dp)
               .clip(CircleShape)
-              .background(if (loadError) DangerRed else TerminalGreen)
+              .background(if (loadError) MaterialTheme.colorScheme.error else AwakiTheme.extra.success)
           )
           Spacer(Modifier.width(8.dp))
           Text(
             text = url,
-            color = TextPrimary,
+            color = MaterialTheme.colorScheme.onSurface,
             fontSize = 12.sp,
             fontFamily = FontFamily.Monospace,
             maxLines = 1,
@@ -871,7 +873,7 @@ private fun PreviewModal(url: String, onDismiss: () -> Unit) {
             },
             modifier = Modifier.size(32.dp)
           ) {
-            Icon(Icons.Default.Refresh, contentDescription = "Reload", tint = TextSecondary, modifier = Modifier.size(17.dp))
+            Icon(Icons.Default.Refresh, contentDescription = "Reload", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(17.dp))
           }
           IconButton(
             onClick = {
@@ -879,13 +881,13 @@ private fun PreviewModal(url: String, onDismiss: () -> Unit) {
             },
             modifier = Modifier.size(32.dp)
           ) {
-            Icon(Icons.AutoMirrored.Outlined.OpenInNew, contentDescription = "Open in browser", tint = TextSecondary, modifier = Modifier.size(17.dp))
+            Icon(Icons.AutoMirrored.Outlined.OpenInNew, contentDescription = "Open in browser", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(17.dp))
           }
           IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
-            Icon(Icons.Default.Close, contentDescription = "Close preview", tint = TextMuted, modifier = Modifier.size(17.dp))
+            Icon(Icons.Default.Close, contentDescription = "Close preview", tint = AwakiTheme.extra.textMuted, modifier = Modifier.size(17.dp))
           }
         }
-        HorizontalDivider(color = DarkBorder)
+        HorizontalDivider(color = MaterialTheme.colorScheme.outline)
         Box(Modifier.weight(1f).fillMaxWidth()) {
           AndroidView(
             factory = { ctx ->
@@ -929,20 +931,20 @@ private fun PreviewModal(url: String, onDismiss: () -> Unit) {
             Box(
               Modifier
                 .fillMaxSize()
-                .background(DarkBackground.copy(alpha = 0.94f)),
+                .background(MaterialTheme.colorScheme.background.copy(alpha = 0.94f)),
               contentAlignment = Alignment.Center
             ) {
               Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("Couldn't load $url", color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                Text("Couldn't load $url", color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(4.dp))
-                Text("The server may still be starting, or it stopped.", color = TextMuted, fontSize = 11.sp)
+                Text("The server may still be starting, or it stopped.", color = AwakiTheme.extra.textMuted, fontSize = 11.sp)
                 Spacer(Modifier.height(10.dp))
                 Button(
                   onClick = {
                     loadError = false
                     webView?.reload()
                   },
-                  colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
+                  colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
                   shape = RoundedCornerShape(8.dp)
                 ) {
                   Text("Retry", fontSize = 12.sp)
@@ -991,12 +993,13 @@ private fun commandPlaceholder(kind: BuildStageKind): String = when (kind) {
   BuildStageKind.RUN -> "e.g. npm run dev"
 }
 
+@Composable
 private fun toneColor(tone: LogTone): Color = when (tone) {
-  LogTone.NORMAL -> TextCode
-  LogTone.ERROR -> Color(0xFFF87171)
-  LogTone.SUCCESS -> TerminalGreen
-  LogTone.INFO -> ElectricBlueGlow
-  LogTone.MUTED -> TextMuted
+  LogTone.NORMAL -> AwakiTheme.extra.textCode
+  LogTone.ERROR -> MaterialTheme.colorScheme.error
+  LogTone.SUCCESS -> AwakiTheme.extra.success
+  LogTone.INFO -> MaterialTheme.colorScheme.primary
+  LogTone.MUTED -> AwakiTheme.extra.textMuted
 }
 
 private fun formatDurationMs(ms: Long): String =

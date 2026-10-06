@@ -7,6 +7,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -19,7 +20,6 @@ import com.awaki.ui.components.AgentIDEBottomBar
 import com.awaki.ui.components.AgentIDETopAppBar
 import com.awaki.ui.screens.ProjectsScreenContent
 import com.awaki.ui.theme.AwakiTheme
-import com.awaki.ui.theme.DarkBackground
 import com.github.takahirom.roborazzi.RobolectricDeviceQualifiers
 import com.github.takahirom.roborazzi.captureRoboImage
 import org.junit.Rule
@@ -127,7 +127,7 @@ class ProjectsScreenScreenshotTest {
 
   @Composable
   private fun Screen(projects: List<Project>, active: Project) {
-    Column(modifier = Modifier.fillMaxSize().background(DarkBackground)) {
+    Column(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
       AgentIDETopAppBar(
         activeProject = active,
         currentDestination = AppDestination.PROJECTS,
@@ -173,7 +173,7 @@ class ProjectsScreenScreenshotTest {
   fun projects_screen_agent_working_screenshot() {
     composeTestRule.setContent {
       AwakiTheme {
-        Column(modifier = Modifier.fillMaxSize().background(DarkBackground)) {
+        Column(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
           AgentIDETopAppBar(
             activeProject = activeProject,
             currentDestination = AppDestination.PROJECTS,

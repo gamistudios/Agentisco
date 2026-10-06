@@ -17,6 +17,7 @@ import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.outlined.StarOutline
 import androidx.compose.material3.*
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -39,6 +40,7 @@ import com.awaki.settings.model.ModelCapabilities
 import com.awaki.settings.model.ReasoningConfig
 import com.awaki.ui.WorkspaceViewModel
 import com.awaki.ui.theme.*
+import com.awaki.ui.theme.AwakiTheme
 
 /**
  * Provider-centric AI configuration UI: provider cards (name, base URL,
@@ -69,21 +71,21 @@ fun AIProvidersSection(viewModel: WorkspaceViewModel, modifier: Modifier = Modif
       horizontalArrangement = Arrangement.SpaceBetween,
       verticalAlignment = Alignment.CenterVertically
     ) {
-      Text("AI Providers", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+      Text("AI Providers", color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
       Surface(
         onClick = { showAddProvider = true },
         shape = RoundedCornerShape(8.dp),
-        color = ElectricBlue.copy(alpha = 0.15f),
-        border = androidx.compose.foundation.BorderStroke(1.dp, ElectricBlue),
+        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
         modifier = Modifier.testTag("btn_add_provider")
       ) {
         Row(
           modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
           verticalAlignment = Alignment.CenterVertically
         ) {
-          Icon(Icons.Default.Add, contentDescription = null, tint = ElectricBlueGlow, modifier = Modifier.size(14.dp))
+          Icon(Icons.Default.Add, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(14.dp))
           Spacer(modifier = Modifier.width(4.dp))
-          Text("Add Provider", color = ElectricBlueGlow, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+          Text("Add Provider", color = MaterialTheme.colorScheme.primary, fontSize = 11.sp, fontWeight = FontWeight.Medium)
         }
       }
     }
@@ -95,13 +97,13 @@ fun AIProvidersSection(viewModel: WorkspaceViewModel, modifier: Modifier = Modif
         modifier = Modifier
           .fillMaxWidth()
           .clip(RoundedCornerShape(12.dp))
-          .background(DarkBackground)
-          .border(1.dp, DarkBorderSubtle, RoundedCornerShape(12.dp))
+          .background(MaterialTheme.colorScheme.background)
+          .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
           .padding(14.dp)
       ) {
         Text(
           "No providers configured. Add one (e.g. an OpenAI-compatible router) with its base URL, protocol and API key, then add models to it.",
-          color = TextMuted,
+          color = AwakiTheme.extra.textMuted,
           fontSize = 12.sp
         )
       }
@@ -117,8 +119,8 @@ fun AIProvidersSection(viewModel: WorkspaceViewModel, modifier: Modifier = Modif
         modifier = Modifier
           .fillMaxWidth()
           .clip(RoundedCornerShape(12.dp))
-          .background(DarkSurface)
-          .border(1.dp, DarkBorder, RoundedCornerShape(12.dp))
+          .background(MaterialTheme.colorScheme.surface)
+          .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(12.dp))
           .clickable { detailProvider = provider }
           .padding(12.dp)
           .testTag("provider_card_${provider.name}")
@@ -135,15 +137,15 @@ fun AIProvidersSection(viewModel: WorkspaceViewModel, modifier: Modifier = Modif
                 .clip(androidx.compose.foundation.shape.CircleShape)
                 .background(
                   when (testState) {
-                    is WorkspaceRepository.ConnectionTestState.Connected -> TerminalGreen
-                    is WorkspaceRepository.ConnectionTestState.Testing -> WarningAmber
-                    is WorkspaceRepository.ConnectionTestState.Failed -> DangerRed
-                    null -> if (provider.hasApiKey) TerminalGreen.copy(alpha = 0.5f) else TextMuted
+                    is WorkspaceRepository.ConnectionTestState.Connected -> AwakiTheme.extra.success
+                    is WorkspaceRepository.ConnectionTestState.Testing -> AwakiTheme.extra.warning
+                    is WorkspaceRepository.ConnectionTestState.Failed -> MaterialTheme.colorScheme.error
+                    null -> if (provider.hasApiKey) AwakiTheme.extra.success.copy(alpha = 0.5f) else AwakiTheme.extra.textMuted
                   }
                 )
             )
             Spacer(modifier = Modifier.width(6.dp))
-            Text(provider.name, color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Text(provider.name, color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
           }
           Text(
             text = when (testState) {
@@ -157,9 +159,9 @@ fun AIProvidersSection(viewModel: WorkspaceViewModel, modifier: Modifier = Modif
               }
             },
             color = when (testState) {
-              is WorkspaceRepository.ConnectionTestState.Connected -> TerminalGreen
-              is WorkspaceRepository.ConnectionTestState.Failed -> DangerRed
-              else -> TextMuted
+              is WorkspaceRepository.ConnectionTestState.Connected -> AwakiTheme.extra.success
+              is WorkspaceRepository.ConnectionTestState.Failed -> MaterialTheme.colorScheme.error
+              else -> AwakiTheme.extra.textMuted
             },
             fontSize = 10.sp,
             maxLines = 1
@@ -167,17 +169,17 @@ fun AIProvidersSection(viewModel: WorkspaceViewModel, modifier: Modifier = Modif
         }
 
         Spacer(modifier = Modifier.height(4.dp))
-        Text(provider.protocol.displayName, color = CyanAccent, fontSize = 11.sp)
+        Text(provider.protocol.displayName, color = MaterialTheme.colorScheme.secondary, fontSize = 11.sp)
         Text(
           provider.baseUrl,
-          color = TextMuted,
+          color = AwakiTheme.extra.textMuted,
           fontSize = 10.sp,
           fontFamily = FontFamily.Monospace,
           maxLines = 1
         )
         Text(
           "$modelCount model${if (modelCount == 1) "" else "s"}",
-          color = TextSecondary,
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
           fontSize = 11.sp
         )
 
@@ -187,21 +189,21 @@ fun AIProvidersSection(viewModel: WorkspaceViewModel, modifier: Modifier = Modif
           MiniAction("Test") { viewModel.testProviderConnection(provider.id) }
           if (!derived) {
             MiniAction("Edit") { editProvider = provider }
-            MiniAction("Delete", DangerRed) { confirmDeleteProvider = provider }
+            MiniAction("Delete", MaterialTheme.colorScheme.error) { confirmDeleteProvider = provider }
           }
         }
 
         testState?.let { state ->
           if (state is WorkspaceRepository.ConnectionTestState.Failed) {
             Spacer(modifier = Modifier.height(6.dp))
-            Text(state.message, color = DangerRed.copy(alpha = 0.9f), fontSize = 10.sp, maxLines = 3)
+            Text(state.message, color = MaterialTheme.colorScheme.error.copy(alpha = 0.9f), fontSize = 10.sp, maxLines = 3)
           }
         }
 
         // Discovery is a convenience, so its failure says little and blocks nothing.
         if (modelCount == 0 && catalogs[provider.id] is WorkspaceRepository.ModelCatalogState.Failed) {
           Spacer(modifier = Modifier.height(6.dp))
-          Text("Model auto-discovery failed — add models manually.", color = TextMuted, fontSize = 10.sp)
+          Text("Model auto-discovery failed — add models manually.", color = AwakiTheme.extra.textMuted, fontSize = 10.sp)
         }
       }
       Spacer(modifier = Modifier.height(10.dp))
@@ -274,12 +276,12 @@ fun AIProvidersSection(viewModel: WorkspaceViewModel, modifier: Modifier = Modif
   confirmDeleteProvider?.let { provider ->
     AlertDialog(
       onDismissRequest = { confirmDeleteProvider = null },
-      containerColor = DarkSurface,
-      title = { Text("Delete \"${provider.name}\"?", color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold) },
+      containerColor = MaterialTheme.colorScheme.surface,
+      title = { Text("Delete \"${provider.name}\"?", color = MaterialTheme.colorScheme.onSurface, fontSize = 16.sp, fontWeight = FontWeight.Bold) },
       text = {
         Text(
           "All models belonging to this provider (${models.count { it.providerId == provider.id }}) will also be removed and become unavailable to the agent. Stored API keys for this provider are erased. This cannot be undone.",
-          color = TextSecondary,
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
           fontSize = 12.sp
         )
       },
@@ -290,27 +292,28 @@ fun AIProvidersSection(viewModel: WorkspaceViewModel, modifier: Modifier = Modif
             confirmDeleteProvider = null
             if (detailProvider?.id == provider.id) detailProvider = null
           },
-          colors = ButtonDefaults.buttonColors(containerColor = DangerRed)
-        ) { Text("Delete Provider", color = Color.White) }
+          colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+        ) { Text("Delete Provider", color = MaterialTheme.colorScheme.onError) }
       },
       dismissButton = {
-        TextButton(onClick = { confirmDeleteProvider = null }) { Text("Cancel", color = TextMuted) }
+        TextButton(onClick = { confirmDeleteProvider = null }) { Text("Cancel", color = AwakiTheme.extra.textMuted) }
       }
     )
   }
 }
 
 @Composable
-internal fun MiniAction(label: String, tint: Color = TextSecondary, modifier: Modifier = Modifier, onClick: () -> Unit) {
+internal fun MiniAction(label: String, tint: Color = Color.Unspecified, modifier: Modifier = Modifier, onClick: () -> Unit) {
+  val labelColor = if (tint == Color.Unspecified) MaterialTheme.colorScheme.onSurfaceVariant else tint
   Box(
     modifier = modifier
       .clip(RoundedCornerShape(6.dp))
-      .background(DarkSurfaceElevated)
-      .border(1.dp, DarkBorderSubtle, RoundedCornerShape(6.dp))
+      .background(MaterialTheme.colorScheme.surfaceContainer)
+      .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(6.dp))
       .clickable(onClick = onClick)
       .padding(horizontal = 10.dp, vertical = 4.dp)
   ) {
-    Text(label, color = tint, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+    Text(label, color = labelColor, fontSize = 11.sp, fontWeight = FontWeight.Medium)
   }
 }
 
@@ -330,11 +333,11 @@ private fun ProviderFormDialog(
 
   AlertDialog(
     onDismissRequest = onDismiss,
-    containerColor = DarkSurface,
+    containerColor = MaterialTheme.colorScheme.surface,
     title = {
       Text(
         if (existing == null) "Add Provider" else "Edit Provider",
-        color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold
+        color = MaterialTheme.colorScheme.onSurface, fontSize = 16.sp, fontWeight = FontWeight.Bold
       )
     },
     text = {
@@ -363,7 +366,7 @@ private fun ProviderFormDialog(
           },
           singleLine = true, modifier = Modifier.fillMaxWidth().testTag("input_provider_url")
         )
-        Text("Protocol", color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+        Text("Protocol", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp, fontWeight = FontWeight.Medium)
         // FlowRow, not Row: on a narrow screen a fixed Row squeezes every chip
         // until the label wraps one character per line ("G/e/m/i/n/i").
         @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
@@ -376,11 +379,11 @@ private fun ProviderFormDialog(
             Surface(
               onClick = { protocol = p },
               shape = RoundedCornerShape(6.dp),
-              color = if (protocol == p) ElectricBlue.copy(alpha = 0.2f) else DarkSurfaceElevated,
-              border = androidx.compose.foundation.BorderStroke(1.dp, if (protocol == p) ElectricBlue else DarkBorderSubtle)
+              color = if (protocol == p) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f) else MaterialTheme.colorScheme.surfaceContainer,
+              border = androidx.compose.foundation.BorderStroke(1.dp, if (protocol == p) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant)
             ) {
               Text(
-                p.displayName, color = if (protocol == p) ElectricBlueGlow else TextSecondary,
+                p.displayName, color = if (protocol == p) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 10.sp, maxLines = 1,
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
               )
@@ -400,7 +403,7 @@ private fun ProviderFormDialog(
               Icon(
                 imageVector = if (keyVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
                 contentDescription = if (keyVisible) "Hide API key" else "Show API key",
-                tint = TextMuted,
+                tint = AwakiTheme.extra.textMuted,
                 modifier = Modifier.size(16.dp)
               )
             }
@@ -408,7 +411,7 @@ private fun ProviderFormDialog(
         )
         Text(
           "Keys are stored in the app's private storage and never sent anywhere except the provider endpoint.",
-          color = TextMuted, fontSize = 9.sp
+          color = AwakiTheme.extra.textMuted, fontSize = 9.sp
         )
       }
     },
@@ -416,12 +419,12 @@ private fun ProviderFormDialog(
       Button(
         onClick = { onSave(name, baseUrl, protocol, apiKey.takeIf { it.isNotBlank() }) },
         enabled = valid,
-        colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
+        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
         modifier = Modifier.testTag("btn_save_provider")
       ) { Text("Save", fontSize = 12.sp) }
     },
     dismissButton = {
-      TextButton(onClick = onDismiss) { Text("Cancel", color = TextMuted, fontSize = 12.sp) }
+      TextButton(onClick = onDismiss) { Text("Cancel", color = AwakiTheme.extra.textMuted, fontSize = 12.sp) }
     }
   )
 }
@@ -443,11 +446,11 @@ private fun ProviderDetailDialog(
 
   AlertDialog(
     onDismissRequest = onDismiss,
-    containerColor = DarkSurface,
+    containerColor = MaterialTheme.colorScheme.surface,
     title = {
       Column {
-        Text(provider.name, color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-        Text(provider.protocol.displayName, color = CyanAccent, fontSize = 11.sp)
+        Text(provider.name, color = MaterialTheme.colorScheme.onSurface, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Text(provider.protocol.displayName, color = MaterialTheme.colorScheme.secondary, fontSize = 11.sp)
       }
     },
     text = {
@@ -459,16 +462,16 @@ private fun ProviderDetailDialog(
         if (!readOnly) ApiKeyField(viewModel = viewModel, provider = provider)
         if (testState != null) {
           when (testState) {
-            is WorkspaceRepository.ConnectionTestState.Testing -> StatusLine("Testing connection…", WarningAmber)
-            is WorkspaceRepository.ConnectionTestState.Connected -> StatusLine(testState.note, TerminalGreen)
-            is WorkspaceRepository.ConnectionTestState.Failed -> StatusLine(testState.message, DangerRed)
+            is WorkspaceRepository.ConnectionTestState.Testing -> StatusLine("Testing connection…", AwakiTheme.extra.warning)
+            is WorkspaceRepository.ConnectionTestState.Connected -> StatusLine(testState.note, AwakiTheme.extra.success)
+            is WorkspaceRepository.ConnectionTestState.Failed -> StatusLine(testState.message, MaterialTheme.colorScheme.error)
           }
         }
 
-        Text("${models.size} Model${if (models.size == 1) "" else "s"}", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        Text("${models.size} Model${if (models.size == 1) "" else "s"}", color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
         Text(
           "Tap the star to set the default model used for background tasks (commit messages, session titles).",
-          color = TextMuted,
+          color = AwakiTheme.extra.textMuted,
           fontSize = 9.sp,
           lineHeight = 12.sp
         )
@@ -479,7 +482,7 @@ private fun ProviderDetailDialog(
             } else {
               "No models yet — the agent cannot use this provider until a model is added."
             },
-            color = TextMuted,
+            color = AwakiTheme.extra.textMuted,
             fontSize = 11.sp
           )
         }
@@ -488,22 +491,22 @@ private fun ProviderDetailDialog(
             modifier = Modifier
               .fillMaxWidth()
               .clip(RoundedCornerShape(8.dp))
-              .background(DarkBackground)
-              .border(1.dp, DarkBorderSubtle, RoundedCornerShape(8.dp))
+              .background(MaterialTheme.colorScheme.background)
+              .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp))
               .padding(horizontal = 10.dp, vertical = 8.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
           ) {
             Column(modifier = Modifier.weight(1f)) {
-              Text(model.displayName, color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-              Text(model.modelId, color = TextMuted, fontSize = 10.sp, fontFamily = FontFamily.Monospace, maxLines = 1)
+              Text(model.displayName, color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+              Text(model.modelId, color = AwakiTheme.extra.textMuted, fontSize = 10.sp, fontFamily = FontFamily.Monospace, maxLines = 1)
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
               val isDefault = model.id == defaultTaskModelId
               Icon(
                 if (isDefault) Icons.Default.Star else Icons.Outlined.StarOutline,
                 contentDescription = if (isDefault) "Default model (tap to unset)" else "Set as default model",
-                tint = if (isDefault) WarningAmber else TextMuted,
+                tint = if (isDefault) AwakiTheme.extra.warning else AwakiTheme.extra.textMuted,
                 modifier = Modifier
                   .size(16.dp)
                   .clickable {
@@ -515,7 +518,7 @@ private fun ProviderDetailDialog(
               if (!readOnly) {
                 Icon(
                   Icons.Default.Edit, contentDescription = "Edit model",
-                  tint = ElectricBlueGlow,
+                  tint = MaterialTheme.colorScheme.primary,
                   modifier = Modifier
                     .size(16.dp)
                     .clickable { onEditModel(model) }
@@ -524,7 +527,7 @@ private fun ProviderDetailDialog(
                 Spacer(modifier = Modifier.width(10.dp))
                 Icon(
                   Icons.Default.Delete, contentDescription = "Delete model",
-                  tint = DangerRed,
+                  tint = MaterialTheme.colorScheme.error,
                   modifier = Modifier
                     .size(16.dp)
                     .clickable { viewModel.deleteModel(model.id) }
@@ -538,11 +541,11 @@ private fun ProviderDetailDialog(
         // stops a provider or model from being configured by hand.
         when (val catalogState = catalogs[provider.id]) {
           is WorkspaceRepository.ModelCatalogState.Loading ->
-            StatusLine("Asking the provider for its models…", WarningAmber)
+            StatusLine("Asking the provider for its models…", AwakiTheme.extra.warning)
           is WorkspaceRepository.ModelCatalogState.Available ->
-            StatusLine("${catalogState.models.size} models listed — typing a Model ID offers them.", TerminalGreen)
+            StatusLine("${catalogState.models.size} models listed — typing a Model ID offers them.", AwakiTheme.extra.success)
           is WorkspaceRepository.ModelCatalogState.Failed ->
-            StatusLine("Auto-discovery failed: ${catalogState.message} Add models manually.", TextMuted)
+            StatusLine("Auto-discovery failed: ${catalogState.message} Add models manually.", AwakiTheme.extra.textMuted)
           null -> Unit
         }
 
@@ -550,8 +553,8 @@ private fun ProviderDetailDialog(
           Surface(
             onClick = onAddModel,
             shape = RoundedCornerShape(8.dp),
-            color = ElectricBlue.copy(alpha = 0.12f),
-            border = androidx.compose.foundation.BorderStroke(1.dp, ElectricBlue),
+            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
             modifier = Modifier.fillMaxWidth().testTag("btn_add_model")
           ) {
             Row(
@@ -559,9 +562,9 @@ private fun ProviderDetailDialog(
               horizontalArrangement = Arrangement.Center,
               verticalAlignment = Alignment.CenterVertically
             ) {
-              Icon(Icons.Default.Add, contentDescription = null, tint = ElectricBlueGlow, modifier = Modifier.size(14.dp))
+              Icon(Icons.Default.Add, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(14.dp))
               Spacer(modifier = Modifier.width(4.dp))
-              Text("Add Model", color = ElectricBlueGlow, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+              Text("Add Model", color = MaterialTheme.colorScheme.primary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
             }
           }
         }
@@ -587,8 +590,8 @@ private fun ProviderDetailDialog(
 @Composable
 private fun DetailField(label: String, value: String) {
   Column {
-    Text(label, color = TextMuted, fontSize = 9.sp)
-    Text(value, color = TextCode, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+    Text(label, color = AwakiTheme.extra.textMuted, fontSize = 9.sp)
+    Text(value, color = AwakiTheme.extra.textCode, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
   }
 }
 
@@ -608,11 +611,11 @@ private fun ApiKeyField(viewModel: WorkspaceViewModel, provider: AIProvider) {
 
   Column {
     Row(verticalAlignment = Alignment.CenterVertically) {
-      Text("API Key", color = TextMuted, fontSize = 9.sp, modifier = Modifier.weight(1f))
+      Text("API Key", color = AwakiTheme.extra.textMuted, fontSize = 9.sp, modifier = Modifier.weight(1f))
       Icon(
         imageVector = if (keyVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
         contentDescription = if (keyVisible) "Hide API key" else "Show API key",
-        tint = if (provider.hasApiKey) TextSecondary else TextMuted,
+        tint = if (provider.hasApiKey) MaterialTheme.colorScheme.onSurfaceVariant else AwakiTheme.extra.textMuted,
         modifier = Modifier
           .size(14.dp)
           .clickable(enabled = provider.hasApiKey) {
@@ -625,17 +628,17 @@ private fun ApiKeyField(viewModel: WorkspaceViewModel, provider: AIProvider) {
       )
     }
     if (!provider.hasApiKey) {
-      Text("not set", color = TextMuted, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+      Text("not set", color = AwakiTheme.extra.textMuted, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
     } else if (keyVisible) {
       Text(
         revealedKey ?: "",
-        color = TextCode,
+        color = AwakiTheme.extra.textCode,
         fontSize = 11.sp,
         fontFamily = FontFamily.Monospace,
         modifier = Modifier.testTag("txt_api_key_revealed")
       )
     } else {
-      Text("••••••••••••", color = TextCode, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+      Text("••••••••••••", color = AwakiTheme.extra.textCode, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
     }
   }
 }
@@ -728,14 +731,14 @@ private fun ModelFormDialog(
 
   AlertDialog(
     onDismissRequest = onDismiss,
-    containerColor = DarkSurface,
+    containerColor = MaterialTheme.colorScheme.surface,
     title = {
       Column {
         Text(
           if (existing == null) "Add Model" else "Edit Model",
-          color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold
+          color = MaterialTheme.colorScheme.onSurface, fontSize = 16.sp, fontWeight = FontWeight.Bold
         )
-        provider?.let { Text("Provider: ${it.name}", color = CyanAccent, fontSize = 11.sp) }
+        provider?.let { Text("Provider: ${it.name}", color = MaterialTheme.colorScheme.secondary, fontSize = 11.sp) }
       }
     },
     text = {
@@ -785,7 +788,7 @@ private fun ModelFormDialog(
           )
         }
 
-        Text("Capabilities", color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+        Text("Capabilities", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp, fontWeight = FontWeight.Medium)
         CapabilityRow("Tool calling", fields.tools) { fields = fields.copy(tools = it) }
         CapabilityRow("Streaming", streaming) { streaming = it }
         CapabilityRow("Images", fields.images) { fields = fields.copy(images = it) }
@@ -800,11 +803,11 @@ private fun ModelFormDialog(
               Surface(
                 onClick = { reasoningEffort = effort },
                 shape = RoundedCornerShape(6.dp),
-                color = if (reasoningEffort == effort) ElectricBlue.copy(alpha = 0.2f) else DarkSurfaceElevated,
-                border = androidx.compose.foundation.BorderStroke(1.dp, if (reasoningEffort == effort) ElectricBlue else DarkBorderSubtle)
+                color = if (reasoningEffort == effort) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f) else MaterialTheme.colorScheme.surfaceContainer,
+                border = androidx.compose.foundation.BorderStroke(1.dp, if (reasoningEffort == effort) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant)
               ) {
                 Text(
-                  effort, color = if (reasoningEffort == effort) ElectricBlueGlow else TextSecondary,
+                  effort, color = if (reasoningEffort == effort) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                   fontSize = 10.sp, modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
                 )
               }
@@ -831,12 +834,12 @@ private fun ModelFormDialog(
           )
         },
         enabled = valid,
-        colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
+        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
         modifier = Modifier.testTag("btn_save_model")
       ) { Text("Save", fontSize = 12.sp) }
     },
     dismissButton = {
-      TextButton(onClick = onDismiss) { Text("Cancel", color = TextMuted, fontSize = 12.sp) }
+      TextButton(onClick = onDismiss) { Text("Cancel", color = AwakiTheme.extra.textMuted, fontSize = 12.sp) }
     }
   )
 }
@@ -858,19 +861,19 @@ internal fun CatalogSuggestions(
     modifier = modifier
       .fillMaxWidth()
       .clip(RoundedCornerShape(8.dp))
-      .background(DarkSurfaceElevated)
-      .border(1.dp, DarkBorderSubtle, RoundedCornerShape(8.dp))
+      .background(MaterialTheme.colorScheme.surfaceContainer)
+      .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp))
   ) {
     Row(
       modifier = Modifier.fillMaxWidth().padding(start = 8.dp, end = 2.dp, top = 2.dp),
       verticalAlignment = Alignment.CenterVertically
     ) {
-      Text("From this provider", color = TextMuted, fontSize = 9.sp, modifier = Modifier.weight(1f))
+      Text("From this provider", color = AwakiTheme.extra.textMuted, fontSize = 9.sp, modifier = Modifier.weight(1f))
       IconButton(
         onClick = onDismiss,
         modifier = Modifier.size(22.dp).testTag("btn_suggestions_dismiss")
       ) {
-        Icon(Icons.Default.Close, contentDescription = "Hide suggestions", tint = TextMuted, modifier = Modifier.size(12.dp))
+        Icon(Icons.Default.Close, contentDescription = "Hide suggestions", tint = AwakiTheme.extra.textMuted, modifier = Modifier.size(12.dp))
       }
     }
     Column(
@@ -891,10 +894,10 @@ internal fun CatalogSuggestions(
           verticalAlignment = Alignment.CenterVertically
         ) {
           Text(
-            m.modelId, color = TextPrimary, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
+            m.modelId, color = MaterialTheme.colorScheme.onSurface, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
             maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f)
           )
-          Text(catalogLimitsLabel(m), color = TextMuted, fontSize = 9.sp, maxLines = 1)
+          Text(catalogLimitsLabel(m), color = AwakiTheme.extra.textMuted, fontSize = 9.sp, maxLines = 1)
         }
       }
     }
@@ -916,7 +919,7 @@ private fun CapabilityRow(label: String, checked: Boolean, onChange: (Boolean) -
       .clickable { onChange(!checked) },
     verticalAlignment = Alignment.CenterVertically
   ) {
-    Checkbox(checked = checked, onCheckedChange = onChange, colors = CheckboxDefaults.colors(checkedColor = ElectricBlue))
-    Text(label, color = TextPrimary, fontSize = 12.sp)
+    Checkbox(checked = checked, onCheckedChange = onChange, colors = CheckboxDefaults.colors(checkedColor = MaterialTheme.colorScheme.primary))
+    Text(label, color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp)
   }
 }

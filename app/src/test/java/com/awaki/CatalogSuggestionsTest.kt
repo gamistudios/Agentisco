@@ -3,6 +3,7 @@ package com.awaki
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -15,7 +16,6 @@ import androidx.compose.ui.unit.dp
 import com.awaki.agent.llm.CatalogModel
 import com.awaki.ui.components.CatalogSuggestions
 import com.awaki.ui.theme.AwakiTheme
-import com.awaki.ui.theme.DarkBackground
 import com.github.takahirom.roborazzi.RobolectricDeviceQualifiers
 import com.github.takahirom.roborazzi.captureRoboImage
 import org.junit.Assert.assertEquals
@@ -50,7 +50,7 @@ class CatalogSuggestionsTest {
   private fun render(matches: List<CatalogModel>) {
     composeTestRule.setContent {
       AwakiTheme {
-        Box(Modifier.fillMaxWidth().background(DarkBackground)) {
+        Box(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.background)) {
           CatalogSuggestions(
             matches = matches,
             onPick = { picked += it },

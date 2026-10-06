@@ -33,6 +33,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
@@ -60,17 +61,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.awaki.BuildConfig
 import com.awaki.ui.WorkspaceViewModel
-import com.awaki.ui.theme.DarkBackground
-import com.awaki.ui.theme.DarkBorder
-import com.awaki.ui.theme.DarkBorderSubtle
-import com.awaki.ui.theme.DarkSurfaceElevated
-import com.awaki.ui.theme.ElectricBlue
-import com.awaki.ui.theme.ElectricBlueGlow
-import com.awaki.ui.theme.TerminalGreen
-import com.awaki.ui.theme.TextMuted
-import com.awaki.ui.theme.TextPrimary
-import com.awaki.ui.theme.TextSecondary
-import com.awaki.ui.theme.WarningAmber
+import com.awaki.ui.theme.AwakiTheme
 
 /**
  * The three settings surfaces that stayed long documents rather than becoming rows:
@@ -104,7 +95,7 @@ internal fun WebAccessCard(viewModel: WorkspaceViewModel, modifier: Modifier = M
   Column(modifier = modifier.fillMaxWidth()) {
     Text(
       "Web Access (Jina.ai)",
-      color = TextPrimary,
+      color = MaterialTheme.colorScheme.onSurface,
       fontSize = 16.sp,
       fontWeight = FontWeight.Bold,
       modifier = Modifier.padding(bottom = 4.dp)
@@ -112,7 +103,7 @@ internal fun WebAccessCard(viewModel: WorkspaceViewModel, modifier: Modifier = M
     Text(
       "Reader: Jina.ai first (20 pages a minute with no key), then a key, then the page itself. " +
         "Search: Jina.ai only with a key, otherwise DuckDuckGo.",
-      color = TextMuted,
+      color = AwakiTheme.extra.textMuted,
       fontSize = 11.sp,
       lineHeight = 15.sp,
       modifier = Modifier.padding(bottom = 12.dp)
@@ -141,10 +132,10 @@ internal fun WebAccessCard(viewModel: WorkspaceViewModel, modifier: Modifier = M
       horizontalArrangement = Arrangement.SpaceBetween,
       verticalAlignment = Alignment.CenterVertically
     ) {
-      Text("Your keys", color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+      Text("Your keys", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
       Text(
         "rotation: ${handles.size + bundled}",
-        color = TextMuted,
+        color = AwakiTheme.extra.textMuted,
         fontSize = 11.sp,
         modifier = Modifier.testTag("txt_jina_rotation")
       )
@@ -154,7 +145,7 @@ internal fun WebAccessCard(viewModel: WorkspaceViewModel, modifier: Modifier = M
       Text(
         if (bundled > 0) "Trying with the public free tier. Visit https://jina.ai to create API Key!"
         else "Visit https://jina.ai to create API Key! — the free tier and the direct route carry every call.",
-        color = TextMuted,
+        color = AwakiTheme.extra.textMuted,
         fontSize = 11.sp,
         lineHeight = 14.sp
       )
@@ -174,7 +165,7 @@ internal fun WebAccessCard(viewModel: WorkspaceViewModel, modifier: Modifier = M
       OutlinedTextField(
         value = newKey,
         onValueChange = { newKey = it; addNote = null },
-        placeholder = { Text("jina_… — paste one or several", color = TextMuted, fontSize = 12.sp) },
+        placeholder = { Text("jina_… — paste one or several", color = AwakiTheme.extra.textMuted, fontSize = 12.sp) },
         singleLine = true,
         visualTransformation = if (keyVisible) VisualTransformation.None else PasswordVisualTransformation(),
         trailingIcon = {
@@ -185,7 +176,7 @@ internal fun WebAccessCard(viewModel: WorkspaceViewModel, modifier: Modifier = M
             Icon(
               imageVector = if (keyVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
               contentDescription = if (keyVisible) "Hide the key" else "Show the key",
-              tint = TextMuted,
+              tint = AwakiTheme.extra.textMuted,
               modifier = Modifier.size(16.dp)
             )
           }
@@ -194,15 +185,15 @@ internal fun WebAccessCard(viewModel: WorkspaceViewModel, modifier: Modifier = M
         modifier = Modifier
           .weight(1f)
           .testTag("input_jina_key"),
-        textStyle = TextStyle(fontSize = 13.sp, color = TextPrimary, fontFamily = FontFamily.Monospace),
+        textStyle = TextStyle(fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface, fontFamily = FontFamily.Monospace),
         shape = RoundedCornerShape(8.dp),
         colors = OutlinedTextFieldDefaults.colors(
-          focusedBorderColor = ElectricBlue,
-          unfocusedBorderColor = DarkBorder,
-          focusedContainerColor = DarkBackground,
-          unfocusedContainerColor = DarkBackground,
-          focusedTextColor = TextPrimary,
-          unfocusedTextColor = TextPrimary
+          focusedBorderColor = MaterialTheme.colorScheme.primary,
+          unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+          focusedContainerColor = MaterialTheme.colorScheme.background,
+          unfocusedContainerColor = MaterialTheme.colorScheme.background,
+          focusedTextColor = MaterialTheme.colorScheme.onSurface,
+          unfocusedTextColor = MaterialTheme.colorScheme.onSurface
         )
       )
       Spacer(modifier = Modifier.width(8.dp))
@@ -215,18 +206,18 @@ internal fun WebAccessCard(viewModel: WorkspaceViewModel, modifier: Modifier = M
         },
         enabled = newKey.isNotBlank(),
         modifier = Modifier.testTag("btn_add_jina_key"),
-        colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue)
+        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
       ) { Text("Add", fontSize = 12.sp) }
     }
     Text(
       addNote ?: "Keys stay in this device's private storage and go only to jina.ai.",
-      color = if (addNote == null) TextMuted else ElectricBlueGlow,
+      color = if (addNote == null) AwakiTheme.extra.textMuted else MaterialTheme.colorScheme.primary,
       fontSize = 10.sp,
       lineHeight = 13.sp,
       modifier = Modifier.testTag("txt_jina_key_note")
     )
 
-    HorizontalDivider(color = DarkBorderSubtle, modifier = Modifier.padding(vertical = 12.dp))
+    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, modifier = Modifier.padding(vertical = 12.dp))
 
     Row(
       modifier = Modifier.fillMaxWidth(),
@@ -234,10 +225,10 @@ internal fun WebAccessCard(viewModel: WorkspaceViewModel, modifier: Modifier = M
       verticalAlignment = Alignment.CenterVertically
     ) {
       Column(modifier = Modifier.weight(1f)) {
-        Text("Test what answers now", color = TextPrimary, fontSize = 13.sp)
+        Text("Test what answers now", color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp)
         Text(
           "One reader call, plus one search call where a key is configured.",
-          color = TextMuted,
+          color = AwakiTheme.extra.textMuted,
           fontSize = 10.sp,
           lineHeight = 13.sp
         )
@@ -247,12 +238,12 @@ internal fun WebAccessCard(viewModel: WorkspaceViewModel, modifier: Modifier = M
         enabled = !checking,
         modifier = Modifier.testTag("btn_test_web_access"),
         colors = ButtonDefaults.buttonColors(
-          containerColor = DarkSurfaceElevated,
-          contentColor = TextPrimary,
-          disabledContainerColor = DarkSurfaceElevated,
-          disabledContentColor = TextMuted
+          containerColor = MaterialTheme.colorScheme.surfaceContainer,
+          contentColor = MaterialTheme.colorScheme.onSurface,
+          disabledContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+          disabledContentColor = AwakiTheme.extra.textMuted
         ),
-        border = BorderStroke(1.dp, DarkBorder)
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
       ) { Text(if (checking) "Checking…" else "Test", fontSize = 12.sp) }
     }
 
@@ -260,7 +251,7 @@ internal fun WebAccessCard(viewModel: WorkspaceViewModel, modifier: Modifier = M
       Spacer(modifier = Modifier.height(8.dp))
       Column(modifier = Modifier.testTag("txt_web_access_report")) {
         report.forEach { line ->
-          Text(line, color = TextSecondary, fontSize = 10.sp, lineHeight = 14.sp)
+          Text(line, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp, lineHeight = 14.sp)
         }
       }
     }
@@ -274,18 +265,18 @@ private fun KeyChip(handle: String, onRemove: () -> Unit) {
     verticalAlignment = Alignment.CenterVertically,
     modifier = Modifier
       .clip(RoundedCornerShape(6.dp))
-      .background(DarkSurfaceElevated)
-      .border(1.dp, DarkBorderSubtle, RoundedCornerShape(6.dp))
+      .background(MaterialTheme.colorScheme.surfaceContainer)
+      .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(6.dp))
       .clickable(onClick = onRemove)
       .padding(horizontal = 8.dp, vertical = 5.dp)
       .testTag("chip_jina_key_$handle")
   ) {
-    Text(handle, color = TextPrimary, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+    Text(handle, color = MaterialTheme.colorScheme.onSurface, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
     Spacer(modifier = Modifier.width(5.dp))
     Icon(
       imageVector = Icons.Default.Close,
       contentDescription = "Remove the key $handle",
-      tint = TextMuted,
+      tint = AwakiTheme.extra.textMuted,
       modifier = Modifier.size(12.dp)
     )
   }
@@ -308,7 +299,7 @@ internal fun ScanExclusionsBody(viewModel: WorkspaceViewModel, modifier: Modifie
   Column(modifier = modifier.fillMaxWidth()) {
     Text(
       "Skipped folders",
-      color = TextPrimary,
+      color = MaterialTheme.colorScheme.onSurface,
       fontSize = 16.sp,
       fontWeight = FontWeight.Bold,
       modifier = Modifier.padding(bottom = 4.dp)
@@ -318,7 +309,7 @@ internal fun ScanExclusionsBody(viewModel: WorkspaceViewModel, modifier: Modifie
         "imports. Generated folders like node_modules or build outputs often hold hundreds of thousands of " +
         "files — skipping them is what keeps huge projects fast to open. Only remove one if you truly need " +
         "to browse it.",
-      color = TextMuted,
+      color = AwakiTheme.extra.textMuted,
       fontSize = 11.sp,
       lineHeight = 15.sp,
       modifier = Modifier.padding(bottom = 12.dp)
@@ -348,7 +339,7 @@ internal fun ScanExclusionsBody(viewModel: WorkspaceViewModel, modifier: Modifie
     Spacer(modifier = Modifier.height(14.dp))
     Text(
       if (settings.useCustomListOnly) "Skipped (custom)" else "Skipped",
-      color = TextSecondary,
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
       fontSize = 12.sp,
       fontWeight = FontWeight.SemiBold
     )
@@ -356,7 +347,7 @@ internal fun ScanExclusionsBody(viewModel: WorkspaceViewModel, modifier: Modifie
     if (skippedDirs.isEmpty()) {
       Text(
         "Nothing is skipped — opening huge projects may be slow or run out of memory.",
-        color = WarningAmber,
+        color = AwakiTheme.extra.warning,
         fontSize = 11.sp,
         modifier = Modifier.testTag("txt_ignore_warning")
       )
@@ -377,7 +368,7 @@ internal fun ScanExclusionsBody(viewModel: WorkspaceViewModel, modifier: Modifie
 
     if (!settings.useCustomListOnly && settings.removedDefaults.isNotEmpty()) {
       Spacer(modifier = Modifier.height(10.dp))
-      Text("Removed from defaults — tap to restore", color = TextMuted, fontSize = 11.sp)
+      Text("Removed from defaults — tap to restore", color = AwakiTheme.extra.textMuted, fontSize = 11.sp)
       Spacer(modifier = Modifier.height(6.dp))
       FlowRow(
         horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -399,21 +390,21 @@ internal fun ScanExclusionsBody(viewModel: WorkspaceViewModel, modifier: Modifie
       OutlinedTextField(
         value = newDirInput,
         onValueChange = { newDirInput = it },
-        placeholder = { Text("folder name, e.g. third_party", color = TextMuted, fontSize = 12.sp) },
+        placeholder = { Text("folder name, e.g. third_party", color = AwakiTheme.extra.textMuted, fontSize = 12.sp) },
         singleLine = true,
         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
         modifier = Modifier
           .weight(1f)
           .testTag("input_ignore_dir"),
-        textStyle = TextStyle(fontSize = 13.sp, color = TextPrimary),
+        textStyle = TextStyle(fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface),
         shape = RoundedCornerShape(8.dp),
         colors = OutlinedTextFieldDefaults.colors(
-          focusedBorderColor = ElectricBlue,
-          unfocusedBorderColor = DarkBorder,
-          focusedContainerColor = DarkBackground,
-          unfocusedContainerColor = DarkBackground,
-          focusedTextColor = TextPrimary,
-          unfocusedTextColor = TextPrimary
+          focusedBorderColor = MaterialTheme.colorScheme.primary,
+          unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+          focusedContainerColor = MaterialTheme.colorScheme.background,
+          unfocusedContainerColor = MaterialTheme.colorScheme.background,
+          focusedTextColor = MaterialTheme.colorScheme.onSurface,
+          unfocusedTextColor = MaterialTheme.colorScheme.onSurface
         )
       )
       Spacer(modifier = Modifier.width(8.dp))
@@ -424,12 +415,12 @@ internal fun ScanExclusionsBody(viewModel: WorkspaceViewModel, modifier: Modifie
         },
         enabled = newDirInput.isNotBlank(),
         modifier = Modifier.testTag("btn_add_ignore_dir"),
-        colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue)
+        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
       ) { Text("Add", fontSize = 12.sp) }
     }
     Text(
       "Restore built-in defaults",
-      color = TextMuted,
+      color = AwakiTheme.extra.textMuted,
       fontSize = 12.sp,
       modifier = Modifier
         .padding(top = 10.dp)
@@ -450,10 +441,10 @@ private fun IgnoreChip(
     verticalAlignment = Alignment.CenterVertically,
     modifier = Modifier
       .clip(RoundedCornerShape(6.dp))
-      .background(DarkSurfaceElevated)
+      .background(MaterialTheme.colorScheme.surfaceContainer)
       .border(
         1.dp,
-        if (custom) ElectricBlue.copy(alpha = 0.6f) else DarkBorderSubtle,
+        if (custom) MaterialTheme.colorScheme.primary.copy(alpha = 0.6f) else MaterialTheme.colorScheme.outlineVariant,
         RoundedCornerShape(6.dp)
       )
       .clickable(onClick = onRemove)
@@ -462,7 +453,7 @@ private fun IgnoreChip(
   ) {
     Text(
       text = name,
-      color = if (struckThrough) TextMuted else TextPrimary,
+      color = if (struckThrough) AwakiTheme.extra.textMuted else MaterialTheme.colorScheme.onSurface,
       fontSize = 11.sp,
       fontFamily = FontFamily.Monospace,
       textDecoration = if (struckThrough) TextDecoration.LineThrough else TextDecoration.None
@@ -471,7 +462,7 @@ private fun IgnoreChip(
     Icon(
       imageVector = if (struckThrough) Icons.Default.Add else Icons.Default.Close,
       contentDescription = if (struckThrough) "Restore $name" else "Stop skipping $name",
-      tint = TextMuted,
+      tint = AwakiTheme.extra.textMuted,
       modifier = Modifier.size(12.dp)
     )
   }
@@ -490,7 +481,7 @@ internal fun AboutCard(modifier: Modifier = Modifier) {
   Column(modifier = modifier.fillMaxWidth()) {
     Text(
       "About",
-      color = TextPrimary,
+      color = MaterialTheme.colorScheme.onSurface,
       fontSize = 16.sp,
       fontWeight = FontWeight.Bold,
       modifier = Modifier.padding(bottom = 8.dp)
@@ -500,27 +491,27 @@ internal fun AboutCard(modifier: Modifier = Modifier) {
         "userland, a real terminal, and an agent that reads, edits, builds and tests your " +
         "projects. Projects, chats and settings stay in the app's private storage — only the " +
         "prompts you send leave it, for the model provider you configure.",
-      color = TextSecondary,
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
       fontSize = 12.sp,
       lineHeight = 17.sp
     )
     Spacer(modifier = Modifier.height(10.dp))
     Text(
       text = "v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})",
-      color = TextMuted,
+      color = AwakiTheme.extra.textMuted,
       fontSize = 10.5.sp,
       fontFamily = FontFamily.Monospace
     )
 
     Spacer(modifier = Modifier.height(14.dp))
-    Text(DEVELOPER_NAME, color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-    Text("Developer · $DEVELOPER_LOCATION", color = TextMuted, fontSize = 11.sp)
+    Text(DEVELOPER_NAME, color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+    Text("Developer · $DEVELOPER_LOCATION", color = AwakiTheme.extra.textMuted, fontSize = 11.sp)
     Spacer(modifier = Modifier.height(10.dp))
     ContactRow(
       icon = Icons.Outlined.MailOutline,
       label = "Email me",
       value = DEVELOPER_EMAIL,
-      tint = ElectricBlueGlow,
+      tint = MaterialTheme.colorScheme.primary,
       tag = "about_email",
       onClick = { uriHandler.openUri("mailto:$DEVELOPER_EMAIL") }
     )
@@ -529,7 +520,7 @@ internal fun AboutCard(modifier: Modifier = Modifier) {
       icon = Icons.AutoMirrored.Outlined.Send,
       label = "Telegram",
       value = "@$DEVELOPER_TELEGRAM",
-      tint = TerminalGreen,
+      tint = AwakiTheme.extra.success,
       tag = "about_telegram",
       onClick = { uriHandler.openUri("https://t.me/$DEVELOPER_TELEGRAM") }
     )
@@ -550,8 +541,8 @@ private fun ContactRow(
     modifier = Modifier
       .fillMaxWidth()
       .clip(RoundedCornerShape(10.dp))
-      .background(DarkSurfaceElevated)
-      .border(1.dp, DarkBorderSubtle, RoundedCornerShape(10.dp))
+      .background(MaterialTheme.colorScheme.surfaceContainer)
+      .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
       .clickable(onClick = onClick)
       .padding(horizontal = 10.dp, vertical = 9.dp)
       .testTag(tag)
@@ -567,13 +558,13 @@ private fun ContactRow(
     }
     Spacer(modifier = Modifier.width(10.dp))
     Column(modifier = Modifier.weight(1f)) {
-      Text(label, color = TextPrimary, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
-      Text(value, color = TextMuted, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+      Text(label, color = MaterialTheme.colorScheme.onSurface, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
+      Text(value, color = AwakiTheme.extra.textMuted, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
     }
     Icon(
       imageVector = Icons.Default.ChevronRight,
       contentDescription = null,
-      tint = TextMuted,
+      tint = AwakiTheme.extra.textMuted,
       modifier = Modifier.size(16.dp)
     )
   }

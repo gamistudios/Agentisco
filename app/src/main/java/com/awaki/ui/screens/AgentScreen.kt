@@ -13,12 +13,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.Chat
@@ -54,6 +51,7 @@ import androidx.compose.material.icons.outlined.QuestionAnswer
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.*
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -104,6 +102,7 @@ import com.awaki.ui.components.computeLineDiff
 import com.awaki.ui.components.diffStats
 import com.awaki.ui.isPlanPublish
 import com.awaki.ui.theme.*
+import com.awaki.ui.theme.AwakiTheme
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.util.Locale
@@ -170,7 +169,7 @@ fun AgentScreen(
   Column(
     modifier = modifier
       .fillMaxSize()
-      .background(DarkBackground)
+      .background(MaterialTheme.colorScheme.background)
       // Keep the composer usable above the soft keyboard.
       .imePadding()
   ) {
@@ -178,8 +177,8 @@ fun AgentScreen(
     Surface(
       onClick = { showSessionSheet = true },
       shape = RoundedCornerShape(10.dp),
-      color = DarkSurface.copy(alpha = 0.7f),
-      border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorderSubtle),
+      color = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f),
+      border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
       modifier = Modifier
         .fillMaxWidth()
         .padding(horizontal = 12.dp, vertical = 6.dp)
@@ -195,13 +194,13 @@ fun AgentScreen(
           Icon(
             Icons.Default.AutoAwesome,
             contentDescription = null,
-            tint = ElectricBlueGlow,
+            tint = MaterialTheme.colorScheme.primary,
             modifier = Modifier.size(18.dp)
           )
           Spacer(modifier = Modifier.width(8.dp))
           Text(
             text = "Agent",
-            color = TextPrimary,
+            color = MaterialTheme.colorScheme.onSurface,
             fontSize = 14.sp,
             fontWeight = FontWeight.Bold
           )
@@ -210,12 +209,12 @@ fun AgentScreen(
           Box(
             modifier = Modifier
               .clip(RoundedCornerShape(10.dp))
-              .background(ElectricBlue.copy(alpha = 0.15f))
+              .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
               .padding(horizontal = 8.dp, vertical = 2.dp)
           ) {
             Text(
               text = "General Agent",
-              color = ElectricBlueGlow,
+              color = MaterialTheme.colorScheme.primary,
               fontSize = 10.sp,
               fontWeight = FontWeight.Medium
             )
@@ -226,7 +225,7 @@ fun AgentScreen(
               modifier = Modifier
                 .size(7.dp)
                 .clip(CircleShape)
-                .background(ElectricBlueGlow)
+                .background(MaterialTheme.colorScheme.primary)
             )
             Spacer(modifier = Modifier.width(8.dp))
           }
@@ -237,13 +236,13 @@ fun AgentScreen(
               .size(24.dp)
               .testTag("btn_new_session")
           ) {
-            Icon(Icons.Default.Add, contentDescription = "New session", tint = TextSecondary, modifier = Modifier.size(15.dp))
+            Icon(Icons.Default.Add, contentDescription = "New session", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(15.dp))
           }
           Spacer(modifier = Modifier.width(4.dp))
           Icon(
             Icons.Default.KeyboardArrowDown,
             contentDescription = "Switch session",
-            tint = TextMuted,
+            tint = AwakiTheme.extra.textMuted,
             modifier = Modifier.size(16.dp)
           )
         }
@@ -253,7 +252,7 @@ fun AgentScreen(
         ) {
           Text(
             text = activeSession?.title ?: "New conversation",
-            color = TextSecondary,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             fontSize = 12.sp,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -264,7 +263,7 @@ fun AgentScreen(
             text = activeSession?.let {
               "${sessions.size} session${if (sessions.size == 1) "" else "s"} · ${relativeTime(it.updatedAt)}"
             } ?: "Start chatting to create one",
-            color = TextMuted,
+            color = AwakiTheme.extra.textMuted,
             fontSize = 9.sp,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
@@ -333,8 +332,8 @@ fun AgentScreen(
               scope.launch { listState.animateScrollToItem(chatItems.size) }
             },
             shape = CircleShape,
-            color = DarkSurfaceElevated,
-            border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder),
+            color = MaterialTheme.colorScheme.surfaceContainer,
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
             modifier = Modifier
               .align(Alignment.BottomCenter)
               .padding(bottom = 10.dp)
@@ -344,9 +343,9 @@ fun AgentScreen(
               modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
               verticalAlignment = Alignment.CenterVertically
             ) {
-              Icon(Icons.Default.KeyboardArrowDown, contentDescription = null, tint = ElectricBlueGlow, modifier = Modifier.size(12.dp))
+              Icon(Icons.Default.KeyboardArrowDown, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(12.dp))
               Spacer(modifier = Modifier.width(4.dp))
-              Text("Jump to latest", color = TextSecondary, fontSize = 11.sp)
+              Text("Jump to latest", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
             }
           }
         }
@@ -394,7 +393,7 @@ fun AgentScreen(
   if (showSessionSheet) {
     ModalBottomSheet(
       onDismissRequest = { showSessionSheet = false },
-      containerColor = DarkSurface
+      containerColor = MaterialTheme.colorScheme.surface
     ) {
       SessionSheet(
         sessions = sessions,
@@ -418,8 +417,8 @@ fun AgentScreen(
     var name by remember(target.id) { mutableStateOf(target.title) }
     AlertDialog(
       onDismissRequest = { renameTarget = null },
-      containerColor = DarkSurface,
-      title = { Text("Rename session", color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold) },
+      containerColor = MaterialTheme.colorScheme.surface,
+      title = { Text("Rename session", color = MaterialTheme.colorScheme.onSurface, fontSize = 15.sp, fontWeight = FontWeight.Bold) },
       text = {
         OutlinedTextField(
           value = name,
@@ -434,11 +433,11 @@ fun AgentScreen(
             viewModel.renameChatSession(target.id, name)
             renameTarget = null
           },
-          colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue)
+          colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
         ) { Text("Save", fontSize = 12.sp) }
       },
       dismissButton = {
-        TextButton(onClick = { renameTarget = null }) { Text("Cancel", color = TextMuted, fontSize = 12.sp) }
+        TextButton(onClick = { renameTarget = null }) { Text("Cancel", color = AwakiTheme.extra.textMuted, fontSize = 12.sp) }
       }
     )
   }
@@ -460,18 +459,18 @@ private fun SessionSheet(
       horizontalArrangement = Arrangement.SpaceBetween,
       verticalAlignment = Alignment.CenterVertically
     ) {
-      Text("Sessions", color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+      Text("Sessions", color = MaterialTheme.colorScheme.onSurface, fontSize = 15.sp, fontWeight = FontWeight.Bold)
       TextButton(onClick = onNew, enabled = !isWorking) {
-        Icon(Icons.Default.Add, contentDescription = null, tint = ElectricBlueGlow, modifier = Modifier.size(14.dp))
+        Icon(Icons.Default.Add, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(14.dp))
         Spacer(modifier = Modifier.width(4.dp))
-        Text("New chat", color = ElectricBlueGlow, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        Text("New chat", color = MaterialTheme.colorScheme.primary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
       }
     }
     Spacer(modifier = Modifier.height(4.dp))
     if (sessions.isEmpty()) {
       Text(
         "No sessions yet for this project. Send a prompt to start one.",
-        color = TextMuted,
+        color = AwakiTheme.extra.textMuted,
         fontSize = 12.sp,
         modifier = Modifier.padding(vertical = 16.dp)
       )
@@ -486,10 +485,10 @@ private fun SessionSheet(
             modifier = Modifier
               .fillMaxWidth()
               .clip(RoundedCornerShape(8.dp))
-              .background(if (isActive) DarkSurfaceElevated else Color.Transparent)
+              .background(if (isActive) MaterialTheme.colorScheme.surfaceContainer else Color.Transparent)
               .border(
                 1.dp,
-                if (isActive) ElectricBlue.copy(alpha = 0.5f) else DarkBorderSubtle,
+                if (isActive) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outlineVariant,
                 RoundedCornerShape(8.dp)
               )
               .clickable(enabled = !isWorking || !isActive) { onSelect(session) }
@@ -501,7 +500,7 @@ private fun SessionSheet(
             Column(modifier = Modifier.weight(1f)) {
               Text(
                 session.title,
-                color = if (isActive) TextPrimary else TextSecondary,
+                color = if (isActive) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 12.sp,
                 fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal,
                 maxLines = 1,
@@ -509,15 +508,15 @@ private fun SessionSheet(
               )
               Text(
                 "${relativeTime(session.updatedAt)} · ${session.status}",
-                color = TextMuted,
+                color = AwakiTheme.extra.textMuted,
                 fontSize = 9.sp
               )
             }
             IconButton(onClick = { onRename(session) }, modifier = Modifier.size(26.dp)) {
-              Icon(Icons.Default.Edit, contentDescription = "Rename", tint = TextMuted, modifier = Modifier.size(13.dp))
+              Icon(Icons.Default.Edit, contentDescription = "Rename", tint = AwakiTheme.extra.textMuted, modifier = Modifier.size(13.dp))
             }
             IconButton(onClick = { onDelete(session) }, modifier = Modifier.size(26.dp)) {
-              Icon(Icons.Default.Delete, contentDescription = "Delete", tint = DangerRed.copy(alpha = 0.7f), modifier = Modifier.size(13.dp))
+              Icon(Icons.Default.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f), modifier = Modifier.size(13.dp))
             }
           }
         }
@@ -529,11 +528,11 @@ private fun SessionSheet(
 @Composable
 private fun SessionStatusDot(status: String) {
   val color = when (status) {
-    "running" -> ElectricBlueGlow
-    "completed" -> TerminalGreen
-    "failed" -> DangerRed
-    "cancelled", "interrupted" -> WarningAmber
-    else -> TextMuted
+    "running" -> MaterialTheme.colorScheme.primary
+    "completed" -> AwakiTheme.extra.success
+    "failed" -> MaterialTheme.colorScheme.error
+    "cancelled", "interrupted" -> AwakiTheme.extra.warning
+    else -> AwakiTheme.extra.textMuted
   }
   Box(modifier = Modifier.size(7.dp).clip(CircleShape).background(color))
 }
@@ -550,8 +549,8 @@ private fun UserBubble(item: UserMessageItem, onEdit: (String) -> Unit = {}) {
   ) {
     Surface(
       shape = RoundedCornerShape(topStart = 14.dp, topEnd = 14.dp, bottomStart = 14.dp, bottomEnd = 4.dp),
-      color = DarkSurfaceElevated,
-      border = androidx.compose.foundation.BorderStroke(1.dp, ElectricBlue.copy(alpha = 0.25f)),
+      color = MaterialTheme.colorScheme.surfaceContainer,
+      border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)),
       modifier = Modifier
         .widthIn(max = 320.dp)
         .combinedClickable(
@@ -563,7 +562,7 @@ private fun UserBubble(item: UserMessageItem, onEdit: (String) -> Unit = {}) {
       Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp)) {
         Text(
           text = item.text,
-          color = TextPrimary,
+          color = MaterialTheme.colorScheme.onSurface,
           fontSize = 13.sp,
           lineHeight = 18.sp
         )
@@ -573,12 +572,12 @@ private fun UserBubble(item: UserMessageItem, onEdit: (String) -> Unit = {}) {
           horizontalArrangement = Arrangement.End,
           modifier = Modifier.fillMaxWidth()
         ) {
-          Text(relativeTime(item.timestamp), color = TextMuted, fontSize = 9.sp)
+          Text(relativeTime(item.timestamp), color = AwakiTheme.extra.textMuted, fontSize = 9.sp)
           Spacer(modifier = Modifier.width(6.dp))
           Icon(
             Icons.Outlined.ContentCopy,
             contentDescription = "Copy message",
-            tint = TextMuted,
+            tint = AwakiTheme.extra.textMuted,
             modifier = Modifier
               .size(11.dp)
               .clickable { clipboard.setText(AnnotatedString(item.text)) }
@@ -587,7 +586,7 @@ private fun UserBubble(item: UserMessageItem, onEdit: (String) -> Unit = {}) {
           Icon(
             Icons.Default.Edit,
             contentDescription = "Edit message",
-            tint = TextMuted,
+            tint = AwakiTheme.extra.textMuted,
             modifier = Modifier
               .size(11.dp)
               .clickable { showEditDialog = true }
@@ -600,13 +599,13 @@ private fun UserBubble(item: UserMessageItem, onEdit: (String) -> Unit = {}) {
     if (showEditDialog) {
       AlertDialog(
         onDismissRequest = { showEditDialog = false },
-        containerColor = DarkSurface,
-        title = { Text("Edit message", color = TextPrimary, fontSize = 14.sp) },
+        containerColor = MaterialTheme.colorScheme.surface,
+        title = { Text("Edit message", color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp) },
         text = {
           OutlinedTextField(
             value = editText,
             onValueChange = { editText = it },
-            placeholder = { Text("Enter new content", color = TextMuted) },
+            placeholder = { Text("Enter new content", color = AwakiTheme.extra.textMuted) },
             modifier = Modifier.fillMaxWidth(),
             singleLine = false,
             maxLines = 4
@@ -619,11 +618,11 @@ private fun UserBubble(item: UserMessageItem, onEdit: (String) -> Unit = {}) {
               showEditDialog = false
             },
             enabled = editText.isNotBlank(),
-            colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue)
-          ) { Text("Save", color = Color.White, fontSize = 12.sp) }
+            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+          ) { Text("Save", color = MaterialTheme.colorScheme.onPrimary, fontSize = 12.sp) }
         },
         dismissButton = {
-          TextButton(onClick = { showEditDialog = false }) { Text("Cancel", color = TextMuted, fontSize = 12.sp) }
+          TextButton(onClick = { showEditDialog = false }) { Text("Cancel", color = AwakiTheme.extra.textMuted, fontSize = 12.sp) }
         }
       )
     }
@@ -642,13 +641,13 @@ private fun SubagentTimelineBanner(name: String) {
       modifier = Modifier
         .width(16.dp)
         .height(1.dp)
-        .background(DarkBorderSubtle)
+        .background(MaterialTheme.colorScheme.outlineVariant)
     )
     Spacer(modifier = Modifier.width(6.dp))
     Surface(
       shape = RoundedCornerShape(12.dp),
-      color = ElectricBlue.copy(alpha = 0.12f),
-      border = androidx.compose.foundation.BorderStroke(1.dp, ElectricBlue.copy(alpha = 0.35f))
+      color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+      border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f))
     ) {
       Row(
         modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
@@ -657,13 +656,13 @@ private fun SubagentTimelineBanner(name: String) {
         Icon(
           Icons.Outlined.Search,
           contentDescription = null,
-          tint = ElectricBlueGlow,
+          tint = MaterialTheme.colorScheme.primary,
           modifier = Modifier.size(12.dp)
         )
         Spacer(modifier = Modifier.width(5.dp))
         Text(
           text = name,
-          color = ElectricBlueGlow,
+          color = MaterialTheme.colorScheme.primary,
           fontSize = 11.sp,
           fontWeight = FontWeight.SemiBold
         )
@@ -674,7 +673,7 @@ private fun SubagentTimelineBanner(name: String) {
       modifier = Modifier
         .weight(1f)
         .height(1.dp)
-        .background(DarkBorderSubtle)
+        .background(MaterialTheme.colorScheme.outlineVariant)
     )
   }
 }
@@ -707,7 +706,7 @@ private fun StatusCircle(icon: ImageVector, color: Color, filled: Boolean = fals
     Icon(
       imageVector = icon,
       contentDescription = null,
-      tint = if (filled) DarkBackground else color,
+      tint = if (filled) MaterialTheme.colorScheme.background else color,
       modifier = Modifier.size(14.dp)
     )
   }
@@ -740,10 +739,10 @@ private fun AgentTurnCard(
   } else null
 
   val statusColor = when (item.status) {
-    TurnStatus.RUNNING -> ElectricBlueGlow
-    TurnStatus.COMPLETED -> TerminalGreen
-    TurnStatus.FAILED -> DangerRed
-    else -> WarningAmber
+    TurnStatus.RUNNING -> MaterialTheme.colorScheme.primary
+    TurnStatus.COMPLETED -> AwakiTheme.extra.success
+    TurnStatus.FAILED -> MaterialTheme.colorScheme.error
+    else -> AwakiTheme.extra.warning
   }
   val statusIcon = when (item.status) {
     TurnStatus.COMPLETED -> Icons.Default.CheckCircle
@@ -768,7 +767,7 @@ private fun AgentTurnCard(
   Column(
     modifier = Modifier
       .fillMaxWidth()
-      .cardWithRail(statusColor, DarkSurface.copy(alpha = 0.55f), RoundedCornerShape(12.dp))
+      .cardWithRail(statusColor, MaterialTheme.colorScheme.surface.copy(alpha = 0.55f), RoundedCornerShape(12.dp))
       .padding(start = 14.dp, end = 12.dp, top = 12.dp, bottom = 12.dp)
       .testTag("chat_agent_turn")
   ) {
@@ -778,7 +777,7 @@ private fun AgentTurnCard(
       Spacer(modifier = Modifier.width(8.dp))
       Text(
         text = "Agent",
-        color = TextPrimary,
+        color = MaterialTheme.colorScheme.onSurface,
         fontSize = 13.sp,
         fontWeight = FontWeight.Bold
       )
@@ -809,7 +808,7 @@ private fun AgentTurnCard(
         Icon(
           Icons.Outlined.ContentCopy,
           contentDescription = "Copy response",
-          tint = TextMuted,
+          tint = AwakiTheme.extra.textMuted,
           modifier = Modifier
             .size(13.dp)
             .clickable { clipboard.setText(AnnotatedString(fullText)) }
@@ -827,11 +826,11 @@ private fun AgentTurnCard(
         Icon(
           Icons.Default.Psychology,
           contentDescription = null,
-          tint = CyanAccent.copy(alpha = 0.7f),
+          tint = MaterialTheme.colorScheme.secondary.copy(alpha = 0.7f),
           modifier = Modifier.size(14.dp)
         )
         Spacer(modifier = Modifier.width(8.dp))
-        Text(item.statusMessage, color = TextSecondary, fontSize = 12.sp, lineHeight = 16.sp)
+        Text(item.statusMessage, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, lineHeight = 16.sp)
       }
     }
 
@@ -894,16 +893,16 @@ private fun AgentTurnCard(
       Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Button(
           onClick = onRetry,
-          colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
+          colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
           shape = RoundedCornerShape(8.dp),
           contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
           modifier = Modifier
             .height(34.dp)
             .testTag("btn_resume_turn")
         ) {
-          Icon(Icons.Default.PlayArrow, contentDescription = null, tint = Color.White, modifier = Modifier.size(15.dp))
+          Icon(Icons.Default.PlayArrow, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(15.dp))
           Spacer(modifier = Modifier.width(6.dp))
-          Text("Resume", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+          Text("Resume", color = MaterialTheme.colorScheme.onPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
         }
       }
     }
@@ -923,7 +922,7 @@ private fun AgentTurnCard(
       Spacer(modifier = Modifier.height(6.dp))
       Text(
         text = attribution,
-        color = TextMuted,
+        color = AwakiTheme.extra.textMuted,
         fontSize = 9.sp,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
@@ -941,14 +940,14 @@ private fun AgentEmptyState(project: com.awaki.data.model.Project, hasHistory: B
     Spacer(modifier = Modifier.height(20.dp))
     Text(
       text = if (hasHistory) "Continue where you left off" else "What are we building?",
-      color = TextPrimary,
+      color = MaterialTheme.colorScheme.onSurface,
       fontSize = 20.sp,
       fontWeight = FontWeight.Bold,
       letterSpacing = (-0.3).sp
     )
     Text(
       text = "Describe a task or let the agent navigate ${project.name}",
-      color = TextMuted,
+      color = AwakiTheme.extra.textMuted,
       fontSize = 12.sp
     )
 
@@ -965,12 +964,12 @@ private fun AgentEmptyState(project: com.awaki.data.model.Project, hasHistory: B
           modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
-            .background(DarkSurface)
-            .border(1.dp, DarkBorderSubtle, RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surface)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp))
             .clickable { onSuggestion(suggestion) }
             .padding(horizontal = 12.dp, vertical = 8.dp)
         ) {
-          Text(suggestion, color = TextSecondary, fontSize = 12.sp)
+          Text(suggestion, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
         }
       }
     }
@@ -990,23 +989,23 @@ private fun CompactionCard(block: CompactionBlock) {
     modifier = Modifier
       .fillMaxWidth()
       .clip(RoundedCornerShape(10.dp))
-      .background(ElectricBlue.copy(alpha = 0.08f))
-      .border(1.dp, ElectricBlue.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
+      .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f))
+      .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
       .clickable { expanded = !expanded }
       .padding(horizontal = 10.dp, vertical = 8.dp)
       .testTag("stream_compaction")
   ) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-      Icon(Icons.Outlined.Compress, contentDescription = null, tint = ElectricBlueGlow, modifier = Modifier.size(14.dp))
+      Icon(Icons.Outlined.Compress, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(14.dp))
       Spacer(modifier = Modifier.width(8.dp))
       Column(modifier = Modifier.weight(1f)) {
-        Text("Context compacted", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-        Text(block.summary, color = TextSecondary, fontSize = 11.sp, lineHeight = 14.sp)
+        Text("Context compacted", color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        Text(block.summary, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp, lineHeight = 14.sp)
       }
       Icon(
         Icons.Default.KeyboardArrowDown,
         contentDescription = if (expanded) "Hide summary" else "Show summary",
-        tint = TextMuted,
+        tint = AwakiTheme.extra.textMuted,
         modifier = Modifier.size(14.dp)
       )
     }
@@ -1014,7 +1013,7 @@ private fun CompactionCard(block: CompactionBlock) {
       Spacer(modifier = Modifier.height(8.dp))
       Text(
         block.summaryText,
-        color = TextSecondary,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
         fontSize = 11.sp,
         lineHeight = 15.sp,
         modifier = Modifier
@@ -1049,7 +1048,7 @@ private fun DelegationActivityStream(
       .testTag("delegation_activity_stream")
   ) {
     Spacer(modifier = Modifier.height(5.dp))
-    Text("Its own work", color = TextMuted, fontSize = 9.sp, fontWeight = FontWeight.SemiBold)
+    Text("Its own work", color = AwakiTheme.extra.textMuted, fontSize = 9.sp, fontWeight = FontWeight.SemiBold)
     blocks.forEach { block ->
       Spacer(modifier = Modifier.height(5.dp))
       when (block) {
@@ -1095,11 +1094,11 @@ internal fun ToolCallRow(
   // Terminal cards show the real shell command instead of {"command": …}.
   val command = remember(item.argsJson) { displayCommandForTool(item.name, item.argsJson) }
   val statusColor = when {
-    subagentPaused -> WarningAmber
-    item.running -> ElectricBlueGlow
-    item.cancelled -> WarningAmber
-    item.success == false -> DangerRed
-    item.success == true -> TerminalGreen
+    subagentPaused -> AwakiTheme.extra.warning
+    item.running -> MaterialTheme.colorScheme.primary
+    item.cancelled -> AwakiTheme.extra.warning
+    item.success == false -> MaterialTheme.colorScheme.error
+    item.success == true -> AwakiTheme.extra.success
     else -> iconColor
   }
   val statusIcon = when {
@@ -1114,7 +1113,7 @@ internal fun ToolCallRow(
     modifier = Modifier
       .fillMaxWidth()
       .clip(RoundedCornerShape(8.dp))
-      .background(DarkSurface.copy(alpha = 0.5f))
+      .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.5f))
       .border(
         1.dp,
         statusColor.copy(alpha = if (item.running) 0.45f else 0.28f),
@@ -1130,12 +1129,12 @@ internal fun ToolCallRow(
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
       StatusCircle(icon = statusIcon, color = statusColor, filled = true)
       Spacer(modifier = Modifier.width(8.dp))
-      Text(verb, color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+      Text(verb, color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
       if (target.isNotBlank()) {
         Spacer(modifier = Modifier.width(6.dp))
         Text(
           target,
-          color = TextSecondary,
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
           fontSize = 11.sp,
           fontFamily = FontFamily.Monospace,
           maxLines = 1,
@@ -1150,7 +1149,7 @@ internal fun ToolCallRow(
         // A delegated card is held and released by its own control: the spinner
         // says it is working, and it stops saying so the moment the user holds it.
         if (item.delegation == null || !subagentPaused) {
-          CircularProgressIndicator(modifier = Modifier.size(12.dp), color = ElectricBlueGlow, strokeWidth = 1.8.dp)
+          CircularProgressIndicator(modifier = Modifier.size(12.dp), color = MaterialTheme.colorScheme.primary, strokeWidth = 1.8.dp)
         }
         if (item.delegation != null && item.callId.isNotBlank()) {
           Spacer(modifier = Modifier.width(4.dp))
@@ -1164,7 +1163,7 @@ internal fun ToolCallRow(
             Icon(
               imageVector = if (subagentPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
               contentDescription = if (subagentPaused) "Resume this agent" else "Pause this agent",
-              tint = if (subagentPaused) TerminalGreen else WarningAmber,
+              tint = if (subagentPaused) AwakiTheme.extra.success else AwakiTheme.extra.warning,
               modifier = Modifier.size(13.dp)
             )
           }
@@ -1179,7 +1178,7 @@ internal fun ToolCallRow(
               .clip(RoundedCornerShape(6.dp))
               .testTag("btn_cancel_tool")
           ) {
-            Icon(Icons.Default.Stop, contentDescription = "Cancel this step", tint = DangerRed, modifier = Modifier.size(13.dp))
+            Icon(Icons.Default.Stop, contentDescription = "Cancel this step", tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(13.dp))
           }
         }
       }
@@ -1188,7 +1187,7 @@ internal fun ToolCallRow(
         Icon(
           Icons.Outlined.ContentCopy,
           contentDescription = "Copy output",
-          tint = TextMuted,
+          tint = AwakiTheme.extra.textMuted,
           modifier = Modifier
             .size(12.dp)
             .clickable { clipboard.setText(AnnotatedString(item.detail)) }
@@ -1197,7 +1196,7 @@ internal fun ToolCallRow(
         Icon(
           Icons.Default.KeyboardArrowDown,
           contentDescription = if (expanded) "Collapse details" else "Expand details",
-          tint = TextMuted,
+          tint = AwakiTheme.extra.textMuted,
           modifier = Modifier.size(14.dp)
         )
       }
@@ -1212,7 +1211,7 @@ internal fun ToolCallRow(
       Row(verticalAlignment = Alignment.CenterVertically) {
         Text(
           if (briefOpen) "Hide the brief" else "Brief for ${brief.role.ifBlank { "this agent" }}",
-          color = ElectricBlueGlow,
+          color = MaterialTheme.colorScheme.primary,
           fontSize = 10.sp,
           fontWeight = FontWeight.SemiBold,
           modifier = Modifier
@@ -1223,7 +1222,7 @@ internal fun ToolCallRow(
         if (brief.description.isNotBlank()) {
           Text(
             brief.description,
-            color = TextMuted,
+            color = AwakiTheme.extra.textMuted,
             fontSize = 10.sp,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -1235,13 +1234,13 @@ internal fun ToolCallRow(
         Spacer(modifier = Modifier.height(4.dp))
         Text(
           brief.prompt,
-          color = TextSecondary,
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
           fontSize = 11.sp,
           lineHeight = 15.sp,
           modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(6.dp))
-            .background(DarkBackground)
+            .background(MaterialTheme.colorScheme.background)
             .padding(8.dp)
             .testTag("delegation_brief_text")
         )
@@ -1255,14 +1254,14 @@ internal fun ToolCallRow(
         modifier = Modifier
           .fillMaxWidth()
           .clip(RoundedCornerShape(6.dp))
-          .background(DarkBackground)
+          .background(MaterialTheme.colorScheme.background)
           .padding(horizontal = 6.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically
       ) {
         Icon(
           Icons.Outlined.ContentCopy,
           contentDescription = "Copy command",
-          tint = TextMuted,
+          tint = AwakiTheme.extra.textMuted,
           modifier = Modifier
             .size(13.dp)
             .clickable { clipboard.setText(AnnotatedString(command)) }
@@ -1271,7 +1270,7 @@ internal fun ToolCallRow(
         Spacer(modifier = Modifier.width(7.dp))
         Text(
           "\$ ${command.trim()}",
-          color = TextCode,
+          color = AwakiTheme.extra.textCode,
           fontSize = 11.sp,
           fontFamily = FontFamily.Monospace,
           softWrap = false,
@@ -1290,9 +1289,9 @@ internal fun ToolCallRow(
       Text(
         text = if (item.cancelled) "Cancelled by user" else item.summary,
         color = when {
-          item.cancelled -> WarningAmber
-          item.success == false -> DangerRed.copy(alpha = 0.9f)
-          else -> TextMuted
+          item.cancelled -> AwakiTheme.extra.warning
+          item.success == false -> MaterialTheme.colorScheme.error.copy(alpha = 0.9f)
+          else -> AwakiTheme.extra.textMuted
         },
         fontSize = 10.sp,
         maxLines = if (expanded) Int.MAX_VALUE else 1,
@@ -1318,7 +1317,7 @@ internal fun ToolCallRow(
         modifier = Modifier
           .fillMaxWidth()
           .clip(RoundedCornerShape(6.dp))
-          .background(DarkBackground)
+          .background(MaterialTheme.colorScheme.background)
           .clickable { workOpen = !workOpen }
           .padding(horizontal = 8.dp, vertical = 5.dp)
           .testTag("btn_toggle_subagent_work")
@@ -1326,20 +1325,20 @@ internal fun ToolCallRow(
         Icon(
           imageVector = if (workOpen) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
           contentDescription = null,
-          tint = TextMuted,
+          tint = AwakiTheme.extra.textMuted,
           modifier = Modifier.size(14.dp)
         )
         Spacer(modifier = Modifier.width(4.dp))
         Text(
           text = if (workOpen) "Hide" else "Show",
-          color = ElectricBlueGlow,
+          color = MaterialTheme.colorScheme.primary,
           fontSize = 10.5.sp,
           fontWeight = FontWeight.SemiBold
         )
         Spacer(modifier = Modifier.width(6.dp))
         Text(
           text = "${item.children.size} steps · $headline",
-          color = TextMuted,
+          color = AwakiTheme.extra.textMuted,
           fontSize = 10.sp,
           maxLines = 1,
           overflow = TextOverflow.Ellipsis,
@@ -1348,7 +1347,7 @@ internal fun ToolCallRow(
         if (liveChild != null && !subagentPaused) {
           CircularProgressIndicator(
             modifier = Modifier.size(10.dp),
-            color = ElectricBlueGlow,
+            color = MaterialTheme.colorScheme.primary,
             strokeWidth = 1.4.dp
           )
         }
@@ -1368,9 +1367,9 @@ internal fun ToolCallRow(
       val (added, removed) = diffStats(diffLines)
       var showAllDiff by remember(item.id) { mutableStateOf(false) }
       Row(verticalAlignment = Alignment.CenterVertically) {
-        Text("+$added", color = TerminalGreen, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, fontFamily = FontFamily.Monospace)
+        Text("+$added", color = AwakiTheme.extra.success, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, fontFamily = FontFamily.Monospace)
         Spacer(modifier = Modifier.width(6.dp))
-        Text("\u2212$removed", color = DangerRed, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, fontFamily = FontFamily.Monospace)
+        Text("\u2212$removed", color = MaterialTheme.colorScheme.error, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, fontFamily = FontFamily.Monospace)
       }
       Spacer(modifier = Modifier.height(4.dp))
       DiffTable(
@@ -1381,7 +1380,7 @@ internal fun ToolCallRow(
         Spacer(modifier = Modifier.height(4.dp))
         Text(
           "Show all ${diffLines.size} lines",
-          color = ElectricBlueGlow,
+          color = MaterialTheme.colorScheme.primary,
           fontSize = 10.sp,
           fontWeight = FontWeight.SemiBold,
           modifier = Modifier
@@ -1397,16 +1396,19 @@ internal fun ToolCallRow(
       Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Button(
           onClick = onRetryTool,
-          colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
+          colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
           contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
           modifier = Modifier.height(28.dp).testTag("btn_retry_tool")
-        ) { Text("Retry", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold) }
+        ) { Text("Retry", color = MaterialTheme.colorScheme.onPrimary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold) }
         Button(
           onClick = onContinueTool,
-          colors = ButtonDefaults.buttonColors(containerColor = TerminalGreen),
+          colors = ButtonDefaults.buttonColors(
+            containerColor = AwakiTheme.extra.success,
+            contentColor = AwakiTheme.extra.onSuccess
+          ),
           contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
           modifier = Modifier.height(28.dp).testTag("btn_continue_tool")
-        ) { Text("Continue", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold) }
+        ) { Text("Continue", fontSize = 11.sp, fontWeight = FontWeight.SemiBold) }
       }
     }
 
@@ -1416,32 +1418,32 @@ internal fun ToolCallRow(
         modifier = Modifier
           .fillMaxWidth()
           .clip(RoundedCornerShape(6.dp))
-          .background(DarkBackground)
+          .background(MaterialTheme.colorScheme.background)
           .padding(8.dp)
       ) {
         // Raw request JSON is opt-in (Settings → Chat Tool Activity).
         if (showToolJson && item.argsJson.isNotBlank() && item.argsJson != "{}") {
           Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Request (raw JSON)", color = TextMuted, fontSize = 9.sp, modifier = Modifier.weight(1f))
+            Text("Request (raw JSON)", color = AwakiTheme.extra.textMuted, fontSize = 9.sp, modifier = Modifier.weight(1f))
             Icon(
               Icons.Outlined.ContentCopy,
               contentDescription = "Copy arguments",
-              tint = TextMuted,
+              tint = AwakiTheme.extra.textMuted,
               modifier = Modifier
                 .size(11.dp)
                 .clickable { clipboard.setText(AnnotatedString(item.argsJson)) }
             )
           }
-          Text(prettyJson(item.argsJson), color = CyanAccent, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+          Text(prettyJson(item.argsJson), color = MaterialTheme.colorScheme.secondary, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
           Spacer(modifier = Modifier.height(6.dp))
         }
         if (item.detail.isNotBlank()) {
           Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Output", color = TextMuted, fontSize = 9.sp, modifier = Modifier.weight(1f))
+            Text("Output", color = AwakiTheme.extra.textMuted, fontSize = 9.sp, modifier = Modifier.weight(1f))
             Icon(
               Icons.Outlined.ContentCopy,
               contentDescription = "Copy output",
-              tint = TextMuted,
+              tint = AwakiTheme.extra.textMuted,
               modifier = Modifier
                 .size(11.dp)
                 .clickable { clipboard.setText(AnnotatedString(item.detail)) }
@@ -1455,14 +1457,14 @@ internal fun ToolCallRow(
               .verticalScroll(rememberScrollState())
               .testTag("tool_output_detail")
           ) {
-            Text(item.detail, color = TextCode, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+            Text(item.detail, color = AwakiTheme.extra.textCode, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
           }
         }
         item.exitCode?.let {
           Spacer(modifier = Modifier.height(6.dp))
           Text(
             "exit code: $it",
-            color = if (it == 0) TerminalGreen else DangerRed,
+            color = if (it == 0) AwakiTheme.extra.success else MaterialTheme.colorScheme.error,
             fontSize = 10.sp,
             fontFamily = FontFamily.Monospace
           )
@@ -1482,12 +1484,12 @@ internal fun ApprovalCard(
 ) {
   val clipboard = LocalClipboardManager.current
   val isTerminal = item.command.isNotBlank()
-  val accent = if (item.isQuestion) ElectricBlueGlow else WarningAmber
+  val accent = if (item.isQuestion) MaterialTheme.colorScheme.primary else AwakiTheme.extra.warning
 
   Column(
     modifier = Modifier
       .fillMaxWidth()
-      .cardWithRail(accent, DarkSurface.copy(alpha = 0.5f))
+      .cardWithRail(accent, MaterialTheme.colorScheme.surface.copy(alpha = 0.5f))
       .padding(start = 14.dp, end = 10.dp, top = 10.dp, bottom = 10.dp)
       .testTag("stream_approval")
   ) {
@@ -1516,20 +1518,20 @@ internal fun ApprovalCard(
         modifier = Modifier
           .fillMaxWidth()
           .clip(RoundedCornerShape(6.dp))
-          .background(DarkBackground)
+          .background(MaterialTheme.colorScheme.background)
           .padding(horizontal = 8.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically
       ) {
         Text(
           "$ ",
-          color = CyanAccent,
+          color = MaterialTheme.colorScheme.secondary,
           fontSize = 12.sp,
           fontFamily = FontFamily.Monospace,
           fontWeight = FontWeight.Bold
         )
         Text(
           item.command,
-          color = TextCode,
+          color = AwakiTheme.extra.textCode,
           fontSize = 11.sp,
           fontFamily = FontFamily.Monospace,
           softWrap = false,
@@ -1542,7 +1544,7 @@ internal fun ApprovalCard(
         Icon(
           Icons.Outlined.ContentCopy,
           contentDescription = "Copy command",
-          tint = TextMuted,
+          tint = AwakiTheme.extra.textMuted,
           modifier = Modifier
             .size(13.dp)
             .clickable { clipboard.setText(AnnotatedString(item.command)) }
@@ -1555,13 +1557,13 @@ internal fun ApprovalCard(
       Spacer(modifier = Modifier.height(4.dp))
       Text(
         "“${item.rationale}”",
-        color = DangerRed,
+        color = MaterialTheme.colorScheme.error,
         fontSize = 11.sp,
         lineHeight = 15.sp
       )
     } else if (item.impact.isNotBlank() && item.impact != item.command) {
       Spacer(modifier = Modifier.height(4.dp))
-      Text(item.impact, color = TextSecondary, fontSize = 11.sp, lineHeight = 15.sp)
+      Text(item.impact, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp, lineHeight = 15.sp)
     }
 
     Spacer(modifier = Modifier.height(6.dp))
@@ -1573,40 +1575,43 @@ internal fun ApprovalCard(
         Text(
           if (item.isQuestion) "Waiting for your answer — choose below."
           else "Waiting for your decision — nothing has run yet.",
-          color = TextMuted,
+          color = AwakiTheme.extra.textMuted,
           fontSize = 11.sp
         )
         if (item.isQuestion) {
           item.options.forEachIndexed { index, option ->
             Button(
               onClick = { onAnswer(option) },
-              colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
+              colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
               contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
               modifier = Modifier
                 .fillMaxWidth()
                 .height(30.dp)
                 .testTag("btn_card_answer_$index")
-            ) { Text(option, color = Color.White, fontSize = 11.sp) }
+            ) { Text(option, color = MaterialTheme.colorScheme.onPrimary, fontSize = 11.sp) }
           }
           TextButton(
             onClick = onReopen,
             modifier = Modifier.testTag("btn_reopen_dialog")
-          ) { Text("Answer in the dialog…", color = TextSecondary, fontSize = 11.sp) }
+          ) { Text("Answer in the dialog…", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp) }
         } else {
           var rationale by remember { mutableStateOf("") }
           Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(
               onClick = onAllow,
-              colors = ButtonDefaults.buttonColors(containerColor = TerminalGreen),
+              colors = ButtonDefaults.buttonColors(
+                containerColor = AwakiTheme.extra.success,
+                contentColor = AwakiTheme.extra.onSuccess
+              ),
               contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
               modifier = Modifier.height(30.dp).testTag("btn_allow_tool")
-            ) { Text("Allow", color = Color.White, fontSize = 11.sp) }
+            ) { Text("Allow", fontSize = 11.sp) }
             Button(
               onClick = { onDeny(rationale.trim().ifBlank { null }) },
-              colors = ButtonDefaults.buttonColors(containerColor = DangerRed),
+              colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
               contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
               modifier = Modifier.height(30.dp).testTag("btn_deny_tool")
-            ) { Text("Deny", color = Color.White, fontSize = 11.sp) }
+            ) { Text("Deny", color = MaterialTheme.colorScheme.onError, fontSize = 11.sp) }
           }
           OutlinedTextField(
             value = rationale,
@@ -1614,52 +1619,52 @@ internal fun ApprovalCard(
             modifier = Modifier
               .fillMaxWidth()
               .testTag("card_deny_reason"),
-            placeholder = { Text(item.freeTextLabel, color = TextMuted, fontSize = 11.sp) },
+            placeholder = { Text(item.freeTextLabel, color = AwakiTheme.extra.textMuted, fontSize = 11.sp) },
             textStyle = LocalTextStyle.current.copy(fontSize = 11.sp),
             singleLine = true,
             colors = OutlinedTextFieldDefaults.colors(
-              focusedBorderColor = WarningAmber,
-              unfocusedBorderColor = DarkBorder,
-              cursorColor = WarningAmber,
-              focusedTextColor = TextPrimary,
-              unfocusedTextColor = TextPrimary
+              focusedBorderColor = AwakiTheme.extra.warning,
+              unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+              cursorColor = AwakiTheme.extra.warning,
+              focusedTextColor = MaterialTheme.colorScheme.onSurface,
+              unfocusedTextColor = MaterialTheme.colorScheme.onSurface
             )
           )
           TextButton(
             onClick = onReopen,
             modifier = Modifier.testTag("btn_reopen_dialog")
-          ) { Text("Open the dialog…", color = TextSecondary, fontSize = 11.sp) }
+          ) { Text("Open the dialog…", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp) }
         }
       }
 
       item.answer.isNotBlank() -> Text(
         "Answered: ${item.answer}",
-        color = TerminalGreen,
+        color = AwakiTheme.extra.success,
         fontSize = 11.sp,
         fontWeight = FontWeight.SemiBold
       )
       item.stalled -> Text(
         "Turn stopped before you decided — nothing was run.",
-        color = TextMuted,
+        color = AwakiTheme.extra.textMuted,
         fontSize = 11.sp,
         fontWeight = FontWeight.SemiBold
       )
       item.isQuestion -> Text(
         "Not answered",
-        color = TextMuted,
+        color = AwakiTheme.extra.textMuted,
         fontSize = 11.sp,
         fontWeight = FontWeight.SemiBold
       )
       else -> {
         Row(verticalAlignment = Alignment.CenterVertically) {
           if (item.allowed) {
-            Icon(Icons.Default.Check, contentDescription = null, tint = TerminalGreen, modifier = Modifier.size(13.dp))
+            Icon(Icons.Default.Check, contentDescription = null, tint = AwakiTheme.extra.success, modifier = Modifier.size(13.dp))
             Spacer(modifier = Modifier.width(4.dp))
-            Text("Allowed", color = TerminalGreen, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            Text("Allowed", color = AwakiTheme.extra.success, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
           } else {
-            Icon(Icons.Default.Close, contentDescription = null, tint = DangerRed, modifier = Modifier.size(13.dp))
+            Icon(Icons.Default.Close, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(13.dp))
             Spacer(modifier = Modifier.width(4.dp))
-            Text("Denied", color = DangerRed, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            Text("Denied", color = MaterialTheme.colorScheme.error, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
           }
         }
       }
@@ -1678,8 +1683,8 @@ private fun ResponseCard(block: TextBlock) {
     modifier = Modifier
       .fillMaxWidth()
       .clip(RoundedCornerShape(12.dp))
-      .background(TerminalGreen.copy(alpha = 0.06f))
-      .border(1.dp, TerminalGreen.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
+      .background(AwakiTheme.extra.success.copy(alpha = 0.06f))
+      .border(1.dp, AwakiTheme.extra.success.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
       .padding(12.dp)
       .testTag("chat_final_response")
   ) {
@@ -1687,13 +1692,13 @@ private fun ResponseCard(block: TextBlock) {
       Icon(
         Icons.Default.CheckCircle,
         contentDescription = null,
-        tint = TerminalGreen,
+        tint = AwakiTheme.extra.success,
         modifier = Modifier.size(14.dp)
       )
       Spacer(modifier = Modifier.width(6.dp))
       Text(
         "Response",
-        color = TerminalGreen,
+        color = AwakiTheme.extra.success,
         fontSize = 10.sp,
         fontWeight = FontWeight.Bold
       )
@@ -1701,7 +1706,7 @@ private fun ResponseCard(block: TextBlock) {
       Icon(
         Icons.Outlined.ContentCopy,
         contentDescription = "Copy response",
-        tint = TextMuted,
+        tint = AwakiTheme.extra.textMuted,
         modifier = Modifier
           .size(13.dp)
           .clickable { clipboard.setText(AnnotatedString(block.text)) }
@@ -1720,8 +1725,8 @@ private fun ThinkingBlock(block: ReasoningBlock) {
     modifier = Modifier
       .fillMaxWidth()
       .clip(RoundedCornerShape(10.dp))
-      .background(DarkBackground.copy(alpha = 0.7f))
-      .border(1.dp, DarkBorderSubtle, RoundedCornerShape(10.dp))
+      .background(MaterialTheme.colorScheme.background.copy(alpha = 0.7f))
+      .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(10.dp))
       .clickable { expanded = !expanded }
       .padding(horizontal = 10.dp, vertical = 7.dp)
       .testTag("stream_thinking")
@@ -1730,24 +1735,24 @@ private fun ThinkingBlock(block: ReasoningBlock) {
       Icon(
         Icons.Default.Psychology,
         contentDescription = null,
-        tint = CyanAccent.copy(alpha = if (block.streaming) 1f else 0.6f),
+        tint = MaterialTheme.colorScheme.secondary.copy(alpha = if (block.streaming) 1f else 0.6f),
         modifier = Modifier.size(13.dp)
       )
       Spacer(modifier = Modifier.width(6.dp))
       Text(
         if (block.streaming) "Thinking..." else "Thoughts",
-        color = CyanAccent.copy(alpha = 0.85f),
+        color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.85f),
         fontSize = 10.sp,
         fontWeight = FontWeight.SemiBold
       )
       Spacer(modifier = Modifier.weight(1f))
-      Text(if (expanded) "v" else ">", color = TextMuted, fontSize = 10.sp)
+      Text(if (expanded) "v" else ">", color = AwakiTheme.extra.textMuted, fontSize = 10.sp)
     }
     if (expanded) {
       Spacer(modifier = Modifier.height(5.dp))
       Text(
         block.text,
-        color = TextMuted,
+        color = AwakiTheme.extra.textMuted,
         fontSize = 11.sp,
         lineHeight = 15.sp,
         fontFamily = FontFamily.Monospace
@@ -1763,18 +1768,18 @@ internal fun ErrorCard(block: ErrorBlock, showRetry: Boolean, onRetry: () -> Uni
   Column(
     modifier = Modifier
       .fillMaxWidth()
-      .cardWithRail(DangerRed, DangerRed.copy(alpha = 0.08f))
+      .cardWithRail(MaterialTheme.colorScheme.error, MaterialTheme.colorScheme.error.copy(alpha = 0.08f))
       .padding(start = 14.dp, end = 10.dp, top = 10.dp, bottom = 10.dp)
       .testTag("stream_error_card")
   ) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-      StatusCircle(icon = Icons.Default.Close, color = DangerRed)
+      StatusCircle(icon = Icons.Default.Close, color = MaterialTheme.colorScheme.error)
       Spacer(modifier = Modifier.width(8.dp))
       Column(modifier = Modifier.weight(1f)) {
-        Text("Error", color = DangerRed, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+        Text("Error", color = MaterialTheme.colorScheme.error, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
         Text(
           text = block.message,
-          color = TextSecondary,
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
           fontSize = 11.5.sp,
           lineHeight = 15.sp,
           maxLines = 4,
@@ -1784,7 +1789,7 @@ internal fun ErrorCard(block: ErrorBlock, showRetry: Boolean, onRetry: () -> Uni
       Icon(
         Icons.Outlined.ContentCopy,
         contentDescription = "Copy error",
-        tint = TextMuted,
+        tint = AwakiTheme.extra.textMuted,
         modifier = Modifier
           .size(12.dp)
           .clickable { clipboard.setText(AnnotatedString(block.message)) }
@@ -1795,13 +1800,13 @@ internal fun ErrorCard(block: ErrorBlock, showRetry: Boolean, onRetry: () -> Uni
       Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Button(
           onClick = onRetry,
-          colors = ButtonDefaults.buttonColors(containerColor = DangerRed),
+          colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
           contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
           modifier = Modifier.height(28.dp).testTag("btn_retry_turn")
         ) {
-          Icon(Icons.Default.Refresh, contentDescription = null, tint = Color.White, modifier = Modifier.size(12.dp))
+          Icon(Icons.Default.Refresh, contentDescription = null, tint = MaterialTheme.colorScheme.onError, modifier = Modifier.size(12.dp))
           Spacer(modifier = Modifier.width(4.dp))
-          Text("Retry", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+          Text("Retry", color = MaterialTheme.colorScheme.onError, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
         }
       }
     }
@@ -1813,12 +1818,12 @@ private fun MiniAction(label: String, onClick: () -> Unit) {
   Box(
     modifier = Modifier
       .clip(RoundedCornerShape(6.dp))
-      .background(DarkSurfaceElevated)
-      .border(1.dp, DarkBorderSubtle, RoundedCornerShape(6.dp))
+      .background(MaterialTheme.colorScheme.surfaceContainer)
+      .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(6.dp))
       .clickable(onClick = onClick)
       .padding(horizontal = 10.dp, vertical = 4.dp)
   ) {
-    Text(label, color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+    Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp, fontWeight = FontWeight.Medium)
   }
 }
 
@@ -1842,15 +1847,15 @@ private fun AgentComposer(
       .fillMaxWidth()
       .padding(horizontal = 10.dp, vertical = 6.dp)
       .clip(RoundedCornerShape(14.dp))
-      .background(DarkSurfaceElevated)
-      .border(1.dp, DarkBorderSubtle, RoundedCornerShape(14.dp))
+      .background(MaterialTheme.colorScheme.surfaceContainer)
+      .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(14.dp))
   ) {
     Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
       // Clean multiline input area
       TextField(
         value = promptText,
         onValueChange = onPromptChange,
-        placeholder = { Text("Ask for follow-up changes…", color = TextMuted, fontSize = 13.sp) },
+        placeholder = { Text("Ask for follow-up changes…", color = AwakiTheme.extra.textMuted, fontSize = 13.sp) },
         modifier = Modifier
           .fillMaxWidth()
           .heightIn(min = 40.dp, max = 110.dp)
@@ -1860,8 +1865,8 @@ private fun AgentComposer(
           unfocusedContainerColor = Color.Transparent,
           focusedIndicatorColor = Color.Transparent,
           unfocusedIndicatorColor = Color.Transparent,
-          focusedTextColor = TextPrimary,
-          unfocusedTextColor = TextPrimary
+          focusedTextColor = MaterialTheme.colorScheme.onSurface,
+          unfocusedTextColor = MaterialTheme.colorScheme.onSurface
         ),
         textStyle = LocalTextStyle.current.copy(fontSize = 13.sp, lineHeight = 18.sp)
       )
@@ -1885,7 +1890,7 @@ private fun AgentComposer(
           ConfigDropdown(
             label = selectedModel?.displayName ?: "Select model",
             sublabel = providerName,
-            tint = if (selectedModel == null) TextMuted else ElectricBlueGlow,
+            tint = if (selectedModel == null) AwakiTheme.extra.textMuted else MaterialTheme.colorScheme.primary,
             leadingIcon = Icons.Default.AutoAwesome,
             options = buildList {
               providers.forEach { provider ->
@@ -1917,9 +1922,9 @@ private fun AgentComposer(
               permissions.fileEditing == PermissionMode.NEVER_ALLOW -> "Edits: off"
               else -> "Edits: ask"
             },
-            tint = if (permissions.planMode) ElectricBlueGlow
-              else if (permissions.fileEditing == PermissionMode.NEVER_ALLOW) DangerRed
-              else TerminalGreen,
+            tint = if (permissions.planMode) MaterialTheme.colorScheme.primary
+              else if (permissions.fileEditing == PermissionMode.NEVER_ALLOW) MaterialTheme.colorScheme.error
+              else AwakiTheme.extra.success,
             options = listOf(
               DropdownOption(
                 label = "Plan mode — research only, no changes",
@@ -1948,7 +1953,7 @@ private fun AgentComposer(
               PermissionMode.NEVER_ALLOW -> "Terminal: off"
               else -> "Terminal: ask"
             },
-            tint = if (permissions.terminalCommands == PermissionMode.ALLOW_ALL) WarningAmber else TerminalGreen,
+            tint = if (permissions.terminalCommands == PermissionMode.ALLOW_ALL) AwakiTheme.extra.warning else AwakiTheme.extra.success,
             options = listOf(
               DropdownOption(label = "Ask before running", tag = PermissionMode.ALWAYS_ASK.name),
               DropdownOption(label = "Allow safe commands", tag = PermissionMode.ALLOW_SAFE.name),
@@ -1976,20 +1981,20 @@ private fun AgentComposer(
               modifier = Modifier
                 .size(32.dp)
                 .clip(CircleShape)
-                .background(WarningAmber)
+                .background(AwakiTheme.extra.warning)
                 .testTag("btn_composer_pause")
             ) {
-              Icon(Icons.Default.Pause, contentDescription = "Pause", tint = Color.White, modifier = Modifier.size(16.dp))
+              Icon(Icons.Default.Pause, contentDescription = "Pause", tint = AwakiTheme.extra.onWarning, modifier = Modifier.size(16.dp))
             }
             IconButton(
               onClick = onStop,
               modifier = Modifier
                 .size(32.dp)
                 .clip(CircleShape)
-                .background(DangerRed)
+                .background(MaterialTheme.colorScheme.error)
                 .testTag("btn_composer_stop")
             ) {
-              Icon(Icons.Default.Stop, contentDescription = "Stop", tint = Color.White, modifier = Modifier.size(16.dp))
+              Icon(Icons.Default.Stop, contentDescription = "Stop", tint = MaterialTheme.colorScheme.onError, modifier = Modifier.size(16.dp))
             }
           }
         } else {
@@ -2000,13 +2005,13 @@ private fun AgentComposer(
             modifier = Modifier
               .size(34.dp)
               .clip(CircleShape)
-              .background(if (canSend) ElectricBlue else DarkSurface.copy(alpha = 0.7f))
+              .background(if (canSend) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface.copy(alpha = 0.7f))
               .testTag("btn_send_agent_prompt")
           ) {
             Icon(
               Icons.AutoMirrored.Filled.Send,
               contentDescription = "Send",
-              tint = if (canSend) Color.White else TextMuted,
+              tint = if (canSend) MaterialTheme.colorScheme.onPrimary else AwakiTheme.extra.textMuted,
               modifier = Modifier.size(15.dp)
             )
           }
@@ -2035,15 +2040,15 @@ data class DropdownOption(
 private fun ContextUsageChip(usage: com.awaki.agent.compact.ContextTokenUsage) {
   if (usage.contextWindow <= 0) return
   val tint = when {
-    usage.isAboveThreshold -> DangerRed
-    usage.pressurePercent >= 85 -> WarningAmber
-    usage.pressurePercent >= 60 -> ElectricBlueGlow
-    else -> TextMuted
+    usage.isAboveThreshold -> MaterialTheme.colorScheme.error
+    usage.pressurePercent >= 85 -> AwakiTheme.extra.warning
+    usage.pressurePercent >= 60 -> MaterialTheme.colorScheme.primary
+    else -> AwakiTheme.extra.textMuted
   }
   Box(
     modifier = Modifier
       .clip(RoundedCornerShape(6.dp))
-      .background(DarkSurface.copy(alpha = 0.6f))
+      .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.6f))
       .border(1.dp, tint.copy(alpha = 0.35f), RoundedCornerShape(6.dp))
       .padding(horizontal = 6.dp, vertical = 4.dp)
       .testTag("context_usage_chip")
@@ -2077,10 +2082,10 @@ internal fun PlanModeToggle(active: Boolean, onToggle: () -> Unit) {
   Surface(
     onClick = onToggle,
     shape = RoundedCornerShape(8.dp),
-    color = if (active) ElectricBlue.copy(alpha = 0.16f) else DarkSurface,
+    color = if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.16f) else MaterialTheme.colorScheme.surface,
     border = androidx.compose.foundation.BorderStroke(
       1.dp,
-      if (active) ElectricBlueGlow else DarkBorderSubtle
+      if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
     ),
     modifier = Modifier.testTag("btn_plan_mode")
   ) {
@@ -2091,13 +2096,13 @@ internal fun PlanModeToggle(active: Boolean, onToggle: () -> Unit) {
       Icon(
         Icons.Outlined.Description,
         contentDescription = null,
-        tint = if (active) ElectricBlueGlow else TextSecondary,
+        tint = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = Modifier.size(13.dp)
       )
       Spacer(modifier = Modifier.width(5.dp))
       Text(
         "Plan",
-        color = if (active) ElectricBlueGlow else TextSecondary,
+        color = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
         fontSize = 11.sp,
         fontWeight = FontWeight.SemiBold
       )
@@ -2111,20 +2116,20 @@ internal fun PlanModeNotice() {
   Row(
     modifier = Modifier
       .fillMaxWidth()
-      .background(ElectricBlue.copy(alpha = 0.10f))
+      .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.10f))
       .padding(horizontal = 12.dp, vertical = 5.dp),
     verticalAlignment = Alignment.CenterVertically
   ) {
     Icon(
       Icons.Outlined.Description,
       contentDescription = null,
-      tint = ElectricBlueGlow,
+      tint = MaterialTheme.colorScheme.primary,
       modifier = Modifier.size(12.dp)
     )
     Spacer(modifier = Modifier.width(6.dp))
     Text(
       text = "Plan mode: the agent reads, researches and plans. It will refuse any change until you turn this off.",
-      color = TextSecondary,
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
       fontSize = 10.sp,
       maxLines = 2,
       overflow = TextOverflow.Ellipsis,
@@ -2140,15 +2145,16 @@ private fun ConfigDropdown(
   onPick: (DropdownOption) -> Unit,
   modifier: Modifier = Modifier,
   sublabel: String? = null,
-  tint: Color = TextSecondary,
+  tint: Color = Color.Unspecified,
   leadingIcon: ImageVector? = null
 ) {
+  val labelColor = if (tint == Color.Unspecified) MaterialTheme.colorScheme.onSurfaceVariant else tint
   var expanded by remember { mutableStateOf(false) }
   Box(modifier = modifier) {
     Surface(
       shape = RoundedCornerShape(6.dp),
-      color = DarkSurface,
-      border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorderSubtle),
+      color = MaterialTheme.colorScheme.surface,
+      border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
       modifier = Modifier.clickable { expanded = true }
     ) {
       Row(
@@ -2156,17 +2162,17 @@ private fun ConfigDropdown(
         modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
       ) {
         if (leadingIcon != null) {
-          Icon(leadingIcon, contentDescription = null, tint = tint, modifier = Modifier.size(11.dp))
+          Icon(leadingIcon, contentDescription = null, tint = labelColor, modifier = Modifier.size(11.dp))
           Spacer(modifier = Modifier.width(4.dp))
         }
         Column {
           Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(label, color = tint, fontSize = 11.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+            Text(label, color = labelColor, fontSize = 11.sp, fontWeight = FontWeight.Medium, maxLines = 1)
             Spacer(modifier = Modifier.width(3.dp))
-            Text("▾", color = TextMuted, fontSize = 9.sp)
+            Text("▾", color = AwakiTheme.extra.textMuted, fontSize = 9.sp)
           }
           sublabel?.let {
-            Text(it, color = TextMuted, fontSize = 8.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(it, color = AwakiTheme.extra.textMuted, fontSize = 8.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
           }
         }
       }
@@ -2174,13 +2180,13 @@ private fun ConfigDropdown(
     DropdownMenu(
       expanded = expanded,
       onDismissRequest = { expanded = false },
-      containerColor = DarkSurfaceElevated,
+      containerColor = MaterialTheme.colorScheme.surfaceContainer,
       modifier = Modifier.heightIn(max = 360.dp)
     ) {
       options.forEach { option ->
         if (option.header) {
           Box(modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
-            Text(option.label, color = TextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+            Text(option.label, color = AwakiTheme.extra.textMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
           }
         } else {
           DropdownMenuItem(
@@ -2190,7 +2196,7 @@ private fun ConfigDropdown(
                   Icon(
                     Icons.Default.Check,
                     contentDescription = null,
-                    tint = ElectricBlueGlow,
+                    tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(14.dp)
                   )
                   Spacer(modifier = Modifier.width(6.dp))
@@ -2198,11 +2204,11 @@ private fun ConfigDropdown(
                 Column {
                   Text(
                     option.label,
-                    color = if (option.configure) ElectricBlueGlow else TextPrimary,
+                    color = if (option.configure) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                     fontSize = 13.sp
                   )
                   option.sublabel?.let {
-                    Text(it, color = TextMuted, fontSize = 10.sp, fontFamily = FontFamily.Monospace, maxLines = 1)
+                    Text(it, color = AwakiTheme.extra.textMuted, fontSize = 10.sp, fontFamily = FontFamily.Monospace, maxLines = 1)
                   }
                 }
               }
@@ -2286,15 +2292,16 @@ private fun toolIcon(name: String): ImageVector = when (toolTypeFor(name)) {
   ToolType.QUESTION -> Icons.Outlined.QuestionAnswer
 }
 
+@Composable
 private fun toolColor(name: String): Color = when (toolTypeFor(name)) {
-  ToolType.READ_FILE -> CyanAccent
-  ToolType.SEARCH -> WarningAmber
-  ToolType.TERMINAL -> TerminalGreen
-  ToolType.EDIT_FILE -> ElectricBlueGlow
-  ToolType.GIT -> IndigoAccent
-  ToolType.BUILD -> WarningAmber
-  ToolType.WEB -> ElectricBlueGlow
-  ToolType.QUESTION -> TerminalGreen
+  ToolType.READ_FILE -> MaterialTheme.colorScheme.secondary
+  ToolType.SEARCH -> AwakiTheme.extra.warning
+  ToolType.TERMINAL -> AwakiTheme.extra.success
+  ToolType.EDIT_FILE -> MaterialTheme.colorScheme.primary
+  ToolType.GIT -> MaterialTheme.colorScheme.tertiary
+  ToolType.BUILD -> AwakiTheme.extra.warning
+  ToolType.WEB -> MaterialTheme.colorScheme.primary
+  ToolType.QUESTION -> AwakiTheme.extra.success
 }
 
 private fun prettyJson(raw: String): String = runCatching {

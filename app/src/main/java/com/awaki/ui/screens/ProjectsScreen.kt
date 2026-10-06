@@ -16,6 +16,7 @@ import androidx.compose.material.icons.automirrored.outlined.*
 import androidx.compose.material3.*
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -39,6 +40,7 @@ import com.awaki.data.model.ProjectKind
 import com.awaki.data.model.WorkspaceStorageInfo
 import com.awaki.ui.WorkspaceViewModel
 import com.awaki.ui.theme.*
+import com.awaki.ui.theme.AwakiTheme
 import com.awaki.ui.util.rememberProjectIcon
 import com.awaki.workspace.filesystem.WorkspaceStorage
 import kotlinx.coroutines.Dispatchers
@@ -136,7 +138,7 @@ fun ProjectsScreen(
   selectedProjectForOverview?.let { proj ->
     AlertDialog(
       onDismissRequest = { selectedProjectForOverview = null },
-      containerColor = DarkSurface,
+      containerColor = MaterialTheme.colorScheme.surface,
       title = {
         Row(
           modifier = Modifier.fillMaxWidth(),
@@ -144,11 +146,11 @@ fun ProjectsScreen(
           verticalAlignment = Alignment.CenterVertically
         ) {
           Column(modifier = Modifier.weight(1f)) {
-            Text(proj.name, color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Text(proj.name, color = MaterialTheme.colorScheme.onSurface, fontSize = 18.sp, fontWeight = FontWeight.Bold)
             Row(verticalAlignment = Alignment.CenterVertically) {
               Text(
                 proj.path,
-                color = if (proj.isMissing) DangerRed else TextMuted,
+                color = if (proj.isMissing) MaterialTheme.colorScheme.error else AwakiTheme.extra.textMuted,
                 fontSize = 10.sp,
                 fontFamily = FontFamily.Monospace,
                 maxLines = 1,
@@ -158,7 +160,7 @@ fun ProjectsScreen(
               Icon(
                 Icons.Outlined.ContentCopy,
                 contentDescription = "Copy project path",
-                tint = TextMuted,
+                tint = AwakiTheme.extra.textMuted,
                 modifier = Modifier
                   .padding(start = 4.dp)
                   .size(11.dp)
@@ -170,10 +172,10 @@ fun ProjectsScreen(
             Box(
               modifier = Modifier
                 .clip(RoundedCornerShape(6.dp))
-                .background(DarkSurfaceElevated)
+                .background(MaterialTheme.colorScheme.surfaceContainer)
                 .padding(horizontal = 8.dp, vertical = 4.dp)
             ) {
-              Text("${proj.changedFilesCount} changes", color = WarningAmber, fontSize = 11.sp)
+              Text("${proj.changedFilesCount} changes", color = AwakiTheme.extra.warning, fontSize = 11.sp)
             }
           }
         }
@@ -188,20 +190,20 @@ fun ProjectsScreen(
               modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(8.dp))
-                .background(DarkBackground)
-                .border(1.dp, DarkBorderSubtle, RoundedCornerShape(8.dp))
+                .background(MaterialTheme.colorScheme.background)
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp))
                 .padding(10.dp)
             ) {
               Text(
                 "Original folder",
-                color = TextSecondary,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 10.sp,
                 fontWeight = FontWeight.SemiBold
               )
               Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                   proj.sourcePath,
-                  color = TextMuted,
+                  color = AwakiTheme.extra.textMuted,
                   fontSize = 10.sp,
                   fontFamily = FontFamily.Monospace,
                   maxLines = 1,
@@ -211,7 +213,7 @@ fun ProjectsScreen(
                 Icon(
                   Icons.Outlined.ContentCopy,
                   contentDescription = "Copy original folder path",
-                  tint = TextMuted,
+                  tint = AwakiTheme.extra.textMuted,
                   modifier = Modifier
                     .padding(start = 4.dp)
                     .size(11.dp)
@@ -227,7 +229,7 @@ fun ProjectsScreen(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                   Text(
                     "Auto-save changes there",
-                    color = TextSecondary,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 11.sp
                   )
                   Spacer(modifier = Modifier.width(6.dp))
@@ -238,7 +240,7 @@ fun ProjectsScreen(
                   )
                 }
                 TextButton(onClick = { viewModel.syncProjectToSource(proj) }) {
-                  Text("Save to folder", color = ElectricBlueGlow, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                  Text("Save to folder", color = MaterialTheme.colorScheme.primary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                 }
               }
             }
@@ -249,16 +251,16 @@ fun ProjectsScreen(
               modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(8.dp))
-                .background(DangerRed.copy(alpha = 0.1f))
-                .border(1.dp, DangerRed.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                .background(MaterialTheme.colorScheme.error.copy(alpha = 0.1f))
+                .border(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
                 .padding(10.dp),
               verticalAlignment = Alignment.CenterVertically
             ) {
-              Icon(Icons.Outlined.Warning, contentDescription = null, tint = DangerRed, modifier = Modifier.size(16.dp))
+              Icon(Icons.Outlined.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
               Spacer(modifier = Modifier.width(8.dp))
               Text(
                 "This project's folder is missing or was moved. Recreate it, or remove the project from the list.",
-                color = TextSecondary,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 11.sp,
                 lineHeight = 15.sp
               )
@@ -339,7 +341,7 @@ fun ProjectsScreen(
               label = "Remove",
               icon = Icons.Outlined.Delete,
               modifier = Modifier.weight(1f),
-              tint = DangerRed,
+              tint = MaterialTheme.colorScheme.error,
               onClick = {
                 pendingRemoval = proj
                 selectedProjectForOverview = null
@@ -348,28 +350,28 @@ fun ProjectsScreen(
           }
 
           Spacer(modifier = Modifier.height(6.dp))
-          Text("Recent Activity", color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+          Text("Recent Activity", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
 
           Column(
             modifier = Modifier
               .fillMaxWidth()
               .clip(RoundedCornerShape(8.dp))
-              .background(DarkBackground)
+              .background(MaterialTheme.colorScheme.background)
               .padding(10.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
           ) {
             if (recentActivity.isEmpty()) {
               Text(
                 "No agent activity yet — open the Agent and give it a task.",
-                color = TextMuted,
+                color = AwakiTheme.extra.textMuted,
                 fontSize = 11.sp
               )
             } else {
               recentActivity.forEach { block ->
                 val color = when {
-                  block.status == "failed" -> DangerRed
-                  block.status == "success" -> TerminalGreen
-                  else -> TextMuted
+                  block.status == "failed" -> MaterialTheme.colorScheme.error
+                  block.status == "success" -> AwakiTheme.extra.success
+                  else -> AwakiTheme.extra.textMuted
                 }
                 Text(
                   text = "● ${activityLabel(block.name, block.summary)} — ${relativeActivityTime(block.createdAt)}",
@@ -391,14 +393,14 @@ fun ProjectsScreen(
             onNavigate(AppDestination.AGENT)
           },
           enabled = !proj.isMissing,
-          colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue)
+          colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
         ) {
           Text("Open in Agent", fontSize = 12.sp)
         }
       },
       dismissButton = {
         TextButton(onClick = { selectedProjectForOverview = null }) {
-          Text("Close", color = TextMuted, fontSize = 12.sp)
+          Text("Close", color = AwakiTheme.extra.textMuted, fontSize = 12.sp)
         }
       }
     )
@@ -413,11 +415,11 @@ fun ProjectsScreen(
         sessionsProject = null
         viewModel.previewSessionsFor(null)
       },
-      containerColor = DarkSurface,
+      containerColor = MaterialTheme.colorScheme.surface,
       title = {
         Column {
-          Text("Agent Chats", color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
-          Text(proj.name, color = TextMuted, fontSize = 10.sp, fontFamily = FontFamily.Monospace, maxLines = 1, overflow = TextOverflow.Ellipsis)
+          Text("Agent Chats", color = MaterialTheme.colorScheme.onSurface, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+          Text(proj.name, color = AwakiTheme.extra.textMuted, fontSize = 10.sp, fontFamily = FontFamily.Monospace, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
       },
       text = {
@@ -425,7 +427,7 @@ fun ProjectsScreen(
           if (sessions.isEmpty()) {
             Text(
               "No conversations yet for this project. Start one with the Agent.",
-              color = TextMuted,
+              color = AwakiTheme.extra.textMuted,
               fontSize = 12.sp,
               modifier = Modifier.padding(vertical = 12.dp)
             )
@@ -443,7 +445,7 @@ fun ProjectsScreen(
                 )
               }
               if (sessions.size > 8) {
-                Text("…and ${sessions.size - 8} more", color = TextMuted, fontSize = 10.sp)
+                Text("…and ${sessions.size - 8} more", color = AwakiTheme.extra.textMuted, fontSize = 10.sp)
               }
             }
           }
@@ -457,14 +459,14 @@ fun ProjectsScreen(
             sessionsProject = null
             onNavigate(AppDestination.AGENT)
           },
-          colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue)
+          colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
         ) { Text("New Chat", fontSize = 12.sp) }
       },
       dismissButton = {
         TextButton(onClick = {
           sessionsProject = null
           viewModel.previewSessionsFor(null)
-        }) { Text("Close", color = TextMuted, fontSize = 12.sp) }
+        }) { Text("Close", color = AwakiTheme.extra.textMuted, fontSize = 12.sp) }
       }
     )
   }
@@ -474,16 +476,16 @@ fun ProjectsScreen(
   pendingRemoval?.let { proj ->
     AlertDialog(
       onDismissRequest = { pendingRemoval = null },
-      containerColor = DarkSurface,
+      containerColor = MaterialTheme.colorScheme.surface,
       title = {
-        Text("Remove project?", color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Text("Remove project?", color = MaterialTheme.colorScheme.onSurface, fontSize = 16.sp, fontWeight = FontWeight.Bold)
       },
       text = {
         Column(modifier = Modifier.fillMaxWidth()) {
           Text(
             "\"${proj.name}\" and all of its files will be permanently deleted from " +
               "~/projects/${File(proj.path).name}, along with this project's agent conversations.",
-            color = TextSecondary,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             fontSize = 12.sp,
             lineHeight = 17.sp
           )
@@ -491,12 +493,12 @@ fun ProjectsScreen(
             Spacer(modifier = Modifier.height(8.dp))
             Text(
               "The original folder you imported it from is kept: ${proj.sourcePath}",
-              color = TextMuted,
+              color = AwakiTheme.extra.textMuted,
               fontSize = 11.sp
             )
           }
           Spacer(modifier = Modifier.height(8.dp))
-          Text("This cannot be undone.", color = DangerRed, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+          Text("This cannot be undone.", color = MaterialTheme.colorScheme.error, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
         }
       },
       confirmButton = {
@@ -505,12 +507,12 @@ fun ProjectsScreen(
             viewModel.removeProject(proj)
             pendingRemoval = null
           },
-          colors = ButtonDefaults.buttonColors(containerColor = DangerRed)
+          colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
         ) { Text("Remove", fontSize = 12.sp) }
       },
       dismissButton = {
         TextButton(onClick = { pendingRemoval = null }) {
-          Text("Cancel", color = TextMuted, fontSize = 12.sp)
+          Text("Cancel", color = AwakiTheme.extra.textMuted, fontSize = 12.sp)
         }
       }
     )
@@ -567,7 +569,7 @@ fun ProjectsScreenContent(
   LazyColumn(
     modifier = modifier
       .fillMaxSize()
-      .background(DarkBackground)
+      .background(MaterialTheme.colorScheme.background)
       .padding(horizontal = 14.dp),
     verticalArrangement = Arrangement.spacedBy(8.dp)
   ) {
@@ -591,7 +593,7 @@ fun ProjectsScreenContent(
             .weight(1f)
             .height(36.dp)
             .testTag("btn_new_project"),
-          colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
+          colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
           contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
           shape = RoundedCornerShape(8.dp)
         ) {
@@ -605,8 +607,8 @@ fun ProjectsScreenContent(
             .weight(1f)
             .height(36.dp)
             .testTag("btn_import_folder"),
-          colors = ButtonDefaults.outlinedButtonColors(contentColor = TextPrimary),
-          border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder),
+          colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.onSurface),
+          border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
           contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
           shape = RoundedCornerShape(8.dp)
         ) {
@@ -629,7 +631,7 @@ fun ProjectsScreenContent(
         ) {
           Text(
             text = "PROJECTS",
-            color = TextMuted,
+            color = AwakiTheme.extra.textMuted,
             fontSize = 10.sp,
             fontWeight = FontWeight.Bold,
             letterSpacing = 0.8.sp
@@ -638,27 +640,27 @@ fun ProjectsScreenContent(
           Box(
             modifier = Modifier
               .clip(RoundedCornerShape(4.dp))
-              .background(DarkSurfaceElevated)
+              .background(MaterialTheme.colorScheme.surfaceContainer)
               .padding(horizontal = 5.dp, vertical = 1.dp)
           ) {
             Text(
               text = "${projects.size}",
-              color = TextSecondary,
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
               fontSize = 9.sp,
               fontFamily = FontFamily.Monospace,
               fontWeight = FontWeight.Medium
             )
           }
           Spacer(modifier = Modifier.width(8.dp))
-          HorizontalDivider(color = DarkBorderSubtle, modifier = Modifier.weight(1f))
+          HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, modifier = Modifier.weight(1f))
           Spacer(modifier = Modifier.width(8.dp))
 
           // View toggle: Linear vs Grid
           Row(
             modifier = Modifier
               .clip(RoundedCornerShape(7.dp))
-              .background(DarkSurface)
-              .border(1.dp, DarkBorderSubtle, RoundedCornerShape(7.dp))
+              .background(MaterialTheme.colorScheme.surface)
+              .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(7.dp))
               .padding(2.dp),
             verticalAlignment = Alignment.CenterVertically
           ) {
@@ -666,7 +668,7 @@ fun ProjectsScreenContent(
               modifier = Modifier
                 .size(24.dp)
                 .clip(RoundedCornerShape(5.dp))
-                .background(if (!gridView) ElectricBlue.copy(alpha = 0.22f) else Color.Transparent)
+                .background(if (!gridView) MaterialTheme.colorScheme.primary.copy(alpha = 0.22f) else Color.Transparent)
                 .clickable { onGridViewChange(false) }
                 .testTag("btn_linear_view"),
               contentAlignment = Alignment.Center
@@ -674,7 +676,7 @@ fun ProjectsScreenContent(
               Icon(
                 imageVector = Icons.AutoMirrored.Outlined.ViewList,
                 contentDescription = "List view",
-                tint = if (!gridView) ElectricBlueGlow else TextMuted,
+                tint = if (!gridView) MaterialTheme.colorScheme.primary else AwakiTheme.extra.textMuted,
                 modifier = Modifier.size(14.dp)
               )
             }
@@ -682,7 +684,7 @@ fun ProjectsScreenContent(
               modifier = Modifier
                 .size(24.dp)
                 .clip(RoundedCornerShape(5.dp))
-                .background(if (gridView) ElectricBlue.copy(alpha = 0.22f) else Color.Transparent)
+                .background(if (gridView) MaterialTheme.colorScheme.primary.copy(alpha = 0.22f) else Color.Transparent)
                 .clickable { onGridViewChange(true) }
                 .testTag("btn_grid_view"),
               contentAlignment = Alignment.Center
@@ -690,7 +692,7 @@ fun ProjectsScreenContent(
               Icon(
                 imageVector = Icons.Outlined.GridView,
                 contentDescription = "Grid view",
-                tint = if (gridView) ElectricBlueGlow else TextMuted,
+                tint = if (gridView) MaterialTheme.colorScheme.primary else AwakiTheme.extra.textMuted,
                 modifier = Modifier.size(13.dp)
               )
             }
@@ -754,8 +756,8 @@ private fun WorkspaceOverview(
     modifier = Modifier
       .fillMaxWidth()
       .clip(shape)
-      .background(DarkSurface)
-      .border(1.dp, DarkBorderSubtle, shape)
+      .background(MaterialTheme.colorScheme.surface)
+      .border(1.dp, MaterialTheme.colorScheme.outlineVariant, shape)
       .padding(horizontal = 10.dp, vertical = 7.dp),
     verticalAlignment = Alignment.CenterVertically
   ) {
@@ -763,14 +765,14 @@ private fun WorkspaceOverview(
       modifier = Modifier
         .size(28.dp)
         .clip(RoundedCornerShape(7.dp))
-        .background(TerminalGreen.copy(alpha = 0.12f))
-        .border(1.dp, TerminalGreen.copy(alpha = 0.3f), RoundedCornerShape(7.dp)),
+        .background(AwakiTheme.extra.success.copy(alpha = 0.12f))
+        .border(1.dp, AwakiTheme.extra.success.copy(alpha = 0.3f), RoundedCornerShape(7.dp)),
       contentAlignment = Alignment.Center
     ) {
       Icon(
         imageVector = Icons.Outlined.Folder,
         contentDescription = null,
-        tint = TerminalGreen,
+        tint = AwakiTheme.extra.success,
         modifier = Modifier.size(15.dp)
       )
     }
@@ -781,7 +783,7 @@ private fun WorkspaceOverview(
       Row(verticalAlignment = Alignment.CenterVertically) {
         Text(
           text = "Your Workspace",
-          color = TextPrimary,
+          color = MaterialTheme.colorScheme.onSurface,
           fontSize = 12.sp,
           fontWeight = FontWeight.SemiBold,
           maxLines = 1
@@ -790,12 +792,12 @@ private fun WorkspaceOverview(
         Box(
           modifier = Modifier
             .clip(RoundedCornerShape(4.dp))
-            .background(DarkSurfaceHighlight)
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
             .padding(horizontal = 4.dp, vertical = 1.dp)
         ) {
           Text(
             text = "$projectCount project${if (projectCount == 1) "" else "s"}",
-            color = TextSecondary,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             fontSize = 8.5.sp,
             fontFamily = FontFamily.Monospace,
             maxLines = 1
@@ -805,7 +807,7 @@ private fun WorkspaceOverview(
       Spacer(modifier = Modifier.height(1.dp))
       Text(
         text = workspacePath,
-        color = TextMuted,
+        color = AwakiTheme.extra.textMuted,
         fontSize = 9.5.sp,
         fontFamily = FontFamily.Monospace,
         maxLines = 1,
@@ -820,9 +822,9 @@ private fun WorkspaceOverview(
         Text(
           text = "${formatBytes(storage.usedBytes)} of ${formatBytes(storage.totalBytes)}",
           color = when {
-            storage.usedFraction > 0.9f -> DangerRed
-            storage.usedFraction > 0.75f -> WarningAmber
-            else -> TerminalGreen
+            storage.usedFraction > 0.9f -> MaterialTheme.colorScheme.error
+            storage.usedFraction > 0.75f -> AwakiTheme.extra.warning
+            else -> AwakiTheme.extra.success
           },
           fontSize = 9.5.sp,
           fontFamily = FontFamily.Monospace,
@@ -833,7 +835,7 @@ private fun WorkspaceOverview(
         Spacer(modifier = Modifier.height(1.dp))
         Text(
           text = "${formatBytes(storage.freeBytes)} free",
-          color = TextMuted,
+          color = AwakiTheme.extra.textMuted,
           fontSize = 8.5.sp,
           fontFamily = FontFamily.Monospace,
           maxLines = 1
@@ -844,14 +846,14 @@ private fun WorkspaceOverview(
             .width(52.dp)
             .height(2.5.dp)
             .clip(RoundedCornerShape(2.dp))
-            .background(DarkSurfaceHighlight)
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
         ) {
           Box(
             modifier = Modifier
               .fillMaxWidth(storage.usedFraction)
               .fillMaxHeight()
               .background(
-                if (storage.usedFraction > 0.9f) DangerRed else ElectricBlue
+                if (storage.usedFraction > 0.9f) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
               )
           )
         }
@@ -859,7 +861,7 @@ private fun WorkspaceOverview(
     } else {
       Text(
         text = "—",
-        color = TextMuted,
+        color = AwakiTheme.extra.textMuted,
         fontSize = 9.5.sp,
         fontFamily = FontFamily.Monospace
       )
@@ -874,28 +876,28 @@ private fun EmptyWorkspaceHint() {
     modifier = Modifier
       .fillMaxWidth()
       .clip(shape)
-      .background(DarkSurface)
-      .border(1.dp, DarkBorderSubtle, shape)
+      .background(MaterialTheme.colorScheme.surface)
+      .border(1.dp, MaterialTheme.colorScheme.outlineVariant, shape)
       .padding(horizontal = 14.dp, vertical = 16.dp),
     horizontalAlignment = Alignment.CenterHorizontally
   ) {
     Icon(
       imageVector = Icons.Outlined.Terminal,
       contentDescription = null,
-      tint = TextMuted,
+      tint = AwakiTheme.extra.textMuted,
       modifier = Modifier.size(22.dp)
     )
     Spacer(modifier = Modifier.height(7.dp))
     Text(
       text = "No projects yet",
-      color = TextPrimary,
+      color = MaterialTheme.colorScheme.onSurface,
       fontSize = 12.5.sp,
       fontWeight = FontWeight.SemiBold
     )
     Spacer(modifier = Modifier.height(3.dp))
     Text(
       text = "Create a project or open an existing folder — it is copied into the Linux workspace so git, builds and terminals behave like on a desktop.",
-      color = TextMuted,
+      color = AwakiTheme.extra.textMuted,
       fontSize = 9.5.sp,
       lineHeight = 13.5.sp
     )
@@ -918,14 +920,14 @@ private fun ProjectCard(
   val shape = RoundedCornerShape(10.dp)
 
   val container = when {
-    isActive -> lerp(DarkSurface, ElectricBlue, 0.08f)
-    project.isMissing -> lerp(DarkSurface, DangerRed, 0.05f)
-    else -> DarkSurface
+    isActive -> lerp(MaterialTheme.colorScheme.surface, MaterialTheme.colorScheme.primary, 0.08f)
+    project.isMissing -> lerp(MaterialTheme.colorScheme.surface, MaterialTheme.colorScheme.error, 0.05f)
+    else -> MaterialTheme.colorScheme.surface
   }
   val borderColor = when {
-    project.isMissing -> DangerRed.copy(alpha = 0.5f)
-    isActive -> ElectricBlue.copy(alpha = 0.75f)
-    else -> DarkBorderSubtle
+    project.isMissing -> MaterialTheme.colorScheme.error.copy(alpha = 0.5f)
+    isActive -> MaterialTheme.colorScheme.primary.copy(alpha = 0.75f)
+    else -> MaterialTheme.colorScheme.outlineVariant
   }
 
   Card(
@@ -954,7 +956,7 @@ private fun ProjectCard(
         Row(verticalAlignment = Alignment.CenterVertically) {
           Text(
             text = project.name,
-            color = TextPrimary,
+            color = MaterialTheme.colorScheme.onSurface,
             fontSize = 13.sp,
             fontWeight = FontWeight.Bold,
             maxLines = 1,
@@ -963,27 +965,27 @@ private fun ProjectCard(
           )
           if (isActive) {
             Spacer(modifier = Modifier.width(5.dp))
-            StatusBadge("CURRENT", ElectricBlueGlow, ElectricBlue.copy(alpha = 0.2f))
+            StatusBadge("CURRENT", MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
           }
           if (project.isMissing) {
             Spacer(modifier = Modifier.width(5.dp))
-            StatusBadge("MISSING", DangerRed, DangerRed.copy(alpha = 0.18f))
+            StatusBadge("MISSING", MaterialTheme.colorScheme.error, MaterialTheme.colorScheme.error.copy(alpha = 0.18f))
           } else if (project.isImported) {
             Spacer(modifier = Modifier.width(5.dp))
-            StatusBadge("IMPORTED", TextMuted, DarkSurfaceElevated)
+            StatusBadge("IMPORTED", AwakiTheme.extra.textMuted, MaterialTheme.colorScheme.surfaceContainer)
           }
           if (project.changedFilesCount > 0) {
             Spacer(modifier = Modifier.width(5.dp))
             Box(
               modifier = Modifier
                 .clip(RoundedCornerShape(4.dp))
-                .background(WarningAmber.copy(alpha = 0.14f))
-                .border(1.dp, WarningAmber.copy(alpha = 0.35f), RoundedCornerShape(4.dp))
+                .background(AwakiTheme.extra.warning.copy(alpha = 0.14f))
+                .border(1.dp, AwakiTheme.extra.warning.copy(alpha = 0.35f), RoundedCornerShape(4.dp))
                 .padding(horizontal = 4.dp, vertical = 1.dp)
             ) {
               Text(
                 text = "+${project.changedFilesCount}",
-                color = WarningAmber,
+                color = AwakiTheme.extra.warning,
                 fontSize = 8.sp,
                 fontFamily = FontFamily.Monospace,
                 fontWeight = FontWeight.Bold
@@ -1009,7 +1011,7 @@ private fun ProjectCard(
         ) {
           Text(
             text = project.path,
-            color = if (project.isMissing) DangerRed else TextMuted,
+            color = if (project.isMissing) MaterialTheme.colorScheme.error else AwakiTheme.extra.textMuted,
             fontSize = 9.5.sp,
             fontFamily = FontFamily.Monospace,
             maxLines = 1,
@@ -1020,7 +1022,7 @@ private fun ProjectCard(
             MetaSeparator()
             Text(
               text = facts.joinToString(" · "),
-              color = TextSecondary,
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
               fontSize = 9.sp,
               fontFamily = FontFamily.Monospace,
               maxLines = 1
@@ -1035,7 +1037,7 @@ private fun ProjectCard(
       CardAction(
         icon = Icons.Outlined.ContentCopy,
         contentDescription = "Copy project path",
-        tint = TextSecondary,
+        tint = MaterialTheme.colorScheme.onSurfaceVariant,
         size = 26.dp,
         iconSize = 13.dp,
         onClick = { onCopyPath(project.path) }
@@ -1044,7 +1046,7 @@ private fun ProjectCard(
         CardAction(
           icon = Icons.Outlined.MoreVert,
           contentDescription = "More actions for ${project.name}",
-          tint = TextSecondary,
+          tint = MaterialTheme.colorScheme.onSurfaceVariant,
           size = 26.dp,
           iconSize = 15.dp,
           testTag = "project_overflow_${project.id}",
@@ -1074,14 +1076,14 @@ private fun ProjectGridCard(
   var menuOpen by remember { mutableStateOf(false) }
   val shape = RoundedCornerShape(10.dp)
   val container = when {
-    isActive -> lerp(DarkSurface, ElectricBlue, 0.08f)
-    project.isMissing -> lerp(DarkSurface, DangerRed, 0.06f)
-    else -> DarkSurface
+    isActive -> lerp(MaterialTheme.colorScheme.surface, MaterialTheme.colorScheme.primary, 0.08f)
+    project.isMissing -> lerp(MaterialTheme.colorScheme.surface, MaterialTheme.colorScheme.error, 0.06f)
+    else -> MaterialTheme.colorScheme.surface
   }
   val borderColor = when {
-    project.isMissing -> DangerRed.copy(alpha = 0.5f)
-    isActive -> ElectricBlue.copy(alpha = 0.75f)
-    else -> DarkBorderSubtle
+    project.isMissing -> MaterialTheme.colorScheme.error.copy(alpha = 0.5f)
+    isActive -> MaterialTheme.colorScheme.primary.copy(alpha = 0.75f)
+    else -> MaterialTheme.colorScheme.outlineVariant
   }
 
   Card(
@@ -1111,7 +1113,7 @@ private fun ProjectGridCard(
           CardAction(
             icon = Icons.Outlined.MoreVert,
             contentDescription = "More actions for ${project.name}",
-            tint = TextSecondary,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
             size = 24.dp,
             iconSize = 14.dp,
             testTag = "project_overflow_${project.id}",
@@ -1132,7 +1134,7 @@ private fun ProjectGridCard(
       Row(verticalAlignment = Alignment.CenterVertically) {
         Text(
           text = project.name,
-          color = TextPrimary,
+          color = MaterialTheme.colorScheme.onSurface,
           fontSize = 12.5.sp,
           fontWeight = FontWeight.Bold,
           maxLines = 1,
@@ -1141,11 +1143,11 @@ private fun ProjectGridCard(
         )
         if (isActive) {
           Spacer(modifier = Modifier.width(4.dp))
-          StatusBadge("CURRENT", ElectricBlueGlow, ElectricBlue.copy(alpha = 0.2f))
+          StatusBadge("CURRENT", MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
         }
         if (project.isMissing) {
           Spacer(modifier = Modifier.width(4.dp))
-          StatusBadge("MISSING", DangerRed, DangerRed.copy(alpha = 0.18f))
+          StatusBadge("MISSING", MaterialTheme.colorScheme.error, MaterialTheme.colorScheme.error.copy(alpha = 0.18f))
         }
       }
 
@@ -1154,7 +1156,7 @@ private fun ProjectGridCard(
       // Monospace Path
       Text(
         text = project.path,
-        color = if (project.isMissing) DangerRed else TextMuted,
+        color = if (project.isMissing) MaterialTheme.colorScheme.error else AwakiTheme.extra.textMuted,
         fontSize = 9.sp,
         fontFamily = FontFamily.Monospace,
         maxLines = 1,
@@ -1174,7 +1176,7 @@ private fun ProjectGridCard(
       ) {
         Text(
           text = facts.joinToString(" · ").ifBlank { "—" },
-          color = TextSecondary,
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
           fontSize = 8.5.sp,
           fontFamily = FontFamily.Monospace,
           maxLines = 1,
@@ -1185,13 +1187,13 @@ private fun ProjectGridCard(
           Box(
             modifier = Modifier
               .clip(RoundedCornerShape(3.dp))
-              .background(WarningAmber.copy(alpha = 0.15f))
-              .border(1.dp, WarningAmber.copy(alpha = 0.35f), RoundedCornerShape(3.dp))
+              .background(AwakiTheme.extra.warning.copy(alpha = 0.15f))
+              .border(1.dp, AwakiTheme.extra.warning.copy(alpha = 0.35f), RoundedCornerShape(3.dp))
               .padding(horizontal = 3.5.dp, vertical = 0.5.dp)
           ) {
             Text(
               text = "+${project.changedFilesCount}",
-              color = WarningAmber,
+              color = AwakiTheme.extra.warning,
               fontSize = 8.sp,
               fontFamily = FontFamily.Monospace,
               fontWeight = FontWeight.Bold
@@ -1214,7 +1216,7 @@ private fun ProjectOverflowMenu(
   DropdownMenu(
     expanded = expanded,
     onDismissRequest = onDismiss,
-    containerColor = DarkSurfaceElevated
+    containerColor = MaterialTheme.colorScheme.surfaceContainer
   ) {
     val disabled = project.isMissing
     OverflowItem("Open in Agent", Icons.Outlined.AutoAwesome, enabled = !disabled) {
@@ -1237,8 +1239,8 @@ private fun ProjectOverflowMenu(
         onDismiss(); onAction(ProjectOverflowAction.SAVE_TO_ORIGINAL)
       }
     }
-    HorizontalDivider(color = DarkBorderSubtle)
-    OverflowItem("Remove project", Icons.Outlined.Delete, tint = DangerRed) {
+    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+    OverflowItem("Remove project", Icons.Outlined.Delete, tint = MaterialTheme.colorScheme.error) {
       onDismiss(); onAction(ProjectOverflowAction.REMOVE)
     }
   }
@@ -1278,7 +1280,7 @@ private fun CardAction(
 private fun MetaValue(text: String) {
   Text(
     text = text,
-    color = TextSecondary,
+    color = MaterialTheme.colorScheme.onSurfaceVariant,
     fontSize = 9.5.sp,
     fontFamily = FontFamily.Monospace
   )
@@ -1289,22 +1291,23 @@ private fun OverflowItem(
   label: String,
   icon: ImageVector,
   enabled: Boolean = true,
-  tint: Color = TextPrimary,
+  tint: Color = Color.Unspecified,
   onClick: () -> Unit
 ) {
+  val itemTint = if (tint == Color.Unspecified) MaterialTheme.colorScheme.onSurface else tint
   DropdownMenuItem(
     text = {
       Text(
         text = label,
         fontSize = 12.sp,
-        color = if (enabled) tint else TextMuted
+        color = if (enabled) itemTint else AwakiTheme.extra.textMuted
       )
     },
     leadingIcon = {
       Icon(
         imageVector = icon,
         contentDescription = null,
-        tint = if (enabled) tint.copy(alpha = 0.75f) else TextMuted,
+        tint = if (enabled) itemTint.copy(alpha = 0.75f) else AwakiTheme.extra.textMuted,
         modifier = Modifier.size(15.dp)
       )
     },
@@ -1328,8 +1331,8 @@ private fun ProjectIcon(project: Project, size: Dp) {
     modifier = Modifier
       .size(size)
       .clip(shape)
-      .background(if (bitmap != null) DarkSurfaceHighlight else accent.copy(alpha = 0.16f))
-      .border(1.dp, if (bitmap != null) DarkBorder else accent.copy(alpha = 0.35f), shape),
+      .background(if (bitmap != null) MaterialTheme.colorScheme.surfaceContainerHigh else accent.copy(alpha = 0.16f))
+      .border(1.dp, if (bitmap != null) MaterialTheme.colorScheme.outline else accent.copy(alpha = 0.35f), shape),
     contentAlignment = Alignment.Center
   ) {
     if (bitmap != null) {
@@ -1362,8 +1365,8 @@ private fun KindChip(kind: ProjectKind) {
   Row(
     modifier = Modifier
       .clip(RoundedCornerShape(4.dp))
-      .background(DarkSurfaceHighlight.copy(alpha = 0.75f))
-      .border(1.dp, DarkBorderSubtle, RoundedCornerShape(4.dp))
+      .background(MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.75f))
+      .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(4.dp))
       .padding(horizontal = 4.5.dp, vertical = 1.dp),
     verticalAlignment = Alignment.CenterVertically
   ) {
@@ -1376,7 +1379,7 @@ private fun KindChip(kind: ProjectKind) {
     Spacer(modifier = Modifier.width(3.5.dp))
     Text(
       text = kind.label,
-      color = TextSecondary,
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
       fontSize = 8.5.sp,
       fontWeight = FontWeight.Medium
     )
@@ -1387,7 +1390,7 @@ private fun KindChip(kind: ProjectKind) {
 private fun MetaSeparator() {
   Text(
     text = "·",
-    color = TextMuted,
+    color = AwakiTheme.extra.textMuted,
     fontSize = 9.sp,
     modifier = Modifier.padding(horizontal = 4.dp)
   )
@@ -1424,26 +1427,28 @@ private fun iconForKind(kind: ProjectKind): ImageVector = when (kind) {
   ProjectKind.UNKNOWN -> Icons.Outlined.Folder
 }
 
+@Composable
 private fun accentForKind(kind: ProjectKind): Color = when (kind) {
-  ProjectKind.ANDROID -> TerminalGreen
-  ProjectKind.NODE -> TerminalGreen
-  ProjectKind.GRADLE -> CyanAccent
-  ProjectKind.FLUTTER -> CyanAccent
-  ProjectKind.GO -> CyanAccent
-  ProjectKind.RUST -> WarningAmber
-  ProjectKind.MAVEN -> WarningAmber
-  ProjectKind.PYTHON -> ElectricBlueGlow
-  ProjectKind.CPP -> ElectricBlueGlow
-  ProjectKind.DOTNET -> IndigoAccent
-  ProjectKind.PHP -> IndigoAccent
-  ProjectKind.RUBY -> DangerRed
-  ProjectKind.GIT_REPO -> TextSecondary
-  ProjectKind.UNKNOWN -> TextMuted
+  ProjectKind.ANDROID -> AwakiTheme.extra.success
+  ProjectKind.NODE -> AwakiTheme.extra.success
+  ProjectKind.GRADLE -> MaterialTheme.colorScheme.secondary
+  ProjectKind.FLUTTER -> MaterialTheme.colorScheme.secondary
+  ProjectKind.GO -> MaterialTheme.colorScheme.secondary
+  ProjectKind.RUST -> AwakiTheme.extra.warning
+  ProjectKind.MAVEN -> AwakiTheme.extra.warning
+  ProjectKind.PYTHON -> MaterialTheme.colorScheme.primary
+  ProjectKind.CPP -> MaterialTheme.colorScheme.primary
+  ProjectKind.DOTNET -> MaterialTheme.colorScheme.tertiary
+  ProjectKind.PHP -> MaterialTheme.colorScheme.tertiary
+  ProjectKind.RUBY -> MaterialTheme.colorScheme.error
+  ProjectKind.GIT_REPO -> MaterialTheme.colorScheme.onSurfaceVariant
+  ProjectKind.UNKNOWN -> AwakiTheme.extra.textMuted
 }
 
 /** Deterministic per-name accent so the same project always looks the same. */
+@Composable
 private fun accentForName(name: String): Color {
-  val palette = listOf(ElectricBlueGlow, CyanAccent, IndigoAccent, TerminalGreen, WarningAmber, DangerRed)
+  val palette = listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.secondary, MaterialTheme.colorScheme.tertiary, AwakiTheme.extra.success, AwakiTheme.extra.warning, MaterialTheme.colorScheme.error)
   val index = (name.fold(7) { acc, c -> (acc * 31 + c.code) and 0x7FFFFFFF }) % palette.size
   return palette[index]
 }
@@ -1487,8 +1492,8 @@ private fun SessionRow(
     modifier = Modifier
       .fillMaxWidth()
       .clip(RoundedCornerShape(8.dp))
-      .background(DarkBackground)
-      .border(1.dp, DarkBorderSubtle, RoundedCornerShape(8.dp))
+      .background(MaterialTheme.colorScheme.background)
+      .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp))
       .clickable(onClick = onContinue)
       .padding(horizontal = 10.dp, vertical = 8.dp),
     verticalAlignment = Alignment.CenterVertically
@@ -1496,7 +1501,7 @@ private fun SessionRow(
     Column(modifier = Modifier.weight(1f)) {
       Text(
         session.title,
-        color = TextPrimary,
+        color = MaterialTheme.colorScheme.onSurface,
         fontSize = 12.sp,
         fontWeight = FontWeight.SemiBold,
         maxLines = 1,
@@ -1504,18 +1509,18 @@ private fun SessionRow(
       )
       Text(
         "${relativeActivityTime(session.updatedAt)} · ${session.status}",
-        color = TextMuted,
+        color = AwakiTheme.extra.textMuted,
         fontSize = 9.sp
       )
     }
     TextButton(onClick = onContinue, contentPadding = PaddingValues(horizontal = 8.dp)) {
-      Text("Continue", color = ElectricBlueGlow, fontSize = 11.sp)
+      Text("Continue", color = MaterialTheme.colorScheme.primary, fontSize = 11.sp)
     }
     IconButton(onClick = onArchive, modifier = Modifier.size(26.dp)) {
-      Icon(Icons.Outlined.Inventory2, contentDescription = "Archive", tint = TextMuted, modifier = Modifier.size(13.dp))
+      Icon(Icons.Outlined.Inventory2, contentDescription = "Archive", tint = AwakiTheme.extra.textMuted, modifier = Modifier.size(13.dp))
     }
     IconButton(onClick = onDelete, modifier = Modifier.size(26.dp)) {
-      Icon(Icons.Outlined.Delete, contentDescription = "Delete", tint = DangerRed.copy(alpha = 0.7f), modifier = Modifier.size(13.dp))
+      Icon(Icons.Outlined.Delete, contentDescription = "Delete", tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f), modifier = Modifier.size(13.dp))
     }
   }
 }
@@ -1539,11 +1544,11 @@ private fun NewOrImportProjectDialog(
 
   AlertDialog(
     onDismissRequest = onDismiss,
-    containerColor = DarkSurface,
+    containerColor = MaterialTheme.colorScheme.surface,
     title = {
       Text(
         if (mode == "create") "Create New Project" else "Open Existing Folder",
-        color = TextPrimary,
+        color = MaterialTheme.colorScheme.onSurface,
         fontSize = 16.sp,
         fontWeight = FontWeight.Bold
       )
@@ -1558,7 +1563,7 @@ private fun NewOrImportProjectDialog(
           modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
-            .background(DarkBackground)
+            .background(MaterialTheme.colorScheme.background)
             .padding(4.dp),
           horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
@@ -1566,34 +1571,34 @@ private fun NewOrImportProjectDialog(
             modifier = Modifier
               .weight(1f)
               .clip(RoundedCornerShape(6.dp))
-              .background(if (mode == "create") ElectricBlue.copy(alpha = 0.25f) else Color.Transparent)
+              .background(if (mode == "create") MaterialTheme.colorScheme.primary.copy(alpha = 0.25f) else Color.Transparent)
               .clickable { mode = "create" }
               .padding(vertical = 6.dp),
             contentAlignment = Alignment.Center
           ) {
-            Text("Create new", color = if (mode == "create") ElectricBlueGlow else TextMuted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            Text("Create new", color = if (mode == "create") MaterialTheme.colorScheme.primary else AwakiTheme.extra.textMuted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
           }
           Box(
             modifier = Modifier
               .weight(1f)
               .clip(RoundedCornerShape(6.dp))
-              .background(if (mode == "import") ElectricBlue.copy(alpha = 0.25f) else Color.Transparent)
+              .background(if (mode == "import") MaterialTheme.colorScheme.primary.copy(alpha = 0.25f) else Color.Transparent)
               .clickable { mode = "import" }
               .padding(vertical = 6.dp),
             contentAlignment = Alignment.Center
           ) {
-            Text("Folder", color = if (mode == "import") ElectricBlueGlow else TextMuted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            Text("Folder", color = if (mode == "import") MaterialTheme.colorScheme.primary else AwakiTheme.extra.textMuted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
           }
           Box(
             modifier = Modifier
               .weight(1f)
               .clip(RoundedCornerShape(6.dp))
-              .background(if (mode == "zip") ElectricBlue.copy(alpha = 0.25f) else Color.Transparent)
+              .background(if (mode == "zip") MaterialTheme.colorScheme.primary.copy(alpha = 0.25f) else Color.Transparent)
               .clickable { mode = "zip" }
               .padding(vertical = 6.dp),
             contentAlignment = Alignment.Center
           ) {
-            Text(".zip", color = if (mode == "zip") ElectricBlueGlow else TextMuted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            Text(".zip", color = if (mode == "zip") MaterialTheme.colorScheme.primary else AwakiTheme.extra.textMuted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
           }
         }
 
@@ -1616,7 +1621,7 @@ private fun NewOrImportProjectDialog(
           )
           Text(
             "The project lives in the app's Linux workspace (~/projects/<name>), giving tools like git full Linux compatibility. To work on an existing folder elsewhere, use the Import tab — changes can be synced back to it.",
-            color = TextMuted,
+            color = AwakiTheme.extra.textMuted,
             fontSize = 9.sp,
             lineHeight = 13.sp
           )
@@ -1637,7 +1642,7 @@ private fun NewOrImportProjectDialog(
           }
           Button(
             onClick = { folderPicker.launch(null) },
-            colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
+            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
             modifier = Modifier.fillMaxWidth().testTag("btn_pick_folder")
           ) {
             Icon(Icons.Outlined.FolderOpen, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -1649,12 +1654,12 @@ private fun NewOrImportProjectDialog(
               modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(6.dp))
-                .background(DarkBackground)
+                .background(MaterialTheme.colorScheme.background)
                 .padding(horizontal = 8.dp, vertical = 6.dp)
             ) {
               Text(
                 importPath,
-                color = TerminalGreen,
+                color = AwakiTheme.extra.success,
                 fontSize = 10.sp,
                 fontFamily = FontFamily.Monospace,
                 maxLines = 2,
@@ -1672,7 +1677,7 @@ private fun NewOrImportProjectDialog(
           )
           Text(
             "Browse the phone's storage and pick the project folder. Its contents are copied into the app's Linux workspace (~/projects) so git, builds and terminals work with full Linux compatibility. Changes can be saved back to the original folder — manually or automatically.",
-            color = TextMuted,
+            color = AwakiTheme.extra.textMuted,
             fontSize = 9.sp,
             lineHeight = 13.sp
           )
@@ -1687,7 +1692,7 @@ private fun NewOrImportProjectDialog(
           }
           Button(
             onClick = { zipPicker.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream")) },
-            colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
+            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
             modifier = Modifier.fillMaxWidth().testTag("btn_pick_zip")
           ) {
             Icon(Icons.Outlined.FolderZip, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -1697,7 +1702,7 @@ private fun NewOrImportProjectDialog(
           if (zipUri != null) {
             Text(
               "Archive selected — give it a name and import.",
-              color = TerminalGreen,
+              color = AwakiTheme.extra.success,
               fontSize = 10.sp
             )
           }
@@ -1711,14 +1716,14 @@ private fun NewOrImportProjectDialog(
           )
           Text(
             "The archive is extracted in the app's Linux workspace. If it contains a single top-level folder, that becomes the project root; otherwise the archive root is used.",
-            color = TextMuted,
+            color = AwakiTheme.extra.textMuted,
             fontSize = 9.sp,
             lineHeight = 13.sp
           )
         }
 
         error?.let {
-          Text(it, color = DangerRed, fontSize = 11.sp)
+          Text(it, color = MaterialTheme.colorScheme.error, fontSize = 11.sp)
         }
       }
     },
@@ -1750,7 +1755,7 @@ private fun NewOrImportProjectDialog(
             }
           }
         },
-        colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue)
+        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
       ) {
         Text(
           when (mode) {
@@ -1764,7 +1769,7 @@ private fun NewOrImportProjectDialog(
     },
     dismissButton = {
       TextButton(onClick = onDismiss) {
-        Text("Cancel", color = TextMuted, fontSize = 12.sp)
+        Text("Cancel", color = AwakiTheme.extra.textMuted, fontSize = 12.sp)
       }
     }
   )
@@ -1776,15 +1781,16 @@ private fun ProjectActionTile(
   icon: androidx.compose.ui.graphics.vector.ImageVector,
   modifier: Modifier = Modifier,
   enabled: Boolean = true,
-  tint: Color = ElectricBlueGlow,
+  tint: Color = Color.Unspecified,
   onClick: () -> Unit
 ) {
+  val tileTint = if (tint == Color.Unspecified) MaterialTheme.colorScheme.primary else tint
   Box(
     modifier = modifier
       .height(54.dp)
       .clip(RoundedCornerShape(8.dp))
-      .background(DarkSurfaceElevated)
-      .border(1.dp, DarkBorder, RoundedCornerShape(8.dp))
+      .background(MaterialTheme.colorScheme.surfaceContainer)
+      .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp))
       .clickable(enabled = enabled, onClick = onClick)
       .padding(8.dp),
     contentAlignment = Alignment.Center
@@ -1793,13 +1799,13 @@ private fun ProjectActionTile(
       Icon(
         imageVector = icon,
         contentDescription = label,
-        tint = tint,
+        tint = tileTint,
         modifier = Modifier.size(16.dp)
       )
       Spacer(modifier = Modifier.width(6.dp))
       Text(
         text = label,
-        color = if (enabled) TextPrimary else TextMuted,
+        color = if (enabled) MaterialTheme.colorScheme.onSurface else AwakiTheme.extra.textMuted,
         fontSize = 13.sp,
         fontWeight = FontWeight.Medium
       )

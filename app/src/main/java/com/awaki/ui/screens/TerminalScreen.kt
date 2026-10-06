@@ -14,6 +14,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -33,6 +34,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.awaki.core.model.AppDestination
 import com.awaki.ui.WorkspaceViewModel
 import com.awaki.ui.theme.*
+import com.awaki.ui.theme.AwakiTheme
 import com.awaki.workspace.terminal.LinuxEnvironmentState
 import com.termux.terminal.TerminalSession
 import com.termux.terminal.TerminalSessionClient
@@ -141,7 +143,7 @@ fun TerminalScreen(
   Column(
     modifier = modifier
       .fillMaxSize()
-      .background(DarkBackground)
+      .background(MaterialTheme.colorScheme.background)
       .imePadding()
   ) {
     TerminalHeader(
@@ -166,10 +168,10 @@ fun TerminalScreen(
             verticalArrangement = Arrangement.spacedBy(10.dp, alignment = Alignment.CenterVertically),
             horizontalAlignment = Alignment.CenterHorizontally
           ) {
-            Text("Starting shell…", color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            Text("Starting shell…", color = MaterialTheme.colorScheme.onSurface, fontSize = 15.sp, fontWeight = FontWeight.Bold)
             Text(
               "If this message stays visible, the shell could not be started. Check logcat for tag \"Awaki-Terminal\".",
-              color = TextSecondary, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
+              color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp, fontFamily = FontFamily.Monospace,
               textAlign = androidx.compose.ui.text.style.TextAlign.Center
             )
           }
@@ -228,11 +230,11 @@ fun TerminalScreen(
     AlertDialog(
       onDismissRequest = { showNewSessionDialog = false },
       title = {
-        Text("New Terminal Session", color = TextPrimary, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+        Text("New Terminal Session", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold, fontSize = 16.sp)
       },
       text = {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-          Text("Open another shell inside the Debian environment:", color = TextSecondary, fontSize = 12.sp)
+          Text("Open another shell inside the Debian environment:", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
           Row(
             modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -241,12 +243,12 @@ fun TerminalScreen(
               Surface(
                 onClick = { newSessionNameInput = preset },
                 shape = RoundedCornerShape(6.dp),
-                color = if (newSessionNameInput == preset) ElectricBlue.copy(alpha = 0.2f) else DarkSurfaceElevated,
-                border = BorderStroke(1.dp, if (newSessionNameInput == preset) ElectricBlue else DarkBorderSubtle)
+                color = if (newSessionNameInput == preset) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f) else MaterialTheme.colorScheme.surfaceContainer,
+                border = BorderStroke(1.dp, if (newSessionNameInput == preset) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant)
               ) {
                 Text(
                   text = preset,
-                  color = if (newSessionNameInput == preset) ElectricBlueGlow else TextPrimary,
+                  color = if (newSessionNameInput == preset) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                   fontSize = 11.sp,
                   fontFamily = FontFamily.Monospace,
                   modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
@@ -257,14 +259,14 @@ fun TerminalScreen(
           OutlinedTextField(
             value = newSessionNameInput,
             onValueChange = { newSessionNameInput = it },
-            placeholder = { Text("e.g. bash-2, build, test", color = TextMuted, fontSize = 12.sp) },
+            placeholder = { Text("e.g. bash-2, build, test", color = AwakiTheme.extra.textMuted, fontSize = 12.sp) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth().testTag("input_new_session_name"),
             colors = OutlinedTextFieldDefaults.colors(
-              focusedBorderColor = ElectricBlue,
-              unfocusedBorderColor = DarkBorderSubtle,
-              focusedTextColor = TextPrimary,
-              unfocusedTextColor = TextPrimary
+              focusedBorderColor = MaterialTheme.colorScheme.primary,
+              unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+              focusedTextColor = MaterialTheme.colorScheme.onSurface,
+              unfocusedTextColor = MaterialTheme.colorScheme.onSurface
             )
           )
         }
@@ -277,18 +279,18 @@ fun TerminalScreen(
             newSessionNameInput = ""
             showNewSessionDialog = false
           },
-          colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
+          colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
           modifier = Modifier.testTag("btn_confirm_new_session")
         ) {
-          Text("Create Session", color = Color.White)
+          Text("Create Session", color = MaterialTheme.colorScheme.onPrimary)
         }
       },
       dismissButton = {
         TextButton(onClick = { showNewSessionDialog = false }) {
-          Text("Cancel", color = TextMuted)
+          Text("Cancel", color = AwakiTheme.extra.textMuted)
         }
       },
-      containerColor = DarkSurface,
+      containerColor = MaterialTheme.colorScheme.surface,
       shape = RoundedCornerShape(12.dp)
     )
   }
@@ -299,8 +301,8 @@ private fun TerminalHeader(workspaceLabel: String, onNewSession: () -> Unit) {
   val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
   Surface(
     modifier = Modifier.fillMaxWidth(),
-    color = DarkSurface,
-    border = BorderStroke(1.dp, DarkBorderSubtle)
+    color = MaterialTheme.colorScheme.surface,
+    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
   ) {
     Row(
       modifier = Modifier
@@ -315,12 +317,12 @@ private fun TerminalHeader(workspaceLabel: String, onNewSession: () -> Unit) {
             modifier = Modifier
               .size(8.dp)
               .clip(CircleShape)
-              .background(TerminalGreen)
+              .background(AwakiTheme.extra.success)
           )
           Spacer(modifier = Modifier.width(6.dp))
           Text(
             text = "Ubuntu Linux",
-            color = TextPrimary,
+            color = MaterialTheme.colorScheme.onSurface,
             fontSize = 13.sp,
             fontWeight = FontWeight.Bold
           )
@@ -328,7 +330,7 @@ private fun TerminalHeader(workspaceLabel: String, onNewSession: () -> Unit) {
         Row(verticalAlignment = Alignment.CenterVertically) {
           Text(
             text = workspaceLabel,
-            color = TextMuted,
+            color = AwakiTheme.extra.textMuted,
             fontSize = 10.sp,
             fontFamily = FontFamily.Monospace,
             maxLines = 1,
@@ -338,7 +340,7 @@ private fun TerminalHeader(workspaceLabel: String, onNewSession: () -> Unit) {
           Icon(
             Icons.Outlined.ContentCopy,
             contentDescription = "Copy path",
-            tint = TextMuted,
+            tint = AwakiTheme.extra.textMuted,
             modifier = Modifier
               .padding(start = 4.dp)
               .size(11.dp)
@@ -352,10 +354,10 @@ private fun TerminalHeader(workspaceLabel: String, onNewSession: () -> Unit) {
         modifier = Modifier
           .size(28.dp)
           .clip(RoundedCornerShape(6.dp))
-          .background(DarkSurfaceElevated)
+          .background(MaterialTheme.colorScheme.surfaceContainer)
           .testTag("btn_new_terminal_session")
       ) {
-        Icon(Icons.Default.Add, contentDescription = "New Session", tint = ElectricBlueGlow, modifier = Modifier.size(16.dp))
+        Icon(Icons.Default.Add, contentDescription = "New Session", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
       }
     }
   }
@@ -382,8 +384,8 @@ private fun SessionTabs(
       Box(
         modifier = Modifier
           .clip(RoundedCornerShape(6.dp))
-          .background(if (isSelected) DarkSurfaceHighlight else DarkBackground)
-          .border(1.dp, if (isSelected) ElectricBlue else DarkBorderSubtle, RoundedCornerShape(6.dp))
+          .background(if (isSelected) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.background)
+          .border(1.dp, if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(6.dp))
           .clickable { onSelect(s.id) }
           .padding(horizontal = 8.dp, vertical = 4.dp)
           .testTag("tab_session_${s.name}")
@@ -393,12 +395,12 @@ private fun SessionTabs(
             modifier = Modifier
               .size(6.dp)
               .clip(CircleShape)
-              .background(if (isSelected) TerminalGreen else TextMuted)
+              .background(if (isSelected) AwakiTheme.extra.success else AwakiTheme.extra.textMuted)
           )
           Spacer(modifier = Modifier.width(6.dp))
           Text(
             text = s.name,
-            color = if (isSelected) TextPrimary else TextSecondary,
+            color = if (isSelected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
             fontSize = 11.sp,
             fontFamily = FontFamily.Monospace,
             fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
@@ -407,7 +409,7 @@ private fun SessionTabs(
           Icon(
             imageVector = Icons.Default.Close,
             contentDescription = "Close session",
-            tint = if (isSelected) TextSecondary else TextMuted,
+            tint = if (isSelected) MaterialTheme.colorScheme.onSurfaceVariant else AwakiTheme.extra.textMuted,
             modifier = Modifier
               .size(13.dp)
               .clip(CircleShape)
@@ -421,16 +423,16 @@ private fun SessionTabs(
     Surface(
       onClick = onNewSession,
       shape = RoundedCornerShape(6.dp),
-      color = DarkSurfaceElevated,
-      border = BorderStroke(1.dp, DarkBorderSubtle)
+      color = MaterialTheme.colorScheme.surfaceContainer,
+      border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
     ) {
       Row(
         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically
       ) {
-        Icon(Icons.Default.Add, contentDescription = "New Tab", tint = TextSecondary, modifier = Modifier.size(12.dp))
+        Icon(Icons.Default.Add, contentDescription = "New Tab", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(12.dp))
         Spacer(modifier = Modifier.width(4.dp))
-        Text("New Tab", color = TextSecondary, fontSize = 11.sp)
+        Text("New Tab", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
       }
     }
   }
@@ -441,7 +443,7 @@ private fun SessionTabs(
 private fun BootstrapPane(state: LinuxEnvironmentState, onRetry: () -> Unit, modifier: Modifier = Modifier) {
   Column(
     modifier = modifier
-      .background(DarkBackground)
+      .background(MaterialTheme.colorScheme.background)
       .padding(24.dp),
     verticalArrangement = Arrangement.spacedBy(14.dp, alignment = Alignment.CenterVertically),
     horizontalAlignment = Alignment.CenterHorizontally
@@ -475,24 +477,24 @@ private fun BootstrapPane(state: LinuxEnvironmentState, onRetry: () -> Unit, mod
             imageVector = if (index < stageIndex) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
             contentDescription = null,
             tint = when {
-              index < stageIndex -> TerminalGreen
-              index == stageIndex && state !is LinuxEnvironmentState.Failed -> ElectricBlueGlow
-              else -> TextMuted
+              index < stageIndex -> AwakiTheme.extra.success
+              index == stageIndex && state !is LinuxEnvironmentState.Failed -> MaterialTheme.colorScheme.primary
+              else -> AwakiTheme.extra.textMuted
             },
             modifier = Modifier.size(14.dp)
           )
           Spacer(modifier = Modifier.width(3.dp))
-          Text(label, color = if (index == stageIndex) TextPrimary else TextMuted, fontSize = 11.sp)
+          Text(label, color = if (index == stageIndex) MaterialTheme.colorScheme.onSurface else AwakiTheme.extra.textMuted, fontSize = 11.sp)
         }
-        if (index < stages.lastIndex) Text("—", color = TextMuted, fontSize = 11.sp)
+        if (index < stages.lastIndex) Text("—", color = AwakiTheme.extra.textMuted, fontSize = 11.sp)
       }
     }
 
-    Text(title, color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+    Text(title, color = MaterialTheme.colorScheme.onSurface, fontSize = 16.sp, fontWeight = FontWeight.Bold, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
     if (detail.isNotBlank()) {
       Text(
         detail,
-        color = TextSecondary,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
         fontSize = 11.sp,
         fontFamily = FontFamily.Monospace,
         maxLines = 3,
@@ -506,22 +508,22 @@ private fun BootstrapPane(state: LinuxEnvironmentState, onRetry: () -> Unit, mod
           if (state.totalBytes > 0) (state.bytesChecked.toFloat() / state.totalBytes).coerceIn(0f, 1f) else 0f
         },
         modifier = Modifier.fillMaxWidth(),
-        color = ElectricBlue
+        color = MaterialTheme.colorScheme.primary
       )
       is LinuxEnvironmentState.Extracting, is LinuxEnvironmentState.Configuring -> LinearProgressIndicator(
         modifier = Modifier.fillMaxWidth(),
-        color = ElectricBlue
+        color = MaterialTheme.colorScheme.primary
       )
-      is LinuxEnvironmentState.Failed -> Button(onClick = onRetry, colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue)) {
-        Icon(Icons.Default.Refresh, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+      is LinuxEnvironmentState.Failed -> Button(onClick = onRetry, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)) {
+        Icon(Icons.Default.Refresh, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(16.dp))
         Spacer(modifier = Modifier.width(6.dp))
-        Text("Retry", color = Color.White)
+        Text("Retry", color = MaterialTheme.colorScheme.onPrimary)
       }
       else -> Unit
     }
     Text(
       "Real apt, real dpkg, real shell — nothing is simulated.",
-      color = TextMuted,
+      color = AwakiTheme.extra.textMuted,
       fontSize = 10.sp,
       fontFamily = FontFamily.Monospace
     )
@@ -637,7 +639,7 @@ private fun TerminalExtraKeysGrid(
   Column(
     modifier = modifier
       .fillMaxWidth()
-      .background(DarkSurface)
+      .background(MaterialTheme.colorScheme.surface)
       .padding(horizontal = 4.dp, vertical = 4.dp),
     verticalArrangement = Arrangement.spacedBy(4.dp)
   ) {
@@ -657,8 +659,8 @@ private fun TerminalExtraKeysGrid(
               .weight(1f)
               .fillMaxHeight()
               .clip(RoundedCornerShape(6.dp))
-              .background(if (isActive) ElectricBlue.copy(alpha = 0.3f) else DarkBackground)
-              .border(1.dp, if (isActive) ElectricBlue else DarkBorderSubtle, RoundedCornerShape(6.dp))
+              .background(if (isActive) MaterialTheme.colorScheme.primary.copy(alpha = 0.3f) else MaterialTheme.colorScheme.background)
+              .border(1.dp, if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(6.dp))
               .clickable { 
                 if (isCtrlKey) {
                   ctrlActive = !ctrlActive
@@ -675,7 +677,7 @@ private fun TerminalExtraKeysGrid(
           ) {
             Text(
               text = key,
-              color = TextCode,
+              color = AwakiTheme.extra.textCode,
               fontSize = 11.sp,
               fontFamily = FontFamily.Monospace,
               fontWeight = FontWeight.Medium

@@ -7,6 +7,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.OffsetMapping
 import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.input.VisualTransformation
+import com.awaki.ui.theme.DarkOnWarning
+import com.awaki.ui.theme.DarkWarning
 
 /**
  * VisualTransformation that applies real-time programming-language-aware
@@ -43,8 +45,8 @@ class SyntaxHighlightTransformation(
       val end = (range.last + 1).coerceIn(0, textLen)
       if (start < end) {
         val isCurrent = idx == activeMatchIndex
-        val matchBg = if (isCurrent) Color(0xFFF59E0B) else Color(0x66F59E0B)
-        val matchFg = if (isCurrent) Color(0xFF1E1E2E) else Color.White
+        val matchBg = if (isCurrent) DarkWarning else DarkWarning.copy(alpha = 0.4f)
+        val matchFg = if (isCurrent) DarkOnWarning else Color.White
         builder.addStyle(
           SpanStyle(
             background = matchBg,

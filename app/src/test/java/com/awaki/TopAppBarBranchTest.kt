@@ -3,6 +3,7 @@ package com.awaki
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -18,7 +19,6 @@ import com.awaki.data.model.Project
 import com.awaki.data.model.ProjectKind
 import com.awaki.ui.components.AgentIDETopAppBar
 import com.awaki.ui.theme.AwakiTheme
-import com.awaki.ui.theme.DarkBackground
 import com.awaki.workspace.git.GitBranch
 import com.github.takahirom.roborazzi.RobolectricDeviceQualifiers
 import com.github.takahirom.roborazzi.captureRoboImage
@@ -125,7 +125,7 @@ class TopAppBarBranchTest {
   fun `branch menu renders under the header`() {
     composeTestRule.setContent {
       AwakiTheme {
-        Box(modifier = Modifier.fillMaxSize().background(DarkBackground)) {
+        Box(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
           AgentIDETopAppBar(
             activeProject = project,
             currentDestination = AppDestination.AGENT,

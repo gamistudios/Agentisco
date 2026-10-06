@@ -30,6 +30,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -39,7 +40,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -63,6 +63,7 @@ import com.awaki.local.model.LocalModelProgress
 import com.awaki.local.model.LocalRuntimeSettings
 import com.awaki.ui.WorkspaceViewModel
 import com.awaki.ui.theme.*
+import com.awaki.ui.theme.AwakiTheme
 
 /**
  * Management surface for models that run on this device.
@@ -112,14 +113,14 @@ fun LocalModelsSection(
       verticalAlignment = Alignment.CenterVertically
     ) {
       Column(modifier = Modifier.weight(1f)) {
-        Text("On-device models", color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        Text("On-device models", color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
         Text(
           text = if (models.isEmpty()) {
             "None available to add"
           } else {
             "$installedCount of ${models.size} installed · ${formatModelBytes(bytesOnDisk)} on disk"
           },
-          color = TextMuted,
+          color = AwakiTheme.extra.textMuted,
           fontSize = 11.sp,
           maxLines = 1,
           overflow = TextOverflow.Ellipsis
@@ -130,8 +131,8 @@ fun LocalModelsSection(
         Surface(
           onClick = { importPicker.launch(arrayOf("*/*")) },
           shape = RoundedCornerShape(8.dp),
-          color = DarkSurfaceElevated,
-          border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder),
+          color = MaterialTheme.colorScheme.surfaceContainer,
+          border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
           modifier = Modifier.testTag("btn_import_local_model")
         ) {
           Row(
@@ -141,27 +142,27 @@ fun LocalModelsSection(
             Icon(
               Icons.Outlined.FolderOpen,
               contentDescription = null,
-              tint = TextSecondary,
+              tint = MaterialTheme.colorScheme.onSurfaceVariant,
               modifier = Modifier.size(14.dp)
             )
             Spacer(modifier = Modifier.width(4.dp))
-            Text("Import", color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+            Text("Import", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp, fontWeight = FontWeight.Medium)
           }
         }
         Surface(
           onClick = { addOpen = true },
           shape = RoundedCornerShape(8.dp),
-          color = ElectricBlue.copy(alpha = 0.15f),
-          border = androidx.compose.foundation.BorderStroke(1.dp, ElectricBlue),
+          color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+          border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
           modifier = Modifier.testTag("btn_add_local_model")
         ) {
           Row(
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
             verticalAlignment = Alignment.CenterVertically
           ) {
-            Icon(Icons.Default.Add, contentDescription = null, tint = ElectricBlueGlow, modifier = Modifier.size(14.dp))
+            Icon(Icons.Default.Add, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(14.dp))
             Spacer(modifier = Modifier.width(4.dp))
-            Text("Add model", color = ElectricBlueGlow, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+            Text("Add model", color = MaterialTheme.colorScheme.primary, fontSize = 11.sp, fontWeight = FontWeight.Medium)
           }
         }
       }
@@ -176,7 +177,7 @@ fun LocalModelsSection(
 
     importError?.let {
       Spacer(modifier = Modifier.height(6.dp))
-      Text(it, color = DangerRed.copy(alpha = 0.9f), fontSize = 10.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+      Text(it, color = MaterialTheme.colorScheme.error.copy(alpha = 0.9f), fontSize = 10.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
     }
 
     Spacer(modifier = Modifier.height(10.dp))
@@ -215,7 +216,7 @@ fun LocalModelsSection(
           1 -> "1 model ready to run on this device"
           else -> "$installedCount models ready to run on this device"
         },
-        color = TextMuted,
+        color = AwakiTheme.extra.textMuted,
         fontSize = 10.sp,
         maxLines = 2,
         overflow = TextOverflow.Ellipsis
@@ -261,8 +262,8 @@ fun LocalModelsSection(
   confirmDelete?.let { model ->
     AlertDialog(
       onDismissRequest = { confirmDelete = null },
-      containerColor = DarkSurface,
-      title = { Text("Delete \"${model.name}\"?", color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold) },
+      containerColor = MaterialTheme.colorScheme.surface,
+      title = { Text("Delete \"${model.name}\"?", color = MaterialTheme.colorScheme.onSurface, fontSize = 16.sp, fontWeight = FontWeight.Bold) },
       text = {
         Text(
           text = if (model.builtIn) {
@@ -270,7 +271,7 @@ fun LocalModelsSection(
           } else {
             "Removes ${formatModelBytes(model.sizeBytes)} of model data and forgets this model. Add it again with its URL to reinstall."
           },
-          color = TextSecondary,
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
           fontSize = 12.sp
         )
       },
@@ -281,12 +282,12 @@ fun LocalModelsSection(
             if (!model.builtIn) viewModel.forgetLocalModel(model.id)
             confirmDelete = null
           },
-          colors = ButtonDefaults.buttonColors(containerColor = DangerRed),
+          colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
           modifier = Modifier.testTag("btn_confirm_local_delete")
-        ) { Text("Delete", color = Color.White, fontSize = 12.sp) }
+        ) { Text("Delete", color = MaterialTheme.colorScheme.onError, fontSize = 12.sp) }
       },
       dismissButton = {
-        TextButton(onClick = { confirmDelete = null }) { Text("Cancel", color = TextMuted, fontSize = 12.sp) }
+        TextButton(onClick = { confirmDelete = null }) { Text("Cancel", color = AwakiTheme.extra.textMuted, fontSize = 12.sp) }
       }
     )
   }
@@ -325,9 +326,9 @@ internal fun LocalModelEnvironmentRow(
           else -> "No Python environment yet"
         },
         color = when {
-          failed != null -> DangerRed
-          ready -> TerminalGreen
-          else -> TextSecondary
+          failed != null -> MaterialTheme.colorScheme.error
+          ready -> AwakiTheme.extra.success
+          else -> MaterialTheme.colorScheme.onSurfaceVariant
         },
         fontSize = 11.sp,
         fontWeight = FontWeight.Medium,
@@ -335,7 +336,7 @@ internal fun LocalModelEnvironmentRow(
         overflow = TextOverflow.Ellipsis
       )
       state.log.lastOrNull()?.let {
-        Text(it, color = TextMuted, fontSize = 9.sp, fontFamily = FontFamily.Monospace, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(it, color = AwakiTheme.extra.textMuted, fontSize = 9.sp, fontFamily = FontFamily.Monospace, maxLines = 1, overflow = TextOverflow.Ellipsis)
       }
     }
     if (installing != null) {
@@ -343,7 +344,7 @@ internal fun LocalModelEnvironmentRow(
     } else {
       MiniAction(
         label = if (ready) "Rebuild" else "Setup environment",
-        tint = if (ready) TextSecondary else ElectricBlueGlow,
+        tint = if (ready) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary,
         modifier = Modifier.testTag("btn_setup_local_env")
       ) { onSetup() }
     }
@@ -374,8 +375,8 @@ internal fun LocalModelCard(
     modifier = Modifier
       .fillMaxWidth()
       .clip(RoundedCornerShape(12.dp))
-      .background(DarkSurface)
-      .border(1.dp, DarkBorder, RoundedCornerShape(12.dp))
+      .background(MaterialTheme.colorScheme.surface)
+      .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(12.dp))
       .padding(12.dp)
       .testTag("local_model_${model.id}")
   ) {
@@ -394,7 +395,7 @@ internal fun LocalModelCard(
         Spacer(modifier = Modifier.width(6.dp))
         Text(
           model.name,
-          color = TextPrimary,
+          color = MaterialTheme.colorScheme.onSurface,
           fontSize = 13.sp,
           fontWeight = FontWeight.SemiBold,
           maxLines = 1,
@@ -417,7 +418,7 @@ internal fun LocalModelCard(
       Spacer(modifier = Modifier.height(3.dp))
       Text(
         model.description,
-        color = TextSecondary,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
         fontSize = 11.sp,
         maxLines = 2,
         overflow = TextOverflow.Ellipsis
@@ -427,7 +428,7 @@ internal fun LocalModelCard(
     Spacer(modifier = Modifier.height(4.dp))
     Text(
       localModelSummary(model, resumable),
-      color = TextMuted,
+      color = AwakiTheme.extra.textMuted,
       fontSize = 10.sp,
       fontFamily = FontFamily.Monospace
     )
@@ -440,20 +441,20 @@ internal fun LocalModelCard(
             .weight(1f)
             .height(3.dp)
             .clip(RoundedCornerShape(2.dp))
-            .background(DarkSurfaceHighlight)
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
         ) {
           Box(
             modifier = Modifier
               .fillMaxWidth(progress.fraction)
               .height(3.dp)
               .clip(RoundedCornerShape(2.dp))
-              .background(ElectricBlue)
+              .background(MaterialTheme.colorScheme.primary)
           )
         }
         Spacer(modifier = Modifier.width(8.dp))
         Text(
           transferLabel(progress),
-          color = TextSecondary,
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
           fontSize = 10.sp,
           fontFamily = FontFamily.Monospace,
           maxLines = 1
@@ -465,7 +466,7 @@ internal fun LocalModelCard(
     // row that failed to load has nothing else to say about itself.
     (state?.error ?: loadError)?.let { error ->
       Spacer(modifier = Modifier.height(6.dp))
-      Text(error, color = DangerRed.copy(alpha = 0.9f), fontSize = 10.sp, maxLines = 3)
+      Text(error, color = MaterialTheme.colorScheme.error.copy(alpha = 0.9f), fontSize = 10.sp, maxLines = 3)
     }
 
     Spacer(modifier = Modifier.height(8.dp))
@@ -477,7 +478,7 @@ internal fun LocalModelCard(
       when {
         state?.isBusy == true -> MiniAction(
           label = "Cancel",
-          tint = DangerRed,
+          tint = MaterialTheme.colorScheme.error,
           modifier = Modifier.testTag("btn_local_cancel_${model.id}"),
           onClick = onCancel
         )
@@ -486,13 +487,13 @@ internal fun LocalModelCard(
         // says so by offering no such button.
         !model.isImported && (status == LocalModelInstallStatus.NOT_INSTALLED || status == LocalModelInstallStatus.FAILED) -> MiniAction(
           label = if (resumable) "Resume" else "Download",
-          tint = ElectricBlueGlow,
+          tint = MaterialTheme.colorScheme.primary,
           modifier = Modifier.testTag("btn_local_install_${model.id}"),
           onClick = onInstall
         )
         !model.isImported && status == LocalModelInstallStatus.UPDATE_AVAILABLE -> MiniAction(
           label = "Update",
-          tint = ElectricBlueGlow,
+          tint = MaterialTheme.colorScheme.primary,
           modifier = Modifier.testTag("btn_local_update_${model.id}"),
           onClick = onInstall
         )
@@ -501,18 +502,18 @@ internal fun LocalModelCard(
         loading -> Box(
           modifier = Modifier
             .clip(RoundedCornerShape(6.dp))
-            .background(DarkSurfaceElevated)
-            .border(1.dp, DarkBorderSubtle, RoundedCornerShape(6.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainer)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(6.dp))
             .padding(horizontal = 10.dp, vertical = 4.dp)
             .testTag("local_model_loading_${model.id}")
         ) {
-          Text("Loading…", color = WarningAmber, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+          Text("Loading…", color = AwakiTheme.extra.warning, fontSize = 11.sp, fontWeight = FontWeight.Medium)
         }
         // Once the bytes are in memory there is nothing left for this button to do, and a
         // second press would only be a wait with no answer at the end of it.
         model.installed && !selected && !resident -> MiniAction(
           label = "Load",
-          tint = ElectricBlueGlow,
+          tint = MaterialTheme.colorScheme.primary,
           modifier = Modifier.testTag("btn_local_load_${model.id}"),
           onClick = onLoad
         )
@@ -538,7 +539,7 @@ internal fun LocalModelCard(
       if (model.installed) {
         MiniAction(
           label = "Delete",
-          tint = DangerRed,
+          tint = MaterialTheme.colorScheme.error,
           modifier = Modifier.testTag("btn_local_delete_${model.id}"),
           onClick = onDelete
         )
@@ -559,20 +560,21 @@ private fun QuantTag(text: String) {
   Box(
     modifier = Modifier
       .clip(RoundedCornerShape(4.dp))
-      .background(DarkSurfaceElevated)
+      .background(MaterialTheme.colorScheme.surfaceContainer)
       .padding(horizontal = 5.dp, vertical = 1.dp)
   ) {
-    Text(text, color = TextMuted, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
+    Text(text, color = AwakiTheme.extra.textMuted, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
   }
 }
 
+@Composable
 private fun statusColor(status: LocalModelInstallStatus): Color = when (status) {
-  LocalModelInstallStatus.INSTALLED -> TerminalGreen
-  LocalModelInstallStatus.UPDATE_AVAILABLE -> ElectricBlue
+  LocalModelInstallStatus.INSTALLED -> AwakiTheme.extra.success
+  LocalModelInstallStatus.UPDATE_AVAILABLE -> MaterialTheme.colorScheme.primary
   LocalModelInstallStatus.DOWNLOADING, LocalModelInstallStatus.IMPORTING,
-  LocalModelInstallStatus.INSTALLING -> WarningAmber
-  LocalModelInstallStatus.FAILED -> DangerRed
-  LocalModelInstallStatus.NOT_INSTALLED -> TextMuted
+  LocalModelInstallStatus.INSTALLING -> AwakiTheme.extra.warning
+  LocalModelInstallStatus.FAILED -> MaterialTheme.colorScheme.error
+  LocalModelInstallStatus.NOT_INSTALLED -> AwakiTheme.extra.textMuted
 }
 
 private fun statusLabel(
@@ -649,8 +651,8 @@ private fun AddLocalModelDialog(
 
   AlertDialog(
     onDismissRequest = { if (!pending) onDismiss() },
-    containerColor = DarkSurface,
-    title = { Text("Add a model by URL", color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold) },
+    containerColor = MaterialTheme.colorScheme.surface,
+    title = { Text("Add a model by URL", color = MaterialTheme.colorScheme.onSurface, fontSize = 16.sp, fontWeight = FontWeight.Bold) },
     text = {
       Column(
         modifier = Modifier.verticalScroll(rememberScrollState()),
@@ -690,10 +692,10 @@ private fun AddLocalModelDialog(
         )
         Text(
           "The bytes come from wherever this URL points. Awaki checks the GGUF header, the size and the digest the source publishes, and keeps nothing that does not verify.",
-          color = TextMuted,
+          color = AwakiTheme.extra.textMuted,
           fontSize = 9.sp
         )
-        error?.let { Text(it, color = DangerRed, fontSize = 10.sp) }
+        error?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 10.sp) }
       }
     },
     confirmButton = {
@@ -707,12 +709,12 @@ private fun AddLocalModelDialog(
           }
         },
         enabled = name.isNotBlank() && url.isNotBlank() && !pending,
-        colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
+        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
         modifier = Modifier.testTag("btn_save_local_model")
       ) { Text(if (pending) "Checking…" else "Add", fontSize = 12.sp) }
     },
     dismissButton = {
-      TextButton(onClick = onDismiss) { Text("Cancel", color = TextMuted, fontSize = 12.sp) }
+      TextButton(onClick = onDismiss) { Text("Cancel", color = AwakiTheme.extra.textMuted, fontSize = 12.sp) }
     }
   )
 }
@@ -727,8 +729,8 @@ private fun LocalModelInfoDialog(
 ) {
   AlertDialog(
     onDismissRequest = onDismiss,
-    containerColor = DarkSurface,
-    title = { Text(model.name, color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold) },
+    containerColor = MaterialTheme.colorScheme.surface,
+    title = { Text(model.name, color = MaterialTheme.colorScheme.onSurface, fontSize = 16.sp, fontWeight = FontWeight.Bold) },
     text = {
       Column(
         modifier = Modifier.verticalScroll(rememberScrollState()),
@@ -744,7 +746,7 @@ private fun LocalModelInfoDialog(
           meta.publishedName?.let { InfoRow("Published as", it) }
         } ?: Text(
           if (model.installed) "The file could not be read — reinstall it." else "Not downloaded yet.",
-          color = TextMuted,
+          color = AwakiTheme.extra.textMuted,
           fontSize = 10.sp
         )
         InfoRow("Size", if (model.sizeBytes > 0L) formatModelBytes(model.sizeBytes) else "unknown")
@@ -766,7 +768,7 @@ private fun LocalModelInfoDialog(
     confirmButton = {
       Button(
         onClick = onDismiss,
-        colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
+        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
         modifier = Modifier.testTag("btn_close_local_info")
       ) { Text("Close", fontSize = 12.sp) }
     }
@@ -776,10 +778,10 @@ private fun LocalModelInfoDialog(
 @Composable
 private fun InfoRow(label: String, value: String) {
   Row(modifier = Modifier.fillMaxWidth()) {
-    Text(label, color = TextMuted, fontSize = 10.sp, modifier = Modifier.width(110.dp))
+    Text(label, color = AwakiTheme.extra.textMuted, fontSize = 10.sp, modifier = Modifier.width(110.dp))
     Text(
       value,
-      color = TextSecondary,
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
       fontSize = 10.sp,
       fontFamily = FontFamily.Monospace,
       modifier = Modifier.weight(1f)
@@ -799,17 +801,17 @@ private fun LocalModelSettingsDialog(
 
   AlertDialog(
     onDismissRequest = onDismiss,
-    containerColor = DarkSurface,
-    title = { Text("${model.name} settings", color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold) },
+    containerColor = MaterialTheme.colorScheme.surface,
+    title = { Text("${model.name} settings", color = MaterialTheme.colorScheme.onSurface, fontSize = 16.sp, fontWeight = FontWeight.Bold) },
     text = {
       Column(
         modifier = Modifier.verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(8.dp)
       ) {
-        Text("Runtime", color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+        Text("Runtime", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp, fontWeight = FontWeight.Medium)
         Text(
           "Reloading the model applies these.",
-          color = TextMuted,
+          color = AwakiTheme.extra.textMuted,
           fontSize = 9.sp
         )
         SettingsFieldRow(
@@ -821,10 +823,10 @@ private fun LocalModelSettingsDialog(
             testTag = "input_local_batch")
         )
         contextLimit?.let {
-          Text("This model was trained for $it tokens.", color = TextMuted, fontSize = 9.sp)
+          Text("This model was trained for $it tokens.", color = AwakiTheme.extra.textMuted, fontSize = 9.sp)
         }
 
-        Text("Generation", color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+        Text("Generation", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp, fontWeight = FontWeight.Medium)
         SettingsFieldRow(
           SettingsField("Max tokens", input.maxTokens, { input = input.copy(maxTokens = it) }, "out",
             testTag = "input_local_max_tokens"),
@@ -840,7 +842,7 @@ private fun LocalModelSettingsDialog(
             testTag = "input_local_repeat")
         )
 
-        Text("Instruction", color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+        Text("Instruction", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp, fontWeight = FontWeight.Medium)
         OutlinedTextField(
           value = input.systemInstruction.orEmpty(),
           onValueChange = { input = input.copy(systemInstruction = it) },
@@ -856,7 +858,7 @@ private fun LocalModelSettingsDialog(
             .testTag("input_local_system_instruction")
         )
 
-        parsed.exceptionOrNull()?.message?.let { Text(it, color = DangerRed, fontSize = 10.sp) }
+        parsed.exceptionOrNull()?.message?.let { Text(it, color = MaterialTheme.colorScheme.error, fontSize = 10.sp) }
       }
     },
     confirmButton = {
@@ -864,19 +866,19 @@ private fun LocalModelSettingsDialog(
         Button(
           onClick = { parsed.getOrNull()?.let(onSave) },
           enabled = parsed.isSuccess,
-          colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
+          colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
           modifier = Modifier.testTag("btn_save_local_settings")
         ) { Text("Save", fontSize = 12.sp) }
         if (!model.configuration.isDefault) {
           TextButton(
             onClick = { input = LocalSettingsInput.of(LocalModelConfiguration.Defaults) },
             modifier = Modifier.testTag("btn_reset_local_settings")
-          ) { Text("Reset to defaults", color = TextMuted, fontSize = 11.sp) }
+          ) { Text("Reset to defaults", color = AwakiTheme.extra.textMuted, fontSize = 11.sp) }
         }
       }
     },
     dismissButton = {
-      TextButton(onClick = onDismiss) { Text("Cancel", color = TextMuted, fontSize = 12.sp) }
+      TextButton(onClick = onDismiss) { Text("Cancel", color = AwakiTheme.extra.textMuted, fontSize = 12.sp) }
     }
   )
 }

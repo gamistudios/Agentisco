@@ -20,6 +20,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -35,6 +36,7 @@ import com.awaki.core.model.AppDestination
 import com.awaki.ui.WorkspaceViewModel
 import com.awaki.ui.components.AIProvidersSection
 import com.awaki.ui.theme.*
+import com.awaki.ui.theme.AwakiTheme
 
 /**
  * Dedicated provider-management surface.
@@ -59,7 +61,7 @@ fun AiProvidersScreen(
   LazyColumn(
     modifier = modifier
       .fillMaxSize()
-      .background(DarkBackground)
+      .background(MaterialTheme.colorScheme.background)
       .padding(horizontal = 16.dp),
     verticalArrangement = Arrangement.spacedBy(16.dp)
   ) {
@@ -70,14 +72,14 @@ fun AiProvidersScreen(
           onClick = { onNavigate(AppDestination.SETTINGS) },
           modifier = Modifier.size(32.dp).testTag("btn_ai_providers_back")
         ) {
-          Icon(Icons.Default.ChevronLeft, contentDescription = "Back to settings", tint = TextMuted)
+          Icon(Icons.Default.ChevronLeft, contentDescription = "Back to settings", tint = AwakiTheme.extra.textMuted)
         }
         Spacer(modifier = Modifier.width(6.dp))
         Column {
-          Text("AI Providers & Models", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+          Text("AI Providers & Models", color = MaterialTheme.colorScheme.onSurface, fontSize = 18.sp, fontWeight = FontWeight.Bold)
           Text(
             "$providerCount provider${if (providerCount == 1) "" else "s"} · $modelCount model${if (modelCount == 1) "" else "s"} configured",
-            color = TextMuted,
+            color = AwakiTheme.extra.textMuted,
             fontSize = 12.sp
           )
         }
@@ -89,8 +91,8 @@ fun AiProvidersScreen(
         modifier = Modifier
           .fillMaxWidth()
           .clip(RoundedCornerShape(12.dp))
-          .border(1.dp, DarkBorder, RoundedCornerShape(12.dp)),
-        colors = CardDefaults.cardColors(containerColor = DarkSurface)
+          .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(12.dp)),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
       ) {
         // The section itself is not scrollable; this LazyColumn provides the
         // scrolling for it (nesting a verticalScroll Column here would crash).

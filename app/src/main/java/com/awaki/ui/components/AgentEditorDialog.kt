@@ -26,6 +26,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Switch
@@ -48,16 +49,7 @@ import androidx.compose.ui.unit.sp
 import com.awaki.agent.model.AgentRole
 import com.awaki.agent.model.AgentRoles
 import com.awaki.ui.WorkspaceViewModel
-import com.awaki.ui.theme.DarkBackground
-import com.awaki.ui.theme.DarkBorder
-import com.awaki.ui.theme.DarkBorderSubtle
-import com.awaki.ui.theme.DarkSurface
-import com.awaki.ui.theme.DarkSurfaceElevated
-import com.awaki.ui.theme.DarkSurfaceHighlight
-import com.awaki.ui.theme.ElectricBlue
-import com.awaki.ui.theme.TextMuted
-import com.awaki.ui.theme.TextPrimary
-import com.awaki.ui.theme.TextSecondary
+import com.awaki.ui.theme.AwakiTheme
 
 /**
  * Define a specialist the agent can delegate to.
@@ -94,12 +86,12 @@ fun AgentEditorDialog(
 
   AlertDialog(
     onDismissRequest = onDismiss,
-    containerColor = DarkSurface,
+    containerColor = MaterialTheme.colorScheme.surface,
     shape = RoundedCornerShape(16.dp),
     title = {
       Text(
         if (original == null) "New agent" else "Edit ${original.name}",
-        color = TextPrimary,
+        color = MaterialTheme.colorScheme.onSurface,
         fontSize = 16.sp,
         fontWeight = FontWeight.SemiBold
       )
@@ -147,14 +139,14 @@ fun AgentEditorDialog(
         )
 
         Spacer(modifier = Modifier.height(10.dp))
-        Text("Model", color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+        Text("Model", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
         Spacer(modifier = Modifier.height(4.dp))
         Box {
           Row(
             modifier = Modifier
               .fillMaxWidth()
               .clip(RoundedCornerShape(8.dp))
-              .border(1.dp, DarkBorder, RoundedCornerShape(8.dp))
+              .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp))
               .clickable { modelMenuOpen = true }
               .padding(horizontal = 12.dp, vertical = 10.dp)
               .testTag("btn_agent_model"),
@@ -164,19 +156,19 @@ fun AgentEditorDialog(
             val chosen = models.firstOrNull { it.id == modelId || it.modelId == modelId }
             Text(
               chosen?.displayName ?: "Use my current model",
-              color = if (chosen == null) TextMuted else TextPrimary,
+              color = if (chosen == null) AwakiTheme.extra.textMuted else MaterialTheme.colorScheme.onSurface,
               fontSize = 13.sp
             )
-            Text("▾", color = TextMuted, fontSize = 11.sp)
+            Text("▾", color = AwakiTheme.extra.textMuted, fontSize = 11.sp)
           }
           DropdownMenu(
             expanded = modelMenuOpen,
             onDismissRequest = { modelMenuOpen = false },
-            containerColor = DarkSurfaceElevated,
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
             modifier = Modifier.heightIn(max = 300.dp)
           ) {
             DropdownMenuItem(
-              text = { Text("Use my current model", color = TextSecondary, fontSize = 13.sp) },
+              text = { Text("Use my current model", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp) },
               onClick = { modelId = ""; modelMenuOpen = false }
             )
             models.forEach { model ->
@@ -187,12 +179,12 @@ fun AgentEditorDialog(
                       Icon(
                         Icons.Default.Check,
                         contentDescription = null,
-                        tint = ElectricBlue,
+                        tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(14.dp)
                       )
                       Spacer(modifier = Modifier.width(6.dp))
                     }
-                    Text(model.displayName, color = TextPrimary, fontSize = 13.sp)
+                    Text(model.displayName, color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp)
                   }
                 },
                 modifier = Modifier.testTag("menu_agent_model_${model.id}"),
@@ -209,10 +201,10 @@ fun AgentEditorDialog(
           verticalAlignment = Alignment.CenterVertically
         ) {
           Column(modifier = Modifier.weight(1f)) {
-            Text("Read-only", color = TextPrimary, fontSize = 13.sp)
+            Text("Read-only", color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp)
             Text(
               "Can look and propose, never change a file or run a command.",
-              color = TextMuted,
+              color = AwakiTheme.extra.textMuted,
               fontSize = 11.sp,
               lineHeight = 14.sp
             )
@@ -222,22 +214,22 @@ fun AgentEditorDialog(
             onCheckedChange = { readOnly = it },
             modifier = Modifier.testTag("switch_agent_readonly"),
             colors = SwitchDefaults.colors(
-              checkedThumbColor = ElectricBlue,
-              checkedTrackColor = ElectricBlue.copy(alpha = 0.35f),
-              checkedBorderColor = ElectricBlue,
-              uncheckedThumbColor = TextSecondary,
-              uncheckedTrackColor = DarkSurfaceHighlight,
-              uncheckedBorderColor = DarkBorder
+              checkedThumbColor = MaterialTheme.colorScheme.primary,
+              checkedTrackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
+              checkedBorderColor = MaterialTheme.colorScheme.primary,
+              uncheckedThumbColor = MaterialTheme.colorScheme.onSurfaceVariant,
+              uncheckedTrackColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+              uncheckedBorderColor = MaterialTheme.colorScheme.outline
             )
           )
         }
 
         Spacer(modifier = Modifier.height(12.dp))
-        HorizontalDivider(color = DarkBorderSubtle)
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
         Spacer(modifier = Modifier.height(10.dp))
         Text(
           if (selected.isEmpty()) "Tools - all a specialist may have" else "Tools - ${selected.size} chosen",
-          color = TextSecondary,
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
           fontSize = 11.sp,
           fontWeight = FontWeight.SemiBold
         )
@@ -248,7 +240,7 @@ fun AgentEditorDialog(
               "a delegated agent can never be given more than this list, whatever it is asked for."
           else
             "This agent will only ever be given the checked tools.",
-          color = TextMuted,
+          color = AwakiTheme.extra.textMuted,
           fontSize = 11.sp,
           lineHeight = 14.sp
         )
@@ -258,12 +250,12 @@ fun AgentEditorDialog(
             val on = selected.contains(tool)
             Text(
               tool,
-              color = if (on) ElectricBlue else TextMuted,
+              color = if (on) MaterialTheme.colorScheme.primary else AwakiTheme.extra.textMuted,
               fontSize = 11.sp,
               modifier = Modifier
                 .clip(RoundedCornerShape(6.dp))
-                .border(1.dp, if (on) ElectricBlue else DarkBorder, RoundedCornerShape(6.dp))
-                .background(if (on) ElectricBlue.copy(alpha = 0.12f) else DarkBackground)
+                .border(1.dp, if (on) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline, RoundedCornerShape(6.dp))
+                .background(if (on) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.background)
                 .clickable {
                   tools = if (on) selected - tool else selected + tool
                 }
@@ -293,11 +285,11 @@ fun AgentEditorDialog(
         },
         enabled = valid,
         modifier = Modifier.testTag("btn_save_agent")
-      ) { Text("Save", color = if (valid) ElectricBlue else TextMuted, fontSize = 13.sp) }
+      ) { Text("Save", color = if (valid) MaterialTheme.colorScheme.primary else AwakiTheme.extra.textMuted, fontSize = 13.sp) }
     },
     dismissButton = {
       TextButton(onClick = onDismiss, modifier = Modifier.testTag("btn_cancel_agent")) {
-        Text("Cancel", color = TextMuted, fontSize = 13.sp)
+        Text("Cancel", color = AwakiTheme.extra.textMuted, fontSize = 13.sp)
       }
     }
   )
@@ -314,22 +306,22 @@ internal fun AgentField(
   minLines: Int = 1
 ) {
   Column(modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp)) {
-    Text(label, color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+    Text(label, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
     Spacer(modifier = Modifier.height(4.dp))
     OutlinedTextField(
       value = value,
       onValueChange = onValueChange,
-      placeholder = { Text(placeholder, color = TextMuted, fontSize = 12.sp) },
+      placeholder = { Text(placeholder, color = AwakiTheme.extra.textMuted, fontSize = 12.sp) },
       singleLine = singleLine,
       minLines = minLines,
       modifier = Modifier.fillMaxWidth().testTag(testTag),
-      textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp, color = TextPrimary),
+      textStyle = androidx.compose.ui.text.TextStyle(fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface),
       shape = RoundedCornerShape(8.dp),
       colors = OutlinedTextFieldDefaults.colors(
-        focusedBorderColor = ElectricBlue,
-        unfocusedBorderColor = DarkBorder,
-        focusedContainerColor = DarkBackground,
-        unfocusedContainerColor = DarkBackground
+        focusedBorderColor = MaterialTheme.colorScheme.primary,
+        unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+        focusedContainerColor = MaterialTheme.colorScheme.background,
+        unfocusedContainerColor = MaterialTheme.colorScheme.background
       )
     )
   }

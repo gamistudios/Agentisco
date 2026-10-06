@@ -18,6 +18,7 @@ import androidx.compose.material.icons.automirrored.outlined.*
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -35,6 +36,7 @@ import com.awaki.core.model.AppDestination
 import com.awaki.data.model.GitCommit
 import com.awaki.ui.WorkspaceViewModel
 import com.awaki.ui.theme.*
+import com.awaki.ui.theme.AwakiTheme
 import com.awaki.workspace.git.*
 import kotlinx.coroutines.launch
 
@@ -113,15 +115,15 @@ fun GitScreen(
   Column(
     modifier = modifier
       .fillMaxSize()
-      .background(DarkBackground)
+      .background(MaterialTheme.colorScheme.background)
   ) {
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     // TOP HEADER
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     Surface(
       modifier = Modifier.fillMaxWidth(),
-      color = DarkSurface,
-      border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorderSubtle)
+      color = MaterialTheme.colorScheme.surface,
+      border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
     ) {
       Column {
         Row(
@@ -141,7 +143,7 @@ fun GitScreen(
                 .size(32.dp)
                 .testTag("btn_git_back")
             ) {
-              Icon(Icons.Default.ChevronLeft, contentDescription = "Back", tint = TextPrimary)
+              Icon(Icons.Default.ChevronLeft, contentDescription = "Back", tint = MaterialTheme.colorScheme.onSurface)
             }
             Spacer(modifier = Modifier.width(6.dp))
             // Same as the Changes header: the title side scrolls instead of
@@ -149,17 +151,17 @@ fun GitScreen(
             Column(modifier = Modifier.horizontalScroll(rememberScrollState())) {
               Text(
                 text = "Source Control",
-                color = TextPrimary,
+                color = MaterialTheme.colorScheme.onSurface,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1
               )
               Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Outlined.Commit, contentDescription = null, tint = ElectricBlueGlow, modifier = Modifier.size(11.dp))
+                Icon(Icons.Outlined.Commit, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(11.dp))
                 Spacer(modifier = Modifier.width(3.dp))
                 Text(
                   text = repoStatus.currentBranch.ifBlank { activeProject.branch.ifBlank { "main" } },
-                  color = ElectricBlueGlow,
+                  color = MaterialTheme.colorScheme.primary,
                   fontSize = 11.sp,
                   fontFamily = FontFamily.Monospace,
                   fontWeight = FontWeight.SemiBold,
@@ -171,7 +173,7 @@ fun GitScreen(
                   Spacer(modifier = Modifier.width(6.dp))
                   Text(
                     text = "↑${repoStatus.aheadCount}  ↓${repoStatus.behindCount}",
-                    color = TextSecondary,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 10.sp,
                     fontFamily = FontFamily.Monospace,
                     maxLines = 1
@@ -192,7 +194,7 @@ fun GitScreen(
                 .size(32.dp)
                 .testTag("btn_refresh_git")
             ) {
-              Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = TextSecondary, modifier = Modifier.size(18.dp))
+              Icon(Icons.Default.Refresh, contentDescription = "Refresh", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
             }
 
             // Shortcut to Changes / Diff Page
@@ -202,11 +204,11 @@ fun GitScreen(
                 .height(30.dp)
                 .testTag("btn_goto_changes"),
               contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
-              border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder)
+              border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
             ) {
-              Icon(Icons.Outlined.Difference, contentDescription = null, tint = WarningAmber, modifier = Modifier.size(13.dp))
+              Icon(Icons.Outlined.Difference, contentDescription = null, tint = AwakiTheme.extra.warning, modifier = Modifier.size(13.dp))
               Spacer(modifier = Modifier.width(4.dp))
-              Text("Changes", color = TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+              Text("Changes", color = MaterialTheme.colorScheme.onSurface, fontSize = 11.sp, fontWeight = FontWeight.Medium)
             }
           }
         }
@@ -215,10 +217,10 @@ fun GitScreen(
         if (isRepo) {
           ScrollableTabRow(
             selectedTabIndex = currentTab.ordinal,
-            containerColor = DarkSurface,
-            contentColor = ElectricBlue,
+            containerColor = MaterialTheme.colorScheme.surface,
+            contentColor = MaterialTheme.colorScheme.primary,
             edgePadding = 12.dp,
-            divider = { HorizontalDivider(color = DarkBorderSubtle) },
+            divider = { HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant) },
             modifier = Modifier.fillMaxWidth()
           ) {
             GitTab.values().forEach { tab ->
@@ -228,13 +230,13 @@ fun GitScreen(
                 onClick = { currentTab = tab },
                 text = {
                   Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(tab.icon, contentDescription = null, modifier = Modifier.size(14.dp), tint = if (isSelected) ElectricBlue else TextMuted)
+                    Icon(tab.icon, contentDescription = null, modifier = Modifier.size(14.dp), tint = if (isSelected) MaterialTheme.colorScheme.primary else AwakiTheme.extra.textMuted)
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
                       text = tab.title,
                       fontSize = 12.sp,
                       fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                      color = if (isSelected) TextPrimary else TextSecondary
+                      color = if (isSelected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
                     )
                   }
                 },
@@ -252,8 +254,8 @@ fun GitScreen(
     if (activeGitOp != null) {
       Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = ElectricBlue.copy(alpha = 0.15f),
-        border = androidx.compose.foundation.BorderStroke(1.dp, ElectricBlue.copy(alpha = 0.4f))
+        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f))
       ) {
         Row(
           modifier = Modifier
@@ -261,9 +263,9 @@ fun GitScreen(
             .padding(horizontal = 14.dp, vertical = 8.dp),
           verticalAlignment = Alignment.CenterVertically
         ) {
-          CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = ElectricBlueGlow)
+          CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.primary)
           Spacer(modifier = Modifier.width(10.dp))
-          Text(text = activeGitOp!!, color = ElectricBlueGlow, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+          Text(text = activeGitOp!!, color = MaterialTheme.colorScheme.primary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
         }
       }
     }
@@ -271,8 +273,8 @@ fun GitScreen(
     if (gitFeedback != null) {
       Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = TerminalGreenBg.copy(alpha = 0.25f),
-        border = androidx.compose.foundation.BorderStroke(1.dp, TerminalGreen.copy(alpha = 0.4f))
+        color = AwakiTheme.extra.successContainer.copy(alpha = 0.25f),
+        border = androidx.compose.foundation.BorderStroke(1.dp, AwakiTheme.extra.success.copy(alpha = 0.4f))
       ) {
         Row(
           modifier = Modifier
@@ -282,18 +284,18 @@ fun GitScreen(
           horizontalArrangement = Arrangement.SpaceBetween
         ) {
           Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-            Icon(Icons.Outlined.CheckCircle, contentDescription = null, tint = TerminalGreen, modifier = Modifier.size(15.dp))
+            Icon(Icons.Outlined.CheckCircle, contentDescription = null, tint = AwakiTheme.extra.success, modifier = Modifier.size(15.dp))
             Spacer(modifier = Modifier.width(8.dp))
             Text(
               text = gitFeedback!!,
-              color = TerminalGreen,
+              color = AwakiTheme.extra.success,
               fontSize = 12.sp,
               lineHeight = 16.sp,
               modifier = Modifier.weight(1f)
             )
           }
           IconButton(onClick = { viewModel.clearGitOperationFeedback() }, modifier = Modifier.size(24.dp)) {
-            Icon(Icons.Default.Close, contentDescription = "Dismiss", tint = TextMuted, modifier = Modifier.size(14.dp))
+            Icon(Icons.Default.Close, contentDescription = "Dismiss", tint = AwakiTheme.extra.textMuted, modifier = Modifier.size(14.dp))
           }
         }
       }
@@ -302,8 +304,8 @@ fun GitScreen(
     if (gitError != null) {
       Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = DangerRedBg.copy(alpha = 0.25f),
-        border = androidx.compose.foundation.BorderStroke(1.dp, DangerRed.copy(alpha = 0.5f))
+        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.25f),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f))
       ) {
         Row(
           modifier = Modifier
@@ -311,19 +313,19 @@ fun GitScreen(
             .padding(horizontal = 14.dp, vertical = 8.dp),
           verticalAlignment = Alignment.CenterVertically
         ) {
-          Icon(Icons.Outlined.Warning, contentDescription = null, tint = DangerRed, modifier = Modifier.size(16.dp))
+          Icon(Icons.Outlined.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp))
           Spacer(modifier = Modifier.width(8.dp))
-          Text(text = gitError!!, color = DangerRed, fontSize = 11.sp, lineHeight = 15.sp, modifier = Modifier.weight(1f))
+          Text(text = gitError!!, color = MaterialTheme.colorScheme.error, fontSize = 11.sp, lineHeight = 15.sp, modifier = Modifier.weight(1f))
           if (gitError!!.contains("index.lock", ignoreCase = true)) {
             TextButton(onClick = { viewModel.clearGitIndexLock() }) {
-              Text("Remove lock", fontSize = 11.sp, color = DangerRed)
+              Text("Remove lock", fontSize = 11.sp, color = MaterialTheme.colorScheme.error)
             }
           }
           IconButton(onClick = { clipboard.setText(AnnotatedString(gitError!!)) }, modifier = Modifier.size(26.dp)) {
-            Icon(Icons.Outlined.ContentCopy, contentDescription = "Copy", tint = TextMuted, modifier = Modifier.size(13.dp))
+            Icon(Icons.Outlined.ContentCopy, contentDescription = "Copy", tint = AwakiTheme.extra.textMuted, modifier = Modifier.size(13.dp))
           }
           IconButton(onClick = { viewModel.dismissGitError() }, modifier = Modifier.size(26.dp)) {
-            Icon(Icons.Default.Close, contentDescription = "Dismiss", tint = TextMuted, modifier = Modifier.size(14.dp))
+            Icon(Icons.Default.Close, contentDescription = "Dismiss", tint = AwakiTheme.extra.textMuted, modifier = Modifier.size(14.dp))
           }
         }
       }
@@ -342,8 +344,8 @@ fun GitScreen(
         Card(
           modifier = Modifier.fillMaxWidth(),
           shape = RoundedCornerShape(14.dp),
-          colors = CardDefaults.cardColors(containerColor = DarkSurface),
-          border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorderSubtle)
+          colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+          border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
         ) {
           Column(
             modifier = Modifier.padding(24.dp),
@@ -351,19 +353,19 @@ fun GitScreen(
           ) {
             Surface(
               shape = CircleShape,
-              color = IndigoAccent.copy(alpha = 0.2f),
+              color = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.2f),
               modifier = Modifier.size(56.dp)
             ) {
               Box(contentAlignment = Alignment.Center) {
-                Icon(Icons.Outlined.ForkRight, contentDescription = null, tint = IndigoAccent, modifier = Modifier.size(32.dp))
+                Icon(Icons.Outlined.ForkRight, contentDescription = null, tint = MaterialTheme.colorScheme.tertiary, modifier = Modifier.size(32.dp))
               }
             }
             Spacer(modifier = Modifier.height(16.dp))
-            Text("Initialize Git Repository", color = TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+            Text("Initialize Git Repository", color = MaterialTheme.colorScheme.onSurface, fontSize = 17.sp, fontWeight = FontWeight.Bold)
             Spacer(modifier = Modifier.height(8.dp))
             Text(
               "Track changes, stage edits, create branches, and sync with GitHub directly in your workspace.",
-              color = TextSecondary,
+              color = MaterialTheme.colorScheme.onSurfaceVariant,
               fontSize = 13.sp,
               textAlign = androidx.compose.ui.text.style.TextAlign.Center,
               lineHeight = 18.sp
@@ -375,7 +377,7 @@ fun GitScreen(
                 .fillMaxWidth()
                 .height(42.dp)
                 .testTag("btn_init_git_repo"),
-              colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue)
+              colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
             ) {
               Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
               Spacer(modifier = Modifier.width(6.dp))
@@ -488,22 +490,22 @@ fun GitScreen(
 
     AlertDialog(
       onDismissRequest = { showCreateBranchDialog = false },
-      title = { Text("Create New Branch", color = TextPrimary, fontWeight = FontWeight.Bold) },
+      title = { Text("Create New Branch", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) },
       text = {
         Column {
-          Text("Branch name:", color = TextSecondary, fontSize = 12.sp)
+          Text("Branch name:", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
           Spacer(modifier = Modifier.height(6.dp))
           OutlinedTextField(
             value = branchName,
             onValueChange = { branchName = it.replace(Regex("[^a-zA-Z0-9._/-]"), "") },
-            placeholder = { Text("feature/my-feature", color = TextMuted, fontSize = 12.sp) },
+            placeholder = { Text("feature/my-feature", color = AwakiTheme.extra.textMuted, fontSize = 12.sp) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
             colors = OutlinedTextFieldDefaults.colors(
-              focusedBorderColor = ElectricBlue,
-              unfocusedBorderColor = DarkBorder,
-              focusedTextColor = TextPrimary,
-              unfocusedTextColor = TextPrimary
+              focusedBorderColor = MaterialTheme.colorScheme.primary,
+              unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+              focusedTextColor = MaterialTheme.colorScheme.onSurface,
+              unfocusedTextColor = MaterialTheme.colorScheme.onSurface
             ),
             textStyle = androidx.compose.ui.text.TextStyle(fontFamily = FontFamily.Monospace, fontSize = 12.sp)
           )
@@ -512,10 +514,10 @@ fun GitScreen(
             Checkbox(
               checked = checkoutImmediately,
               onCheckedChange = { checkoutImmediately = it },
-              colors = CheckboxDefaults.colors(checkedColor = ElectricBlue)
+              colors = CheckboxDefaults.colors(checkedColor = MaterialTheme.colorScheme.primary)
             )
             Spacer(modifier = Modifier.width(6.dp))
-            Text("Switch to this branch after creation", color = TextSecondary, fontSize = 12.sp)
+            Text("Switch to this branch after creation", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
           }
         }
       },
@@ -528,17 +530,17 @@ fun GitScreen(
             }
           },
           enabled = branchName.isNotBlank(),
-          colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue)
+          colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
         ) {
           Text("Create Branch")
         }
       },
       dismissButton = {
         OutlinedButton(onClick = { showCreateBranchDialog = false }) {
-          Text("Cancel", color = TextSecondary)
+          Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
       },
-      containerColor = DarkSurface,
+      containerColor = MaterialTheme.colorScheme.surface,
       shape = RoundedCornerShape(12.dp)
     )
   }
@@ -549,13 +551,13 @@ fun GitScreen(
 
     AlertDialog(
       onDismissRequest = { branchToDelete = null },
-      icon = { Icon(Icons.Outlined.Warning, contentDescription = null, tint = DangerRed) },
-      title = { Text("Delete Branch?", color = TextPrimary, fontWeight = FontWeight.Bold) },
+      icon = { Icon(Icons.Outlined.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+      title = { Text("Delete Branch?", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) },
       text = {
         Column {
           Text(
             "Are you sure you want to delete branch \"${branchToDelete!!.name}\"?",
-            color = TextSecondary,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             fontSize = 13.sp
           )
           Spacer(modifier = Modifier.height(12.dp))
@@ -563,10 +565,10 @@ fun GitScreen(
             Checkbox(
               checked = forceDelete,
               onCheckedChange = { forceDelete = it },
-              colors = CheckboxDefaults.colors(checkedColor = DangerRed)
+              colors = CheckboxDefaults.colors(checkedColor = MaterialTheme.colorScheme.error)
             )
             Spacer(modifier = Modifier.width(6.dp))
-            Text("Force delete (-D) even if not fully merged", color = DangerRed, fontSize = 11.sp)
+            Text("Force delete (-D) even if not fully merged", color = MaterialTheme.colorScheme.error, fontSize = 11.sp)
           }
         }
       },
@@ -577,17 +579,17 @@ fun GitScreen(
             branchToDelete = null
             viewModel.deleteBranch(branch.name, force = forceDelete)
           },
-          colors = ButtonDefaults.buttonColors(containerColor = DangerRed)
+          colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
         ) {
-          Text("Delete Branch", color = Color.White)
+          Text("Delete Branch", color = MaterialTheme.colorScheme.onError)
         }
       },
       dismissButton = {
         OutlinedButton(onClick = { branchToDelete = null }) {
-          Text("Cancel", color = TextSecondary)
+          Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
       },
-      containerColor = DarkSurface,
+      containerColor = MaterialTheme.colorScheme.surface,
       shape = RoundedCornerShape(12.dp)
     )
   }
@@ -598,10 +600,10 @@ fun GitScreen(
 
     AlertDialog(
       onDismissRequest = { branchToRename = null },
-      title = { Text("Rename Branch", color = TextPrimary, fontWeight = FontWeight.Bold) },
+      title = { Text("Rename Branch", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) },
       text = {
         Column {
-          Text("Rename \"${branchToRename!!.name}\" to:", color = TextSecondary, fontSize = 12.sp)
+          Text("Rename \"${branchToRename!!.name}\" to:", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
           Spacer(modifier = Modifier.height(6.dp))
           OutlinedTextField(
             value = newBranchName,
@@ -609,10 +611,10 @@ fun GitScreen(
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
             colors = OutlinedTextFieldDefaults.colors(
-              focusedBorderColor = ElectricBlue,
-              unfocusedBorderColor = DarkBorder,
-              focusedTextColor = TextPrimary,
-              unfocusedTextColor = TextPrimary
+              focusedBorderColor = MaterialTheme.colorScheme.primary,
+              unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+              focusedTextColor = MaterialTheme.colorScheme.onSurface,
+              unfocusedTextColor = MaterialTheme.colorScheme.onSurface
             ),
             textStyle = androidx.compose.ui.text.TextStyle(fontFamily = FontFamily.Monospace, fontSize = 12.sp)
           )
@@ -626,17 +628,17 @@ fun GitScreen(
             viewModel.renameBranch(old, newBranchName.trim())
           },
           enabled = newBranchName.isNotBlank() && newBranchName != branchToRename!!.name,
-          colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue)
+          colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
         ) {
           Text("Rename")
         }
       },
       dismissButton = {
         OutlinedButton(onClick = { branchToRename = null }) {
-          Text("Cancel", color = TextSecondary)
+          Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
       },
-      containerColor = DarkSurface,
+      containerColor = MaterialTheme.colorScheme.surface,
       shape = RoundedCornerShape(12.dp)
     )
   }
@@ -645,11 +647,11 @@ fun GitScreen(
   if (branchToMerge != null) {
     AlertDialog(
       onDismissRequest = { branchToMerge = null },
-      title = { Text("Merge Branch?", color = TextPrimary, fontWeight = FontWeight.Bold) },
+      title = { Text("Merge Branch?", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) },
       text = {
         Text(
           "Merge branch \"${branchToMerge!!.name}\" into current branch \"${repoStatus.currentBranch}\"?",
-          color = TextSecondary,
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
           fontSize = 13.sp
         )
       },
@@ -660,17 +662,17 @@ fun GitScreen(
             branchToMerge = null
             viewModel.mergeBranch(branch.name)
           },
-          colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue)
+          colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
         ) {
           Text("Merge")
         }
       },
       dismissButton = {
         OutlinedButton(onClick = { branchToMerge = null }) {
-          Text("Cancel", color = TextSecondary)
+          Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
       },
-      containerColor = DarkSurface,
+      containerColor = MaterialTheme.colorScheme.surface,
       shape = RoundedCornerShape(12.dp)
     )
   }
@@ -679,11 +681,11 @@ fun GitScreen(
   if (branchToRebase != null) {
     AlertDialog(
       onDismissRequest = { branchToRebase = null },
-      title = { Text("Rebase Branch?", color = TextPrimary, fontWeight = FontWeight.Bold) },
+      title = { Text("Rebase Branch?", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) },
       text = {
         Text(
           "Rebase current branch \"${repoStatus.currentBranch}\" onto \"${branchToRebase!!.name}\"?\n\nIf conflicts occur, you will be able to resolve or abort the rebase.",
-          color = TextSecondary,
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
           fontSize = 13.sp
         )
       },
@@ -694,17 +696,20 @@ fun GitScreen(
             branchToRebase = null
             viewModel.rebaseBranch(branch.name)
           },
-          colors = ButtonDefaults.buttonColors(containerColor = WarningAmber)
+          colors = ButtonDefaults.buttonColors(
+            containerColor = AwakiTheme.extra.warning,
+            contentColor = AwakiTheme.extra.onWarning
+          )
         ) {
           Text("Rebase")
         }
       },
       dismissButton = {
         OutlinedButton(onClick = { branchToRebase = null }) {
-          Text("Cancel", color = TextSecondary)
+          Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
       },
-      containerColor = DarkSurface,
+      containerColor = MaterialTheme.colorScheme.surface,
       shape = RoundedCornerShape(12.dp)
     )
   }
@@ -716,22 +721,22 @@ fun GitScreen(
 
     AlertDialog(
       onDismissRequest = { showCreateStashDialog = false },
-      title = { Text("Save Changes to Stash", color = TextPrimary, fontWeight = FontWeight.Bold) },
+      title = { Text("Save Changes to Stash", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) },
       text = {
         Column {
-          Text("Optional stash message:", color = TextSecondary, fontSize = 12.sp)
+          Text("Optional stash message:", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
           Spacer(modifier = Modifier.height(6.dp))
           OutlinedTextField(
             value = stashMsg,
             onValueChange = { stashMsg = it },
-            placeholder = { Text("WIP on feature...", color = TextMuted, fontSize = 12.sp) },
+            placeholder = { Text("WIP on feature...", color = AwakiTheme.extra.textMuted, fontSize = 12.sp) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
             colors = OutlinedTextFieldDefaults.colors(
-              focusedBorderColor = ElectricBlue,
-              unfocusedBorderColor = DarkBorder,
-              focusedTextColor = TextPrimary,
-              unfocusedTextColor = TextPrimary
+              focusedBorderColor = MaterialTheme.colorScheme.primary,
+              unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+              focusedTextColor = MaterialTheme.colorScheme.onSurface,
+              unfocusedTextColor = MaterialTheme.colorScheme.onSurface
             )
           )
           Spacer(modifier = Modifier.height(10.dp))
@@ -739,10 +744,10 @@ fun GitScreen(
             Checkbox(
               checked = includeUntracked,
               onCheckedChange = { includeUntracked = it },
-              colors = CheckboxDefaults.colors(checkedColor = ElectricBlue)
+              colors = CheckboxDefaults.colors(checkedColor = MaterialTheme.colorScheme.primary)
             )
             Spacer(modifier = Modifier.width(6.dp))
-            Text("Include untracked files (-u)", color = TextSecondary, fontSize = 12.sp)
+            Text("Include untracked files (-u)", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
           }
         }
       },
@@ -752,17 +757,17 @@ fun GitScreen(
             showCreateStashDialog = false
             viewModel.saveStash(stashMsg.trim(), includeUntracked)
           },
-          colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue)
+          colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
         ) {
           Text("Save Stash")
         }
       },
       dismissButton = {
         OutlinedButton(onClick = { showCreateStashDialog = false }) {
-          Text("Cancel", color = TextSecondary)
+          Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
       },
-      containerColor = DarkSurface,
+      containerColor = MaterialTheme.colorScheme.surface,
       shape = RoundedCornerShape(12.dp)
     )
   }
@@ -771,12 +776,12 @@ fun GitScreen(
   if (stashToDrop != null) {
     AlertDialog(
       onDismissRequest = { stashToDrop = null },
-      icon = { Icon(Icons.Outlined.Delete, contentDescription = null, tint = DangerRed) },
-      title = { Text("Drop Stash?", color = TextPrimary, fontWeight = FontWeight.Bold) },
+      icon = { Icon(Icons.Outlined.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+      title = { Text("Drop Stash?", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) },
       text = {
         Text(
           "Are you sure you want to permanently delete stash@{" + stashToDrop!!.index + "} (\"" + stashToDrop!!.message + "\")?",
-          color = TextSecondary,
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
           fontSize = 13.sp
         )
       },
@@ -787,17 +792,17 @@ fun GitScreen(
             stashToDrop = null
             viewModel.dropStash(idx)
           },
-          colors = ButtonDefaults.buttonColors(containerColor = DangerRed)
+          colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
         ) {
-          Text("Drop Stash", color = Color.White)
+          Text("Drop Stash", color = MaterialTheme.colorScheme.onError)
         }
       },
       dismissButton = {
         OutlinedButton(onClick = { stashToDrop = null }) {
-          Text("Cancel", color = TextSecondary)
+          Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
       },
-      containerColor = DarkSurface,
+      containerColor = MaterialTheme.colorScheme.surface,
       shape = RoundedCornerShape(12.dp)
     )
   }
@@ -809,38 +814,38 @@ fun GitScreen(
 
     AlertDialog(
       onDismissRequest = { showCreateTagDialog = false },
-      title = { Text("Create Git Tag", color = TextPrimary, fontWeight = FontWeight.Bold) },
+      title = { Text("Create Git Tag", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) },
       text = {
         Column {
-          Text("Tag name (e.g. v1.0.0):", color = TextSecondary, fontSize = 12.sp)
+          Text("Tag name (e.g. v1.0.0):", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
           Spacer(modifier = Modifier.height(6.dp))
           OutlinedTextField(
             value = tagName,
             onValueChange = { tagName = it.trim() },
-            placeholder = { Text("v1.0.0", color = TextMuted, fontSize = 12.sp) },
+            placeholder = { Text("v1.0.0", color = AwakiTheme.extra.textMuted, fontSize = 12.sp) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
             colors = OutlinedTextFieldDefaults.colors(
-              focusedBorderColor = ElectricBlue,
-              unfocusedBorderColor = DarkBorder,
-              focusedTextColor = TextPrimary,
-              unfocusedTextColor = TextPrimary
+              focusedBorderColor = MaterialTheme.colorScheme.primary,
+              unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+              focusedTextColor = MaterialTheme.colorScheme.onSurface,
+              unfocusedTextColor = MaterialTheme.colorScheme.onSurface
             ),
             textStyle = androidx.compose.ui.text.TextStyle(fontFamily = FontFamily.Monospace, fontSize = 12.sp)
           )
           Spacer(modifier = Modifier.height(10.dp))
-          Text("Optional annotation message:", color = TextSecondary, fontSize = 12.sp)
+          Text("Optional annotation message:", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
           Spacer(modifier = Modifier.height(6.dp))
           OutlinedTextField(
             value = tagMsg,
             onValueChange = { tagMsg = it },
-            placeholder = { Text("Release notes...", color = TextMuted, fontSize = 12.sp) },
+            placeholder = { Text("Release notes...", color = AwakiTheme.extra.textMuted, fontSize = 12.sp) },
             modifier = Modifier.fillMaxWidth(),
             colors = OutlinedTextFieldDefaults.colors(
-              focusedBorderColor = ElectricBlue,
-              unfocusedBorderColor = DarkBorder,
-              focusedTextColor = TextPrimary,
-              unfocusedTextColor = TextPrimary
+              focusedBorderColor = MaterialTheme.colorScheme.primary,
+              unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+              focusedTextColor = MaterialTheme.colorScheme.onSurface,
+              unfocusedTextColor = MaterialTheme.colorScheme.onSurface
             )
           )
         }
@@ -854,17 +859,17 @@ fun GitScreen(
             }
           },
           enabled = tagName.isNotBlank(),
-          colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue)
+          colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
         ) {
           Text("Create Tag")
         }
       },
       dismissButton = {
         OutlinedButton(onClick = { showCreateTagDialog = false }) {
-          Text("Cancel", color = TextSecondary)
+          Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
       },
-      containerColor = DarkSurface,
+      containerColor = MaterialTheme.colorScheme.surface,
       shape = RoundedCornerShape(12.dp)
     )
   }
@@ -876,10 +881,10 @@ fun GitScreen(
 
     AlertDialog(
       onDismissRequest = { showAddRemoteDialog = false },
-      title = { Text("Add Remote Repository", color = TextPrimary, fontWeight = FontWeight.Bold) },
+      title = { Text("Add Remote Repository", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) },
       text = {
         Column {
-          Text("Remote name:", color = TextSecondary, fontSize = 12.sp)
+          Text("Remote name:", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
           Spacer(modifier = Modifier.height(6.dp))
           OutlinedTextField(
             value = remoteName,
@@ -887,26 +892,26 @@ fun GitScreen(
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
             colors = OutlinedTextFieldDefaults.colors(
-              focusedBorderColor = ElectricBlue,
-              unfocusedBorderColor = DarkBorder,
-              focusedTextColor = TextPrimary,
-              unfocusedTextColor = TextPrimary
+              focusedBorderColor = MaterialTheme.colorScheme.primary,
+              unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+              focusedTextColor = MaterialTheme.colorScheme.onSurface,
+              unfocusedTextColor = MaterialTheme.colorScheme.onSurface
             )
           )
           Spacer(modifier = Modifier.height(10.dp))
-          Text("Remote URL (HTTPS or SSH):", color = TextSecondary, fontSize = 12.sp)
+          Text("Remote URL (HTTPS or SSH):", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
           Spacer(modifier = Modifier.height(6.dp))
           OutlinedTextField(
             value = remoteUrl,
             onValueChange = { remoteUrl = it.trim() },
-            placeholder = { Text("https://github.com/user/repo.git", color = TextMuted, fontSize = 12.sp) },
+            placeholder = { Text("https://github.com/user/repo.git", color = AwakiTheme.extra.textMuted, fontSize = 12.sp) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
             colors = OutlinedTextFieldDefaults.colors(
-              focusedBorderColor = ElectricBlue,
-              unfocusedBorderColor = DarkBorder,
-              focusedTextColor = TextPrimary,
-              unfocusedTextColor = TextPrimary
+              focusedBorderColor = MaterialTheme.colorScheme.primary,
+              unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+              focusedTextColor = MaterialTheme.colorScheme.onSurface,
+              unfocusedTextColor = MaterialTheme.colorScheme.onSurface
             ),
             textStyle = androidx.compose.ui.text.TextStyle(fontFamily = FontFamily.Monospace, fontSize = 11.sp)
           )
@@ -921,17 +926,17 @@ fun GitScreen(
             }
           },
           enabled = remoteName.isNotBlank() && remoteUrl.isNotBlank(),
-          colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue)
+          colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
         ) {
           Text("Add Remote")
         }
       },
       dismissButton = {
         OutlinedButton(onClick = { showAddRemoteDialog = false }) {
-          Text("Cancel", color = TextSecondary)
+          Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
       },
-      containerColor = DarkSurface,
+      containerColor = MaterialTheme.colorScheme.surface,
       shape = RoundedCornerShape(12.dp)
     )
   }
@@ -955,7 +960,7 @@ fun GitScreen(
         aiCommitExplanation = null
         commitDetailError = null
       },
-      containerColor = DarkSurface,
+      containerColor = MaterialTheme.colorScheme.surface,
       shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
     ) {
       Column(
@@ -972,7 +977,7 @@ fun GitScreen(
           Column(modifier = Modifier.weight(1f)) {
             Text(
               text = commit.message,
-              color = TextPrimary,
+              color = MaterialTheme.colorScheme.onSurface,
               fontSize = 15.sp,
               fontWeight = FontWeight.Bold
             )
@@ -980,11 +985,11 @@ fun GitScreen(
             Row(verticalAlignment = Alignment.CenterVertically) {
               Surface(
                 shape = RoundedCornerShape(4.dp),
-                color = DarkSurfaceHighlight
+                color = MaterialTheme.colorScheme.surfaceContainerHigh
               ) {
                 Text(
                   text = commit.hash.take(7),
-                  color = ElectricBlueGlow,
+                  color = MaterialTheme.colorScheme.primary,
                   fontSize = 11.sp,
                   fontFamily = FontFamily.Monospace,
                   fontWeight = FontWeight.Bold,
@@ -994,7 +999,7 @@ fun GitScreen(
               Spacer(modifier = Modifier.width(8.dp))
               Text(
                 text = "${commit.author} · ${commit.date}",
-                color = TextSecondary,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 11.sp
               )
             }
@@ -1004,7 +1009,7 @@ fun GitScreen(
             onClick = { clipboard.setText(AnnotatedString(commit.hash)) },
             modifier = Modifier.size(32.dp)
           ) {
-            Icon(Icons.Outlined.ContentCopy, contentDescription = "Copy hash", tint = TextSecondary, modifier = Modifier.size(16.dp))
+            Icon(Icons.Outlined.ContentCopy, contentDescription = "Copy hash", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
           }
         }
 
@@ -1024,9 +1029,9 @@ fun GitScreen(
             },
             modifier = Modifier.weight(1f).height(34.dp),
             contentPadding = PaddingValues(0.dp),
-            border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder)
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
           ) {
-            Text("Cherry-pick", fontSize = 11.sp, color = TextPrimary)
+            Text("Cherry-pick", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface)
           }
 
           // Revert Commit
@@ -1038,9 +1043,9 @@ fun GitScreen(
             },
             modifier = Modifier.weight(1f).height(34.dp),
             contentPadding = PaddingValues(0.dp),
-            border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder)
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
           ) {
-            Text("Revert", fontSize = 11.sp, color = DangerRed)
+            Text("Revert", fontSize = 11.sp, color = MaterialTheme.colorScheme.error)
           }
 
           // Reset to here
@@ -1051,9 +1056,9 @@ fun GitScreen(
             },
             modifier = Modifier.weight(1f).height(34.dp),
             contentPadding = PaddingValues(0.dp),
-            border = androidx.compose.foundation.BorderStroke(1.dp, DangerRed.copy(alpha = 0.5f))
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f))
           ) {
-            Text("Reset…", fontSize = 11.sp, color = DangerRed)
+            Text("Reset…", fontSize = 11.sp, color = MaterialTheme.colorScheme.error)
           }
 
           // Explain with AI
@@ -1067,7 +1072,7 @@ fun GitScreen(
             },
             modifier = Modifier.height(34.dp),
             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = IndigoAccent)
+            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.tertiary)
           ) {
             Icon(Icons.Outlined.AutoAwesome, contentDescription = null, modifier = Modifier.size(13.dp))
             Spacer(modifier = Modifier.width(4.dp))
@@ -1079,21 +1084,21 @@ fun GitScreen(
         if (isAiCommitLoading) {
           Spacer(modifier = Modifier.height(12.dp))
           Row(verticalAlignment = Alignment.CenterVertically) {
-            CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = IndigoAccent)
+            CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.tertiary)
             Spacer(modifier = Modifier.width(8.dp))
-            Text("AI is explaining commit changes…", color = TextMuted, fontSize = 12.sp)
+            Text("AI is explaining commit changes…", color = AwakiTheme.extra.textMuted, fontSize = 12.sp)
           }
         } else if (explanation != null) {
           Spacer(modifier = Modifier.height(12.dp))
           Surface(
             modifier = Modifier.fillMaxWidth(),
-            color = DarkSurfaceElevated,
+            color = MaterialTheme.colorScheme.surfaceContainer,
             shape = RoundedCornerShape(8.dp),
-            border = androidx.compose.foundation.BorderStroke(1.dp, IndigoAccent.copy(alpha = 0.4f))
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.tertiary.copy(alpha = 0.4f))
           ) {
             Text(
               text = explanation,
-              color = TextPrimary,
+              color = MaterialTheme.colorScheme.onSurface,
               fontSize = 12.sp,
               lineHeight = 17.sp,
               modifier = Modifier.padding(12.dp)
@@ -1103,12 +1108,12 @@ fun GitScreen(
 
         // Commit File Changes & Diff Preview
         Spacer(modifier = Modifier.height(14.dp))
-        Text("Files Changed in this Commit:", color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        Text("Files Changed in this Commit:", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
         Spacer(modifier = Modifier.height(6.dp))
 
         if (isCommitDetailLoading) {
           Box(modifier = Modifier.fillMaxWidth().height(80.dp), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = ElectricBlue)
+            CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.primary)
           }
         } else if (detail != null && detail.filesChanged.isNotEmpty()) {
           Surface(
@@ -1116,8 +1121,8 @@ fun GitScreen(
               .fillMaxWidth()
               .heightIn(max = 240.dp),
             shape = RoundedCornerShape(8.dp),
-            color = DarkSurfaceElevated,
-            border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorderSubtle)
+            color = MaterialTheme.colorScheme.surfaceContainer,
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
           ) {
             LazyColumn(modifier = Modifier.padding(8.dp)) {
               items(detail.filesChanged) { file ->
@@ -1130,7 +1135,7 @@ fun GitScreen(
                 ) {
                   Text(
                     text = file.path,
-                    color = TextPrimary,
+                    color = MaterialTheme.colorScheme.onSurface,
                     fontSize = 11.sp,
                     fontFamily = FontFamily.Monospace,
                     modifier = Modifier.weight(1f),
@@ -1140,11 +1145,11 @@ fun GitScreen(
                   if (file.additions > 0 || file.deletions > 0) {
                     Row {
                       if (file.additions > 0) {
-                        Text("+$file.additions", color = TerminalGreen, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                        Text("+$file.additions", color = AwakiTheme.extra.success, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
                       }
                       if (file.deletions > 0) {
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("-$file.deletions", color = DangerRed, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                        Text("-$file.deletions", color = MaterialTheme.colorScheme.error, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
                       }
                     }
                   }
@@ -1159,14 +1164,14 @@ fun GitScreen(
               .fillMaxWidth()
               .heightIn(max = 240.dp),
             shape = RoundedCornerShape(8.dp),
-            color = DarkSurfaceElevated,
-            border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorderSubtle)
+            color = MaterialTheme.colorScheme.surfaceContainer,
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
           ) {
             LazyColumn(modifier = Modifier.padding(10.dp)) {
               item {
                 Text(
                   text = diffText,
-                  color = TextCode,
+                  color = AwakiTheme.extra.textCode,
                   fontSize = 10.sp,
                   fontFamily = FontFamily.Monospace,
                   lineHeight = 14.sp
@@ -1178,8 +1183,8 @@ fun GitScreen(
           Surface(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(8.dp),
-            color = DangerRedBg.copy(alpha = 0.25f),
-            border = androidx.compose.foundation.BorderStroke(1.dp, DangerRed.copy(alpha = 0.5f))
+            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.25f),
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f))
           ) {
             Row(
               modifier = Modifier
@@ -1187,13 +1192,13 @@ fun GitScreen(
                 .padding(horizontal = 12.dp, vertical = 10.dp),
               verticalAlignment = Alignment.CenterVertically
             ) {
-              Icon(Icons.Outlined.Warning, contentDescription = null, tint = DangerRed, modifier = Modifier.size(15.dp))
+              Icon(Icons.Outlined.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(15.dp))
               Spacer(modifier = Modifier.width(8.dp))
-              Text(errorText, color = DangerRed, fontSize = 11.sp, lineHeight = 15.sp, modifier = Modifier.weight(1f))
+              Text(errorText, color = MaterialTheme.colorScheme.error, fontSize = 11.sp, lineHeight = 15.sp, modifier = Modifier.weight(1f))
             }
           }
         } else {
-          Text("No file details available.", color = TextMuted, fontSize = 11.sp)
+          Text("No file details available.", color = AwakiTheme.extra.textMuted, fontSize = 11.sp)
         }
 
         Spacer(modifier = Modifier.height(20.dp))
@@ -1208,17 +1213,17 @@ fun GitScreen(
 
     AlertDialog(
       onDismissRequest = { commitToReset = null },
-      icon = { Icon(Icons.Outlined.Warning, contentDescription = null, tint = DangerRed) },
-      title = { Text("Reset Current Branch?", color = TextPrimary, fontWeight = FontWeight.Bold) },
+      icon = { Icon(Icons.Outlined.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+      title = { Text("Reset Current Branch?", color = MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Bold) },
       text = {
         Column {
           Text(
             "Reset branch \"${repoStatus.currentBranch}\" HEAD to commit ${commit.hash.take(7)} (\"${commit.message}\")?",
-            color = TextSecondary,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             fontSize = 13.sp
           )
           Spacer(modifier = Modifier.height(14.dp))
-          Text("Select reset mode:", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+          Text("Select reset mode:", color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
           Spacer(modifier = Modifier.height(8.dp))
 
           // Mode 1: Soft
@@ -1226,7 +1231,7 @@ fun GitScreen(
             modifier = Modifier
               .fillMaxWidth()
               .clip(RoundedCornerShape(6.dp))
-              .background(if (resetMode == ResetMode.SOFT) DarkSurfaceHighlight else Color.Transparent)
+              .background(if (resetMode == ResetMode.SOFT) MaterialTheme.colorScheme.surfaceContainerHigh else Color.Transparent)
               .clickable { resetMode = ResetMode.SOFT }
               .padding(8.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -1234,8 +1239,8 @@ fun GitScreen(
             RadioButton(selected = resetMode == ResetMode.SOFT, onClick = { resetMode = ResetMode.SOFT })
             Spacer(modifier = Modifier.width(6.dp))
             Column {
-              Text("Soft (--soft)", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-              Text("Keeps all changes staged in your index", color = TextMuted, fontSize = 10.sp)
+              Text("Soft (--soft)", color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+              Text("Keeps all changes staged in your index", color = AwakiTheme.extra.textMuted, fontSize = 10.sp)
             }
           }
 
@@ -1244,7 +1249,7 @@ fun GitScreen(
             modifier = Modifier
               .fillMaxWidth()
               .clip(RoundedCornerShape(6.dp))
-              .background(if (resetMode == ResetMode.MIXED) DarkSurfaceHighlight else Color.Transparent)
+              .background(if (resetMode == ResetMode.MIXED) MaterialTheme.colorScheme.surfaceContainerHigh else Color.Transparent)
               .clickable { resetMode = ResetMode.MIXED }
               .padding(8.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -1252,8 +1257,8 @@ fun GitScreen(
             RadioButton(selected = resetMode == ResetMode.MIXED, onClick = { resetMode = ResetMode.MIXED })
             Spacer(modifier = Modifier.width(6.dp))
             Column {
-              Text("Mixed (--mixed)", color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-              Text("Keeps changes in working tree unstaged", color = TextMuted, fontSize = 10.sp)
+              Text("Mixed (--mixed)", color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+              Text("Keeps changes in working tree unstaged", color = AwakiTheme.extra.textMuted, fontSize = 10.sp)
             }
           }
 
@@ -1262,7 +1267,7 @@ fun GitScreen(
             modifier = Modifier
               .fillMaxWidth()
               .clip(RoundedCornerShape(6.dp))
-              .background(if (resetMode == ResetMode.HARD) DarkSurfaceHighlight else Color.Transparent)
+              .background(if (resetMode == ResetMode.HARD) MaterialTheme.colorScheme.surfaceContainerHigh else Color.Transparent)
               .clickable { resetMode = ResetMode.HARD }
               .padding(8.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -1270,12 +1275,12 @@ fun GitScreen(
             RadioButton(
               selected = resetMode == ResetMode.HARD,
               onClick = { resetMode = ResetMode.HARD },
-              colors = RadioButtonDefaults.colors(selectedColor = DangerRed)
+              colors = RadioButtonDefaults.colors(selectedColor = MaterialTheme.colorScheme.error)
             )
             Spacer(modifier = Modifier.width(6.dp))
             Column {
-              Text("Hard (--hard) [DESTRUCTIVE]", color = DangerRed, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-              Text("Permanently discards all working tree modifications", color = DangerRed.copy(alpha = 0.8f), fontSize = 10.sp)
+              Text("Hard (--hard) [DESTRUCTIVE]", color = MaterialTheme.colorScheme.error, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+              Text("Permanently discards all working tree modifications", color = MaterialTheme.colorScheme.error.copy(alpha = 0.8f), fontSize = 10.sp)
             }
           }
         }
@@ -1290,17 +1295,20 @@ fun GitScreen(
             commitToReset = null
             viewModel.resetToCommit(h, m)
           },
-          colors = ButtonDefaults.buttonColors(containerColor = if (resetMode == ResetMode.HARD) DangerRed else WarningAmber)
+          colors = ButtonDefaults.buttonColors(
+            containerColor = if (resetMode == ResetMode.HARD) MaterialTheme.colorScheme.error else AwakiTheme.extra.warning,
+            contentColor = if (resetMode == ResetMode.HARD) MaterialTheme.colorScheme.onError else AwakiTheme.extra.onWarning
+          )
         ) {
-          Text("Reset Branch", color = Color.White)
+          Text("Reset Branch")
         }
       },
       dismissButton = {
         OutlinedButton(onClick = { commitToReset = null }) {
-          Text("Cancel", color = TextSecondary)
+          Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
       },
-      containerColor = DarkSurface,
+      containerColor = MaterialTheme.colorScheme.surface,
       shape = RoundedCornerShape(12.dp)
     )
   }
@@ -1346,16 +1354,16 @@ private fun GitOverviewTab(
         Card(
           modifier = Modifier.fillMaxWidth(),
           shape = RoundedCornerShape(10.dp),
-          colors = CardDefaults.cardColors(containerColor = DangerRedBg.copy(alpha = 0.3f)),
-          border = androidx.compose.foundation.BorderStroke(1.dp, DangerRed.copy(alpha = 0.6f))
+          colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)),
+          border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.6f))
         ) {
           Column(modifier = Modifier.padding(14.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-              Icon(Icons.Outlined.Warning, contentDescription = null, tint = DangerRed, modifier = Modifier.size(18.dp))
+              Icon(Icons.Outlined.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
               Spacer(modifier = Modifier.width(8.dp))
               Text(
                 text = repoStatus.activeOperation.label,
-                color = DangerRed,
+                color = MaterialTheme.colorScheme.error,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Bold
               )
@@ -1364,7 +1372,7 @@ private fun GitOverviewTab(
               Spacer(modifier = Modifier.height(4.dp))
               Text(
                 text = "${repoStatus.conflictedFiles.size} conflicted files need resolution in Changes tab.",
-                color = TextPrimary,
+                color = MaterialTheme.colorScheme.onSurface,
                 fontSize = 11.sp
               )
             }
@@ -1379,7 +1387,10 @@ private fun GitOverviewTab(
                     else -> {}
                   }
                 },
-                colors = ButtonDefaults.buttonColors(containerColor = TerminalGreen),
+                colors = ButtonDefaults.buttonColors(
+                  containerColor = AwakiTheme.extra.success,
+                  contentColor = AwakiTheme.extra.onSuccess
+                ),
                 modifier = Modifier.height(30.dp),
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
               ) {
@@ -1395,11 +1406,11 @@ private fun GitOverviewTab(
                     else -> {}
                   }
                 },
-                border = androidx.compose.foundation.BorderStroke(1.dp, DangerRed),
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.error),
                 modifier = Modifier.height(30.dp),
                 contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
               ) {
-                Text("Abort", fontSize = 11.sp, color = DangerRed)
+                Text("Abort", fontSize = 11.sp, color = MaterialTheme.colorScheme.error)
               }
             }
           }
@@ -1412,8 +1423,8 @@ private fun GitOverviewTab(
       Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = DarkSurface),
-        border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorderSubtle)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
       ) {
         Column(modifier = Modifier.padding(16.dp)) {
           Row(
@@ -1422,14 +1433,14 @@ private fun GitOverviewTab(
             verticalAlignment = Alignment.CenterVertically
           ) {
             Column {
-              Text("CURRENT BRANCH", color = TextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp)
+              Text("CURRENT BRANCH", color = AwakiTheme.extra.textMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp)
               Spacer(modifier = Modifier.height(4.dp))
               Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Outlined.ForkRight, contentDescription = null, tint = ElectricBlueGlow, modifier = Modifier.size(16.dp))
+                Icon(Icons.Outlined.ForkRight, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
                   text = repoStatus.currentBranch,
-                  color = TextPrimary,
+                  color = MaterialTheme.colorScheme.onSurface,
                   fontSize = 16.sp,
                   fontFamily = FontFamily.Monospace,
                   fontWeight = FontWeight.Bold
@@ -1440,7 +1451,7 @@ private fun GitOverviewTab(
             // Clean vs Dirty working tree indicator
             Surface(
               shape = RoundedCornerShape(20.dp),
-              color = if (repoStatus.isClean) TerminalGreenBg.copy(alpha = 0.3f) else WarningAmberBg.copy(alpha = 0.3f)
+              color = if (repoStatus.isClean) AwakiTheme.extra.successContainer.copy(alpha = 0.3f) else AwakiTheme.extra.warningContainer.copy(alpha = 0.3f)
             ) {
               Row(
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
@@ -1450,12 +1461,12 @@ private fun GitOverviewTab(
                   modifier = Modifier
                     .size(6.dp)
                     .clip(CircleShape)
-                    .background(if (repoStatus.isClean) TerminalGreen else WarningAmber)
+                    .background(if (repoStatus.isClean) AwakiTheme.extra.success else AwakiTheme.extra.warning)
                 )
                 Spacer(modifier = Modifier.width(4.dp))
                 Text(
                   text = if (repoStatus.isClean) "Clean Tree" else "${repoStatus.totalChangedFiles} uncommitted",
-                  color = if (repoStatus.isClean) TerminalGreen else WarningAmber,
+                  color = if (repoStatus.isClean) AwakiTheme.extra.success else AwakiTheme.extra.warning,
                   fontSize = 10.sp,
                   fontWeight = FontWeight.SemiBold
                 )
@@ -1464,7 +1475,7 @@ private fun GitOverviewTab(
           }
 
           Spacer(modifier = Modifier.height(14.dp))
-          HorizontalDivider(color = DarkBorderSubtle)
+          HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
           Spacer(modifier = Modifier.height(12.dp))
 
           // Upstream tracking & Ahead/Behind
@@ -1474,29 +1485,29 @@ private fun GitOverviewTab(
             verticalAlignment = Alignment.CenterVertically
           ) {
             Column {
-              Text("TRACKING UPSTREAM", color = TextMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+              Text("TRACKING UPSTREAM", color = AwakiTheme.extra.textMuted, fontSize = 10.sp, fontWeight = FontWeight.Bold)
               Spacer(modifier = Modifier.height(2.dp))
               Text(
                 text = repoStatus.upstreamBranch ?: "None configured",
-                color = if (repoStatus.upstreamBranch != null) TextCode else TextMuted,
+                color = if (repoStatus.upstreamBranch != null) AwakiTheme.extra.textCode else AwakiTheme.extra.textMuted,
                 fontSize = 11.sp,
                 fontFamily = FontFamily.Monospace
               )
             }
 
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-              Surface(shape = RoundedCornerShape(6.dp), color = DarkSurfaceElevated) {
+              Surface(shape = RoundedCornerShape(6.dp), color = MaterialTheme.colorScheme.surfaceContainer) {
                 Row(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                  Icon(Icons.Outlined.ArrowUpward, contentDescription = null, tint = ElectricBlueGlow, modifier = Modifier.size(12.dp))
+                  Icon(Icons.Outlined.ArrowUpward, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(12.dp))
                   Spacer(modifier = Modifier.width(3.dp))
-                  Text("${repoStatus.aheadCount} ahead", color = ElectricBlueGlow, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                  Text("${repoStatus.aheadCount} ahead", color = MaterialTheme.colorScheme.primary, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
                 }
               }
-              Surface(shape = RoundedCornerShape(6.dp), color = DarkSurfaceElevated) {
+              Surface(shape = RoundedCornerShape(6.dp), color = MaterialTheme.colorScheme.surfaceContainer) {
                 Row(modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                  Icon(Icons.Outlined.ArrowDownward, contentDescription = null, tint = WarningAmber, modifier = Modifier.size(12.dp))
+                  Icon(Icons.Outlined.ArrowDownward, contentDescription = null, tint = AwakiTheme.extra.warning, modifier = Modifier.size(12.dp))
                   Spacer(modifier = Modifier.width(3.dp))
-                  Text("${repoStatus.behindCount} behind", color = WarningAmber, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                  Text("${repoStatus.behindCount} behind", color = AwakiTheme.extra.warning, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
                 }
               }
             }
@@ -1515,7 +1526,7 @@ private fun GitOverviewTab(
                 .weight(1.2f)
                 .height(36.dp)
                 .testTag("btn_git_sync"),
-              colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
+              colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
               contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp)
             ) {
               Icon(Icons.Outlined.Sync, contentDescription = null, modifier = Modifier.size(15.dp))
@@ -1529,9 +1540,9 @@ private fun GitOverviewTab(
                 .weight(1f)
                 .height(36.dp),
               contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
-              border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder)
+              border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
             ) {
-              Text("Fetch", fontSize = 11.sp, color = TextPrimary)
+              Text("Fetch", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface)
             }
 
             OutlinedButton(
@@ -1540,9 +1551,9 @@ private fun GitOverviewTab(
                 .weight(1f)
                 .height(36.dp),
               contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
-              border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder)
+              border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
             ) {
-              Text("Pull", fontSize = 11.sp, color = TextPrimary)
+              Text("Pull", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface)
             }
 
             OutlinedButton(
@@ -1551,9 +1562,9 @@ private fun GitOverviewTab(
                 .weight(1f)
                 .height(36.dp),
               contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
-              border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder)
+              border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
             ) {
-              Text("Push", fontSize = 11.sp, color = TextPrimary)
+              Text("Push", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface)
             }
           }
         }
@@ -1572,7 +1583,7 @@ private fun GitOverviewTab(
           title = "Branches",
           count = branchesCount.toString(),
           icon = Icons.Outlined.ForkRight,
-          iconTint = ElectricBlueGlow,
+          iconTint = MaterialTheme.colorScheme.primary,
           onClick = { onNavigateToTab(GitTab.BRANCHES) }
         )
 
@@ -1582,7 +1593,7 @@ private fun GitOverviewTab(
           title = "Commits",
           count = repoStatus.headCommitHash?.take(7) ?: "Log",
           icon = Icons.Outlined.History,
-          iconTint = IndigoAccent,
+          iconTint = MaterialTheme.colorScheme.tertiary,
           onClick = { onNavigateToTab(GitTab.COMMITS) }
         )
 
@@ -1592,7 +1603,7 @@ private fun GitOverviewTab(
           title = "Stashes",
           count = stashesCount.toString(),
           icon = Icons.Outlined.Bookmarks,
-          iconTint = WarningAmber,
+          iconTint = AwakiTheme.extra.warning,
           onClick = { onNavigateToTab(GitTab.STASHES_TAGS) }
         )
 
@@ -1602,7 +1613,7 @@ private fun GitOverviewTab(
           title = "Changes",
           count = repoStatus.totalChangedFiles.toString(),
           icon = Icons.Outlined.Difference,
-          iconTint = TerminalGreen,
+          iconTint = AwakiTheme.extra.success,
           onClick = onNavigateToChanges
         )
       }
@@ -1613,8 +1624,8 @@ private fun GitOverviewTab(
       Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(10.dp),
-        colors = CardDefaults.cardColors(containerColor = DarkSurface),
-        border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorderSubtle)
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
       ) {
         Column(modifier = Modifier.padding(14.dp)) {
           Row(
@@ -1623,36 +1634,36 @@ private fun GitOverviewTab(
             verticalAlignment = Alignment.CenterVertically
           ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-              Icon(Icons.Outlined.Cloud, contentDescription = null, tint = ElectricBlueGlow, modifier = Modifier.size(16.dp))
+              Icon(Icons.Outlined.Cloud, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
               Spacer(modifier = Modifier.width(6.dp))
-              Text("CONFIGURED REMOTES", color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp)
+              Text("CONFIGURED REMOTES", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp)
             }
             TextButton(
               onClick = onAddRemote,
               contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
               modifier = Modifier.height(26.dp)
             ) {
-              Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(13.dp), tint = ElectricBlueGlow)
+              Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(13.dp), tint = MaterialTheme.colorScheme.primary)
               Spacer(modifier = Modifier.width(3.dp))
-              Text("Add Remote", color = ElectricBlueGlow, fontSize = 11.sp)
+              Text("Add Remote", color = MaterialTheme.colorScheme.primary, fontSize = 11.sp)
             }
           }
 
           if (remotes.isEmpty()) {
             Spacer(modifier = Modifier.height(6.dp))
-            Text("No git remotes configured yet.", color = TextMuted, fontSize = 11.sp)
+            Text("No git remotes configured yet.", color = AwakiTheme.extra.textMuted, fontSize = 11.sp)
           } else {
             remotes.forEach { r ->
               Spacer(modifier = Modifier.height(8.dp))
               Surface(
                 shape = RoundedCornerShape(6.dp),
-                color = DarkSurfaceElevated,
+                color = MaterialTheme.colorScheme.surfaceContainer,
                 modifier = Modifier.fillMaxWidth()
               ) {
                 Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)) {
-                  Text(r.name, color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                  Text(r.name, color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                   Spacer(modifier = Modifier.height(2.dp))
-                  Text(r.fetchUrl, color = TextMuted, fontSize = 10.sp, fontFamily = FontFamily.Monospace, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                  Text(r.fetchUrl, color = AwakiTheme.extra.textMuted, fontSize = 10.sp, fontFamily = FontFamily.Monospace, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
               }
             }
@@ -1667,8 +1678,8 @@ private fun GitOverviewTab(
         Card(
           modifier = Modifier.fillMaxWidth(),
           shape = RoundedCornerShape(10.dp),
-          colors = CardDefaults.cardColors(containerColor = DarkSurface),
-          border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorderSubtle)
+          colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+          border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
         ) {
           Column(modifier = Modifier.padding(14.dp)) {
             Row(
@@ -1676,13 +1687,13 @@ private fun GitOverviewTab(
               horizontalArrangement = Arrangement.SpaceBetween,
               verticalAlignment = Alignment.CenterVertically
             ) {
-              Text("LATEST STASH", color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp)
+              Text("LATEST STASH", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp)
               TextButton(
                 onClick = { onNavigateToTab(GitTab.STASHES_TAGS) },
                 contentPadding = PaddingValues(0.dp),
                 modifier = Modifier.height(24.dp)
               ) {
-                Text("View All (${stashes.size})", color = ElectricBlueGlow, fontSize = 11.sp)
+                Text("View All (${stashes.size})", color = MaterialTheme.colorScheme.primary, fontSize = 11.sp)
               }
             }
             Spacer(modifier = Modifier.height(8.dp))
@@ -1693,16 +1704,16 @@ private fun GitOverviewTab(
               verticalAlignment = Alignment.CenterVertically
             ) {
               Column(modifier = Modifier.weight(1f)) {
-                Text(topStash.message.ifBlank { "WIP on ${topStash.branch}" }, color = TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-                Text("stash@{${topStash.index}} · ${topStash.date}", color = TextMuted, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                Text(topStash.message.ifBlank { "WIP on ${topStash.branch}" }, color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                Text("stash@{${topStash.index}} · ${topStash.date}", color = AwakiTheme.extra.textMuted, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
               }
               Button(
                 onClick = { onPopStash(topStash.index) },
                 modifier = Modifier.height(28.dp),
                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = DarkSurfaceHighlight)
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)
               ) {
-                Text("Pop", fontSize = 11.sp, color = TextPrimary)
+                Text("Pop", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface)
               }
             }
           }
@@ -1750,18 +1761,18 @@ private fun GitBranchesTab(
       OutlinedTextField(
         value = searchQuery,
         onValueChange = { searchQuery = it },
-        placeholder = { Text("Search branches...", color = TextMuted, fontSize = 12.sp) },
+        placeholder = { Text("Search branches...", color = AwakiTheme.extra.textMuted, fontSize = 12.sp) },
         singleLine = true,
         modifier = Modifier
           .weight(1f)
           .height(44.dp),
         colors = OutlinedTextFieldDefaults.colors(
-          focusedBorderColor = ElectricBlue,
-          unfocusedBorderColor = DarkBorder,
-          focusedTextColor = TextPrimary,
-          unfocusedTextColor = TextPrimary,
-          focusedContainerColor = DarkSurface,
-          unfocusedContainerColor = DarkSurface
+          focusedBorderColor = MaterialTheme.colorScheme.primary,
+          unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+          focusedTextColor = MaterialTheme.colorScheme.onSurface,
+          unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+          focusedContainerColor = MaterialTheme.colorScheme.surface,
+          unfocusedContainerColor = MaterialTheme.colorScheme.surface
         ),
         textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp, fontFamily = FontFamily.Monospace)
       )
@@ -1769,7 +1780,7 @@ private fun GitBranchesTab(
       Button(
         onClick = onCreateBranch,
         modifier = Modifier.height(44.dp),
-        colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
+        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 0.dp)
       ) {
         Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(15.dp))
@@ -1788,7 +1799,7 @@ private fun GitBranchesTab(
     ) {
       Text(
         text = "${filteredBranches.size} branches",
-        color = TextMuted,
+        color = AwakiTheme.extra.textMuted,
         fontSize = 11.sp
       )
 
@@ -1796,11 +1807,11 @@ private fun GitBranchesTab(
         Checkbox(
           checked = showRemoteBranches,
           onCheckedChange = { showRemoteBranches = it },
-          colors = CheckboxDefaults.colors(checkedColor = ElectricBlue),
+          colors = CheckboxDefaults.colors(checkedColor = MaterialTheme.colorScheme.primary),
           modifier = Modifier.size(24.dp)
         )
         Spacer(modifier = Modifier.width(4.dp))
-        Text("Show remote branches", color = TextSecondary, fontSize = 11.sp)
+        Text("Show remote branches", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
       }
     }
 
@@ -1809,7 +1820,7 @@ private fun GitBranchesTab(
     // Branches List
     if (filteredBranches.isEmpty()) {
       Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text("No branches match your query.", color = TextMuted, fontSize = 12.sp)
+        Text("No branches match your query.", color = AwakiTheme.extra.textMuted, fontSize = 12.sp)
       }
     } else {
       LazyColumn(
@@ -1850,8 +1861,8 @@ private fun BranchRowItem(
 
   Surface(
     shape = RoundedCornerShape(8.dp),
-    color = if (isCurrent) DarkSurfaceHighlight else DarkSurface,
-    border = androidx.compose.foundation.BorderStroke(1.dp, if (isCurrent) ElectricBlue else DarkBorderSubtle),
+    color = if (isCurrent) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surface,
+    border = androidx.compose.foundation.BorderStroke(1.dp, if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant),
     modifier = Modifier.fillMaxWidth()
   ) {
     Row(
@@ -1866,7 +1877,7 @@ private fun BranchRowItem(
         Icon(
           imageVector = if (branch.isRemote) Icons.Outlined.Cloud else Icons.Outlined.ForkRight,
           contentDescription = null,
-          tint = if (isCurrent) ElectricBlueGlow else if (branch.isRemote) CyanAccent else TextMuted,
+          tint = if (isCurrent) MaterialTheme.colorScheme.primary else if (branch.isRemote) MaterialTheme.colorScheme.secondary else AwakiTheme.extra.textMuted,
           modifier = Modifier.size(16.dp)
         )
         Spacer(modifier = Modifier.width(8.dp))
@@ -1874,7 +1885,7 @@ private fun BranchRowItem(
           Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
               text = branch.name,
-              color = if (isCurrent) ElectricBlueGlow else TextPrimary,
+              color = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
               fontSize = 13.sp,
               fontFamily = FontFamily.Monospace,
               fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Medium,
@@ -1885,11 +1896,11 @@ private fun BranchRowItem(
               Spacer(modifier = Modifier.width(6.dp))
               Surface(
                 shape = RoundedCornerShape(4.dp),
-                color = ElectricBlue.copy(alpha = 0.2f)
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
               ) {
                 Text(
                   text = "CURRENT",
-                  color = ElectricBlueGlow,
+                  color = MaterialTheme.colorScheme.primary,
                   fontSize = 9.sp,
                   fontWeight = FontWeight.Bold,
                   modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
@@ -1901,11 +1912,11 @@ private fun BranchRowItem(
           if (branch.upstream != null || branch.ahead > 0 || branch.behind > 0) {
             Row(verticalAlignment = Alignment.CenterVertically) {
               if (branch.upstream != null) {
-                Text(branch.upstream, color = TextMuted, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                Text(branch.upstream, color = AwakiTheme.extra.textMuted, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
               }
               if (branch.ahead > 0 || branch.behind > 0) {
                 Spacer(modifier = Modifier.width(6.dp))
-                Text("↑${branch.ahead}  ↓${branch.behind}", color = TextSecondary, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                Text("↑${branch.ahead}  ↓${branch.behind}", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
               }
             }
           }
@@ -1915,43 +1926,43 @@ private fun BranchRowItem(
       // Branch Actions Menu
       Box {
         IconButton(onClick = { showMenu = true }, modifier = Modifier.size(28.dp)) {
-          Icon(Icons.Default.MoreVert, contentDescription = "Branch options", tint = TextSecondary, modifier = Modifier.size(16.dp))
+          Icon(Icons.Default.MoreVert, contentDescription = "Branch options", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
         }
 
         DropdownMenu(
           expanded = showMenu,
           onDismissRequest = { showMenu = false },
-          modifier = Modifier.background(DarkSurfaceElevated)
+          modifier = Modifier.background(MaterialTheme.colorScheme.surfaceContainer)
         ) {
           if (!isCurrent) {
             DropdownMenuItem(
-              text = { Text("Checkout Branch", color = TextPrimary, fontSize = 12.sp) },
+              text = { Text("Checkout Branch", color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp) },
               onClick = { showMenu = false; onCheckout() },
-              leadingIcon = { Icon(Icons.Outlined.Check, contentDescription = null, tint = ElectricBlue, modifier = Modifier.size(14.dp)) }
+              leadingIcon = { Icon(Icons.Outlined.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(14.dp)) }
             )
             DropdownMenuItem(
-              text = { Text("Merge into current", color = TextPrimary, fontSize = 12.sp) },
+              text = { Text("Merge into current", color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp) },
               onClick = { showMenu = false; onMerge() },
-              leadingIcon = { Icon(Icons.AutoMirrored.Outlined.MergeType, contentDescription = null, tint = TerminalGreen, modifier = Modifier.size(14.dp)) }
+              leadingIcon = { Icon(Icons.AutoMirrored.Outlined.MergeType, contentDescription = null, tint = AwakiTheme.extra.success, modifier = Modifier.size(14.dp)) }
             )
             DropdownMenuItem(
-              text = { Text("Rebase current onto this", color = TextPrimary, fontSize = 12.sp) },
+              text = { Text("Rebase current onto this", color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp) },
               onClick = { showMenu = false; onRebase() },
-              leadingIcon = { Icon(Icons.AutoMirrored.Outlined.CallSplit, contentDescription = null, tint = WarningAmber, modifier = Modifier.size(14.dp)) }
+              leadingIcon = { Icon(Icons.AutoMirrored.Outlined.CallSplit, contentDescription = null, tint = AwakiTheme.extra.warning, modifier = Modifier.size(14.dp)) }
             )
           }
 
           DropdownMenuItem(
-            text = { Text("Rename Branch", color = TextPrimary, fontSize = 12.sp) },
+            text = { Text("Rename Branch", color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp) },
             onClick = { showMenu = false; onRename() },
-            leadingIcon = { Icon(Icons.Outlined.Edit, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(14.dp)) }
+            leadingIcon = { Icon(Icons.Outlined.Edit, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(14.dp)) }
           )
 
           if (!isCurrent) {
             DropdownMenuItem(
-              text = { Text("Delete Branch", color = DangerRed, fontSize = 12.sp) },
+              text = { Text("Delete Branch", color = MaterialTheme.colorScheme.error, fontSize = 12.sp) },
               onClick = { showMenu = false; onDelete() },
-              leadingIcon = { Icon(Icons.Outlined.Delete, contentDescription = null, tint = DangerRed, modifier = Modifier.size(14.dp)) }
+              leadingIcon = { Icon(Icons.Outlined.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(14.dp)) }
             )
           }
         }
@@ -1995,11 +2006,11 @@ private fun GitCommitsTab(
         .height(34.dp)
         .testTag("btn_undo_last_commit"),
       contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-      border = androidx.compose.foundation.BorderStroke(1.dp, WarningAmber.copy(alpha = 0.5f))
+      border = androidx.compose.foundation.BorderStroke(1.dp, AwakiTheme.extra.warning.copy(alpha = 0.5f))
     ) {
-      Icon(Icons.AutoMirrored.Outlined.Undo, contentDescription = null, tint = WarningAmber, modifier = Modifier.size(14.dp))
+      Icon(Icons.AutoMirrored.Outlined.Undo, contentDescription = null, tint = AwakiTheme.extra.warning, modifier = Modifier.size(14.dp))
       Spacer(modifier = Modifier.width(6.dp))
-      Text("Undo last commit (keeps changes staged)", fontSize = 11.sp, color = TextPrimary)
+      Text("Undo last commit (keeps changes staged)", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface)
     }
 
     Spacer(modifier = Modifier.height(8.dp))
@@ -2008,18 +2019,18 @@ private fun GitCommitsTab(
     OutlinedTextField(
       value = searchQuery,
       onValueChange = { searchQuery = it },
-      placeholder = { Text("Filter commits by message, author, hash...", color = TextMuted, fontSize = 12.sp) },
+      placeholder = { Text("Filter commits by message, author, hash...", color = AwakiTheme.extra.textMuted, fontSize = 12.sp) },
       singleLine = true,
       modifier = Modifier
         .fillMaxWidth()
         .height(44.dp),
       colors = OutlinedTextFieldDefaults.colors(
-        focusedBorderColor = ElectricBlue,
-        unfocusedBorderColor = DarkBorder,
-        focusedTextColor = TextPrimary,
-        unfocusedTextColor = TextPrimary,
-        focusedContainerColor = DarkSurface,
-        unfocusedContainerColor = DarkSurface
+        focusedBorderColor = MaterialTheme.colorScheme.primary,
+        unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+        focusedTextColor = MaterialTheme.colorScheme.onSurface,
+        unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+        focusedContainerColor = MaterialTheme.colorScheme.surface,
+        unfocusedContainerColor = MaterialTheme.colorScheme.surface
       ),
       textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp, fontFamily = FontFamily.Monospace)
     )
@@ -2028,7 +2039,7 @@ private fun GitCommitsTab(
 
     if (filteredCommits.isEmpty()) {
       Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text("No commits found.", color = TextMuted, fontSize = 12.sp)
+        Text("No commits found.", color = AwakiTheme.extra.textMuted, fontSize = 12.sp)
       }
     } else {
       LazyColumn(
@@ -2053,11 +2064,11 @@ private fun GitCommitsTab(
           ) {
             OutlinedButton(
               onClick = onLoadMore,
-              border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder)
+              border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
             ) {
-              Icon(Icons.Outlined.History, contentDescription = null, modifier = Modifier.size(14.dp), tint = TextSecondary)
+              Icon(Icons.Outlined.History, contentDescription = null, modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
               Spacer(modifier = Modifier.width(6.dp))
-              Text("Load More Commits", color = TextSecondary, fontSize = 12.sp)
+              Text("Load More Commits", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
             }
           }
         }
@@ -2077,8 +2088,8 @@ private fun CommitRowItem(
 ) {
   Surface(
     shape = RoundedCornerShape(8.dp),
-    color = DarkSurface,
-    border = androidx.compose.foundation.BorderStroke(1.dp, if (isHead) ElectricBlue.copy(alpha = 0.5f) else DarkBorderSubtle),
+    color = MaterialTheme.colorScheme.surface,
+    border = androidx.compose.foundation.BorderStroke(1.dp, if (isHead) MaterialTheme.colorScheme.primary.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outlineVariant),
     modifier = Modifier.fillMaxWidth()
   ) {
     Row(
@@ -2093,7 +2104,7 @@ private fun CommitRowItem(
         modifier = Modifier
           .size(8.dp)
           .clip(CircleShape)
-          .background(if (isHead) ElectricBlueGlow else IndigoAccent)
+          .background(if (isHead) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.tertiary)
       )
 
       Spacer(modifier = Modifier.width(10.dp))
@@ -2102,7 +2113,7 @@ private fun CommitRowItem(
         Row(verticalAlignment = Alignment.CenterVertically) {
           Text(
             text = commit.message,
-            color = TextPrimary,
+            color = MaterialTheme.colorScheme.onSurface,
             fontSize = 12.sp,
             fontWeight = FontWeight.SemiBold,
             maxLines = 1,
@@ -2111,8 +2122,8 @@ private fun CommitRowItem(
           )
           if (isHead) {
             Spacer(modifier = Modifier.width(6.dp))
-            Surface(shape = RoundedCornerShape(3.dp), color = ElectricBlue.copy(alpha = 0.25f)) {
-              Text("HEAD", color = ElectricBlueGlow, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp))
+            Surface(shape = RoundedCornerShape(3.dp), color = MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)) {
+              Text("HEAD", color = MaterialTheme.colorScheme.primary, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp))
             }
           }
         }
@@ -2122,7 +2133,7 @@ private fun CommitRowItem(
         Row(verticalAlignment = Alignment.CenterVertically) {
           Text(
             text = commit.hash.take(7),
-            color = ElectricBlueGlow,
+            color = MaterialTheme.colorScheme.primary,
             fontSize = 10.sp,
             fontFamily = FontFamily.Monospace,
             fontWeight = FontWeight.Bold
@@ -2130,13 +2141,13 @@ private fun CommitRowItem(
           Spacer(modifier = Modifier.width(8.dp))
           Text(
             text = "${commit.author} · ${commit.date}",
-            color = TextMuted,
+            color = AwakiTheme.extra.textMuted,
             fontSize = 10.sp
           )
         }
       }
 
-      Icon(Icons.Default.ChevronRight, contentDescription = "View commit", tint = TextMuted, modifier = Modifier.size(16.dp))
+      Icon(Icons.Default.ChevronRight, contentDescription = "View commit", tint = AwakiTheme.extra.textMuted, modifier = Modifier.size(16.dp))
     }
   }
 }
@@ -2171,10 +2182,10 @@ private fun GitStashesAndTagsTab(
         verticalAlignment = Alignment.CenterVertically
       ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-          Text("SAVED STASHES", color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp)
+          Text("SAVED STASHES", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp)
           Spacer(modifier = Modifier.width(6.dp))
-          Surface(shape = RoundedCornerShape(10.dp), color = WarningAmber.copy(alpha = 0.2f)) {
-            Text("${stashes.size}", color = WarningAmber, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp))
+          Surface(shape = RoundedCornerShape(10.dp), color = AwakiTheme.extra.warning.copy(alpha = 0.2f)) {
+            Text("${stashes.size}", color = AwakiTheme.extra.warning, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp))
           }
         }
 
@@ -2182,7 +2193,7 @@ private fun GitStashesAndTagsTab(
           onClick = onCreateStash,
           modifier = Modifier.height(28.dp),
           contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-          colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue)
+          colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
         ) {
           Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(12.dp))
           Spacer(modifier = Modifier.width(3.dp))
@@ -2195,12 +2206,12 @@ private fun GitStashesAndTagsTab(
       item {
         Surface(
           shape = RoundedCornerShape(8.dp),
-          color = DarkSurface,
+          color = MaterialTheme.colorScheme.surface,
           modifier = Modifier.fillMaxWidth()
         ) {
           Text(
             "No stashes saved. Stashing allows you to save uncommitted changes without making a commit.",
-            color = TextMuted,
+            color = AwakiTheme.extra.textMuted,
             fontSize = 11.sp,
             modifier = Modifier.padding(14.dp)
           )
@@ -2210,8 +2221,8 @@ private fun GitStashesAndTagsTab(
       items(stashes, key = { it.ref }) { stash ->
         Surface(
           shape = RoundedCornerShape(8.dp),
-          color = DarkSurface,
-          border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorderSubtle),
+          color = MaterialTheme.colorScheme.surface,
+          border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
           modifier = Modifier.fillMaxWidth()
         ) {
           Column(modifier = Modifier.padding(12.dp)) {
@@ -2223,14 +2234,14 @@ private fun GitStashesAndTagsTab(
               Column(modifier = Modifier.weight(1f)) {
                 Text(
                   text = stash.message.ifBlank { "WIP on ${stash.branch}" },
-                  color = TextPrimary,
+                  color = MaterialTheme.colorScheme.onSurface,
                   fontSize = 12.sp,
                   fontWeight = FontWeight.SemiBold
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
                   text = "stash@{${stash.index}} on ${stash.branch} · ${stash.date}",
-                  color = TextMuted,
+                  color = AwakiTheme.extra.textMuted,
                   fontSize = 10.sp,
                   fontFamily = FontFamily.Monospace
                 )
@@ -2248,7 +2259,7 @@ private fun GitStashesAndTagsTab(
                 onClick = { onPopStash(stash.index) },
                 modifier = Modifier.height(28.dp),
                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue)
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
               ) {
                 Text("Pop", fontSize = 11.sp)
               }
@@ -2257,18 +2268,18 @@ private fun GitStashesAndTagsTab(
                 onClick = { onApplyStash(stash.index) },
                 modifier = Modifier.height(28.dp),
                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder)
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
               ) {
-                Text("Apply", fontSize = 11.sp, color = TextPrimary)
+                Text("Apply", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface)
               }
 
               OutlinedButton(
                 onClick = { onDropStash(stash) },
                 modifier = Modifier.height(28.dp),
                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-                border = androidx.compose.foundation.BorderStroke(1.dp, DangerRed.copy(alpha = 0.5f))
+                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.5f))
               ) {
-                Text("Drop", fontSize = 11.sp, color = DangerRed)
+                Text("Drop", fontSize = 11.sp, color = MaterialTheme.colorScheme.error)
               }
             }
           }
@@ -2285,10 +2296,10 @@ private fun GitStashesAndTagsTab(
         verticalAlignment = Alignment.CenterVertically
       ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-          Text("GIT TAGS", color = TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp)
+          Text("GIT TAGS", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp)
           Spacer(modifier = Modifier.width(6.dp))
-          Surface(shape = RoundedCornerShape(10.dp), color = CyanAccent.copy(alpha = 0.2f)) {
-            Text("${tags.size}", color = CyanAccent, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp))
+          Surface(shape = RoundedCornerShape(10.dp), color = MaterialTheme.colorScheme.secondary.copy(alpha = 0.2f)) {
+            Text("${tags.size}", color = MaterialTheme.colorScheme.secondary, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp))
           }
         }
 
@@ -2297,20 +2308,20 @@ private fun GitStashesAndTagsTab(
             onClick = onPushTags,
             modifier = Modifier.height(28.dp),
             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-            border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder)
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
           ) {
-            Text("Push Tags", fontSize = 11.sp, color = TextSecondary)
+            Text("Push Tags", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
           }
 
           Button(
             onClick = onCreateTag,
             modifier = Modifier.height(28.dp),
             contentPadding = PaddingValues(horizontal = 10.dp, vertical = 0.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = CyanAccent)
+            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
           ) {
             Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(12.dp))
             Spacer(modifier = Modifier.width(3.dp))
-            Text("Create Tag", fontSize = 11.sp, color = DarkBackground, fontWeight = FontWeight.SemiBold)
+            Text("Create Tag", fontSize = 11.sp, color = MaterialTheme.colorScheme.background, fontWeight = FontWeight.SemiBold)
           }
         }
       }
@@ -2320,12 +2331,12 @@ private fun GitStashesAndTagsTab(
       item {
         Surface(
           shape = RoundedCornerShape(8.dp),
-          color = DarkSurface,
+          color = MaterialTheme.colorScheme.surface,
           modifier = Modifier.fillMaxWidth()
         ) {
           Text(
             "No tags found. Tags are useful for marking release points (e.g. v1.0.0).",
-            color = TextMuted,
+            color = AwakiTheme.extra.textMuted,
             fontSize = 11.sp,
             modifier = Modifier.padding(14.dp)
           )
@@ -2335,8 +2346,8 @@ private fun GitStashesAndTagsTab(
       items(tags) { tagName ->
         Surface(
           shape = RoundedCornerShape(8.dp),
-          color = DarkSurface,
-          border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorderSubtle),
+          color = MaterialTheme.colorScheme.surface,
+          border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
           modifier = Modifier.fillMaxWidth()
         ) {
           Row(
@@ -2347,16 +2358,16 @@ private fun GitStashesAndTagsTab(
             verticalAlignment = Alignment.CenterVertically
           ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-              Icon(Icons.Outlined.Bookmarks, contentDescription = null, tint = CyanAccent, modifier = Modifier.size(15.dp))
+              Icon(Icons.Outlined.Bookmarks, contentDescription = null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(15.dp))
               Spacer(modifier = Modifier.width(8.dp))
-              Text(tagName, color = TextPrimary, fontSize = 12.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+              Text(tagName, color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
             }
 
             IconButton(
               onClick = { onDeleteTag(tagName) },
               modifier = Modifier.size(28.dp)
             ) {
-              Icon(Icons.Outlined.Delete, contentDescription = "Delete tag", tint = DangerRed.copy(alpha = 0.8f), modifier = Modifier.size(15.dp))
+              Icon(Icons.Outlined.Delete, contentDescription = "Delete tag", tint = MaterialTheme.colorScheme.error.copy(alpha = 0.8f), modifier = Modifier.size(15.dp))
             }
           }
         }
@@ -2379,8 +2390,8 @@ private fun OverviewMetricCard(
 ) {
   Surface(
     shape = RoundedCornerShape(8.dp),
-    color = DarkSurface,
-    border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorderSubtle),
+    color = MaterialTheme.colorScheme.surface,
+    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
     modifier = modifier.clickable { onClick() }
   ) {
     Column(
@@ -2391,7 +2402,7 @@ private fun OverviewMetricCard(
       Spacer(modifier = Modifier.height(4.dp))
       Text(
         text = count,
-        color = TextPrimary,
+        color = MaterialTheme.colorScheme.onSurface,
         fontSize = 13.sp,
         fontWeight = FontWeight.Bold,
         fontFamily = FontFamily.Monospace,
@@ -2400,7 +2411,7 @@ private fun OverviewMetricCard(
       )
       Text(
         text = title,
-        color = TextMuted,
+        color = AwakiTheme.extra.textMuted,
         fontSize = 10.sp
       )
     }

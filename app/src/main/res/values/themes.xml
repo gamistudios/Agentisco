@@ -1,5 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <style name="Theme.Awaki" parent="android:Theme.DeviceDefault.NoActionBar" />
+    <!--
+      DeviceDefault tracks the system's light/dark mode, but Awaki only ships dark, so a
+      light-mode phone would flash a white window before Compose draws its first frame.
+    -->
+    <style name="Theme.Awaki" parent="android:Theme.DeviceDefault.NoActionBar">
+        <item name="android:windowBackground">@color/awaki_window_background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
 </resources>

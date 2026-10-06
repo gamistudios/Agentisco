@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -20,6 +21,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.awaki.ui.theme.*
+import com.awaki.ui.theme.AwakiTheme
 
 enum class DevKeyMode {
   SYMBOLS,
@@ -49,8 +51,8 @@ fun DevKeyboardBar(
 
   Surface(
     modifier = modifier.fillMaxWidth(),
-    color = DarkSurface,
-    border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorderSubtle)
+    color = MaterialTheme.colorScheme.surface,
+    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
   ) {
     Column(modifier = Modifier.fillMaxWidth()) {
       // Mode selector tabs
@@ -66,7 +68,7 @@ fun DevKeyboardBar(
         ModeTab("Navigation", currentMode == DevKeyMode.NAVIGATION, "tab_navigation") { currentMode = DevKeyMode.NAVIGATION }
       }
 
-      HorizontalDivider(color = DarkBorderSubtle, thickness = 0.5.dp)
+      HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
 
       // Horizontal keys row
       Row(
@@ -173,7 +175,7 @@ private fun ModeTab(
   Box(
     modifier = Modifier
       .clip(RoundedCornerShape(4.dp))
-      .background(if (isSelected) DarkSurfaceHighlight else DarkSurface)
+      .background(if (isSelected) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surface)
       .clickable(onClick = onClick)
       .padding(horizontal = 8.dp, vertical = 2.dp)
       .testTag(testTag)
@@ -182,7 +184,7 @@ private fun ModeTab(
       text = name,
       fontSize = 11.sp,
       fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-      color = if (isSelected) ElectricBlueGlow else TextMuted
+      color = if (isSelected) MaterialTheme.colorScheme.primary else AwakiTheme.extra.textMuted
     )
   }
 }
@@ -203,15 +205,15 @@ private fun DevKeyButton(
       .clip(RoundedCornerShape(6.dp))
       .background(
         when {
-          isArmed -> ElectricBlue.copy(alpha = 0.25f)
-          isModifier -> DarkSurfaceElevated
-          isAction -> DarkSurfaceElevated
-          else -> DarkSurfaceHighlight
+          isArmed -> MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)
+          isModifier -> MaterialTheme.colorScheme.surfaceContainer
+          isAction -> MaterialTheme.colorScheme.surfaceContainer
+          else -> MaterialTheme.colorScheme.surfaceContainerHigh
         }
       )
       .border(
         1.dp,
-        if (isArmed) ElectricBlue else DarkBorder,
+        if (isArmed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
         RoundedCornerShape(6.dp)
       )
       .clickable(onClick = onClick)
@@ -221,7 +223,7 @@ private fun DevKeyButton(
   ) {
     Text(
       text = text,
-      color = if (isArmed) ElectricBlueGlow else if (isAction || isModifier) CyanAccent else TextCode,
+      color = if (isArmed) MaterialTheme.colorScheme.primary else if (isAction || isModifier) MaterialTheme.colorScheme.secondary else AwakiTheme.extra.textCode,
       fontSize = 13.sp,
       fontWeight = if (isArmed) FontWeight.Bold else FontWeight.Medium,
       fontFamily = FontFamily.Monospace

@@ -15,6 +15,7 @@ import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.*
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -28,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.awaki.core.model.AppDestination
 import com.awaki.ui.theme.*
+import com.awaki.ui.theme.AwakiTheme
 
 /**
  * The IDE's three primary surfaces. Projects and Terminal are workspaces with
@@ -44,9 +46,9 @@ fun AgentIDEBottomBar(
 ) {
   Surface(
     modifier = modifier.fillMaxWidth(),
-    color = DarkSurface,
+    color = MaterialTheme.colorScheme.surface,
     tonalElevation = 8.dp,
-    border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorderSubtle)
+    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
   ) {
     Row(
       modifier = Modifier
@@ -106,18 +108,18 @@ private fun BottomNavItem(
   // highlight. The hero (Agent) keeps its standing by wearing an accent *outline*
   // when it is not selected — important, but visibly not the open screen.
   val container = when {
-    selected -> ElectricBlue.copy(alpha = 0.20f)
+    selected -> MaterialTheme.colorScheme.primary.copy(alpha = 0.20f)
     else -> Color.Transparent
   }
   val borderColor = when {
-    selected -> ElectricBlue.copy(alpha = 0.55f)
-    isHero -> ElectricBlue.copy(alpha = 0.22f)
+    selected -> MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)
+    isHero -> MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)
     else -> Color.Transparent
   }
   val contentColor = when {
-    selected -> ElectricBlueGlow
-    isHero -> ElectricBlueGlow.copy(alpha = 0.62f)
-    else -> TextMuted
+    selected -> MaterialTheme.colorScheme.primary
+    isHero -> MaterialTheme.colorScheme.primary.copy(alpha = 0.62f)
+    else -> AwakiTheme.extra.textMuted
   }
 
   Box(
@@ -126,7 +128,7 @@ private fun BottomNavItem(
       .clip(RoundedCornerShape(14.dp))
       .clickable(
         interactionSource = interactionSource,
-        indication = ripple(color = ElectricBlue),
+        indication = ripple(color = MaterialTheme.colorScheme.primary),
         onClick = onClick
       )
       .testTag(testTag),
@@ -159,8 +161,8 @@ private fun BottomNavItem(
               .align(Alignment.TopEnd)
               .offset(x = 2.dp, y = (-2).dp)
               .clip(CircleShape)
-              .background(TerminalGreen)
-              .border(1.dp, DarkSurface, CircleShape)
+              .background(AwakiTheme.extra.success)
+              .border(1.dp, MaterialTheme.colorScheme.surface, CircleShape)
           )
         }
       }

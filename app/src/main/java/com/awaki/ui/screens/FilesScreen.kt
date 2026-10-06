@@ -21,6 +21,7 @@ import androidx.compose.material.icons.automirrored.outlined.Undo
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -41,18 +42,36 @@ import com.awaki.data.model.FileDiff
 import com.awaki.data.model.ProjectFile
 import com.awaki.ui.WorkspaceViewModel
 import com.awaki.ui.theme.*
+import com.awaki.ui.theme.AwakiTheme
 import com.awaki.workspace.git.GitRepoStatus
 
 /**
  * Git working-tree status for files.
  */
-enum class FileGitState(val label: String, val badgeColor: Color, val bgColor: Color) {
-  NONE("", Color.Transparent, Color.Transparent),
-  MODIFIED("M", WarningAmber, WarningAmberBg),
-  STAGED("S", TerminalGreen, TerminalGreenBg),
-  UNTRACKED("U", CyanAccent, Color(0xFF083344)),
-  CONFLICT("!", DangerRed, DangerRedBg)
+enum class FileGitState(val label: String) {
+  NONE(""),
+  MODIFIED("M"),
+  STAGED("S"),
+  UNTRACKED("U"),
+  CONFLICT("!")
 }
+
+/**
+ * The badge's ink. An enum constant cannot read the theme, so the colours live
+ * beside it instead of inside it — which is also what lets a theme change
+ * repaint the explorer rather than leaving one palette stuck in the tree.
+ */
+@Composable
+fun FileGitState.badgeInk(): Color = when (this) {
+  FileGitState.NONE -> MaterialTheme.colorScheme.onSurface
+  FileGitState.MODIFIED -> AwakiTheme.extra.warning
+  FileGitState.STAGED -> AwakiTheme.extra.success
+  FileGitState.UNTRACKED -> MaterialTheme.colorScheme.secondary
+  FileGitState.CONFLICT -> MaterialTheme.colorScheme.error
+}
+
+@Composable
+fun FileGitState.badgeWash(): Color = badgeInk().copy(alpha = 0.16f)
 
 /**
  * Sorting orders for the files explorer.
@@ -233,13 +252,13 @@ fun FilesScreen(
 
   Scaffold(
     modifier = modifier.fillMaxSize(),
-    containerColor = DarkBackground,
+    containerColor = MaterialTheme.colorScheme.background,
     snackbarHost = { SnackbarHost(snackbarHostState) },
     topBar = {
       Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = DarkSurface,
-        border = BorderStroke(1.dp, DarkBorderSubtle)
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
       ) {
         Column {
           // Main Top App Bar
@@ -261,7 +280,7 @@ fun FilesScreen(
                 Icon(
                   imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
                   contentDescription = "Back to Editor",
-                  tint = TextSecondary,
+                  tint = MaterialTheme.colorScheme.onSurfaceVariant,
                   modifier = Modifier.size(20.dp)
                 )
               }
@@ -272,7 +291,7 @@ fun FilesScreen(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                   Text(
                     text = activeProject.name.ifBlank { "Workspace" },
-                    color = TextPrimary,
+                    color = MaterialTheme.colorScheme.onSurface,
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Bold,
                     maxLines = 1,
@@ -281,9 +300,9 @@ fun FilesScreen(
                   if (activeProject.branch.isNotBlank()) {
                     Spacer(modifier = Modifier.width(6.dp))
                     Surface(
-                      color = DarkSurfaceElevated,
+                      color = MaterialTheme.colorScheme.surfaceContainer,
                       shape = RoundedCornerShape(4.dp),
-                      border = BorderStroke(1.dp, DarkBorderSubtle)
+                      border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
                     ) {
                       Row(
                         modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
@@ -292,13 +311,13 @@ fun FilesScreen(
                         Icon(
                           imageVector = Icons.Outlined.ForkRight,
                           contentDescription = "Branch",
-                          tint = CyanAccent,
+                          tint = MaterialTheme.colorScheme.secondary,
                           modifier = Modifier.size(11.dp)
                         )
                         Spacer(modifier = Modifier.width(3.dp))
                         Text(
                           text = activeProject.branch,
-                          color = CyanAccent,
+                          color = MaterialTheme.colorScheme.secondary,
                           fontSize = 10.sp,
                           fontFamily = FontFamily.Monospace
                         )
@@ -309,7 +328,7 @@ fun FilesScreen(
 
                 Text(
                   text = "$totalFilesCount files • ${if (repoStatus.totalChangedFiles > 0) "${repoStatus.totalChangedFiles} modified" else "working tree clean"}",
-                  color = if (repoStatus.totalChangedFiles > 0) WarningAmber else TextMuted,
+                  color = if (repoStatus.totalChangedFiles > 0) AwakiTheme.extra.warning else AwakiTheme.extra.textMuted,
                   fontSize = 11.sp
                 )
               }
@@ -326,13 +345,13 @@ fun FilesScreen(
                 modifier = Modifier
                   .size(34.dp)
                   .clip(RoundedCornerShape(6.dp))
-                  .background(DarkSurfaceElevated)
+                  .background(MaterialTheme.colorScheme.surfaceContainer)
                   .testTag("btn_refresh_files")
               ) {
                 Icon(
                   imageVector = Icons.Default.Refresh,
                   contentDescription = "Refresh files",
-                  tint = if (isFilesLoading) ElectricBlueGlow else TextSecondary,
+                  tint = if (isFilesLoading) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                   modifier = Modifier.size(16.dp)
                 )
               }
@@ -346,13 +365,13 @@ fun FilesScreen(
                 modifier = Modifier
                   .size(34.dp)
                   .clip(RoundedCornerShape(6.dp))
-                  .background(if (isSearchActive) DarkSurfaceHighlight else DarkSurfaceElevated)
+                  .background(if (isSearchActive) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceContainer)
                   .testTag("btn_search_files")
               ) {
                 Icon(
                   imageVector = Icons.Default.Search,
                   contentDescription = "Search files",
-                  tint = if (isSearchActive) ElectricBlueGlow else TextSecondary,
+                  tint = if (isSearchActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                   modifier = Modifier.size(16.dp)
                 )
               }
@@ -365,13 +384,13 @@ fun FilesScreen(
                 modifier = Modifier
                   .size(34.dp)
                   .clip(RoundedCornerShape(6.dp))
-                  .background(DarkSurfaceElevated)
+                  .background(MaterialTheme.colorScheme.surfaceContainer)
                   .testTag("btn_collapse_all")
               ) {
                 Icon(
                   imageVector = if (expandedDirs.isEmpty()) Icons.Outlined.FolderOpen else Icons.Outlined.Folder,
                   contentDescription = if (expandedDirs.isEmpty()) "Expand all" else "Collapse all",
-                  tint = TextSecondary,
+                  tint = MaterialTheme.colorScheme.onSurfaceVariant,
                   modifier = Modifier.size(16.dp)
                 )
               }
@@ -383,12 +402,12 @@ fun FilesScreen(
                   modifier = Modifier
                     .size(34.dp)
                     .clip(RoundedCornerShape(6.dp))
-                    .background(DarkSurfaceElevated)
+                    .background(MaterialTheme.colorScheme.surfaceContainer)
                 ) {
                   Icon(
                     imageVector = Icons.Outlined.Tune,
                     contentDescription = "Sort and filter options",
-                    tint = TextSecondary,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(16.dp)
                   )
                 }
@@ -396,11 +415,11 @@ fun FilesScreen(
                 DropdownMenu(
                   expanded = showSortMenu,
                   onDismissRequest = { showSortMenu = false },
-                  modifier = Modifier.background(DarkSurface)
+                  modifier = Modifier.background(MaterialTheme.colorScheme.surface)
                 ) {
                   Text(
                     text = "SORT FILES BY",
-                    color = TextMuted,
+                    color = AwakiTheme.extra.textMuted,
                     fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
@@ -410,14 +429,14 @@ fun FilesScreen(
                       text = {
                         Text(
                           text = order.title,
-                          color = if (sortOrder == order) ElectricBlueGlow else TextPrimary,
+                          color = if (sortOrder == order) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                           fontSize = 12.sp,
                           fontWeight = if (sortOrder == order) FontWeight.Bold else FontWeight.Normal
                         )
                       },
                       leadingIcon = {
                         if (sortOrder == order) {
-                          Icon(Icons.Outlined.Check, contentDescription = null, tint = ElectricBlueGlow, modifier = Modifier.size(14.dp))
+                          Icon(Icons.Outlined.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(14.dp))
                         } else {
                           Spacer(modifier = Modifier.size(14.dp))
                         }
@@ -428,12 +447,12 @@ fun FilesScreen(
                       }
                     )
                   }
-                  HorizontalDivider(color = DarkBorderSubtle)
+                  HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                   DropdownMenuItem(
                     text = {
                       Text(
                         text = if (showHiddenFiles) "Hide dotfiles" else "Show dotfiles (.env, .git)",
-                        color = TextSecondary,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 12.sp
                       )
                     },
@@ -441,7 +460,7 @@ fun FilesScreen(
                       Icon(
                         imageVector = if (showHiddenFiles) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
                         contentDescription = null,
-                        tint = TextMuted,
+                        tint = AwakiTheme.extra.textMuted,
                         modifier = Modifier.size(14.dp)
                       )
                     },
@@ -460,7 +479,7 @@ fun FilesScreen(
             Column(
               modifier = Modifier
                 .fillMaxWidth()
-                .background(DarkSurface)
+                .background(MaterialTheme.colorScheme.surface)
                 .padding(bottom = 8.dp)
             ) {
               // Search Input Row
@@ -468,9 +487,9 @@ fun FilesScreen(
                 modifier = Modifier
                   .fillMaxWidth()
                   .padding(horizontal = 12.dp, vertical = 4.dp),
-                color = DarkBackground,
+                color = MaterialTheme.colorScheme.background,
                 shape = RoundedCornerShape(8.dp),
-                border = BorderStroke(1.dp, if (searchQuery.isNotEmpty()) ElectricBlue else DarkBorder)
+                border = BorderStroke(1.dp, if (searchQuery.isNotEmpty()) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline)
               ) {
                 Row(
                   modifier = Modifier
@@ -481,14 +500,14 @@ fun FilesScreen(
                   Icon(
                     imageVector = Icons.Default.Search,
                     contentDescription = null,
-                    tint = TextMuted,
+                    tint = AwakiTheme.extra.textMuted,
                     modifier = Modifier.size(16.dp)
                   )
                   Spacer(modifier = Modifier.width(8.dp))
                   TextField(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
-                    placeholder = { Text("Search files by name (e.g. Chat.tsx, package.json)...", color = TextMuted, fontSize = 12.sp) },
+                    placeholder = { Text("Search files by name (e.g. Chat.tsx, package.json)...", color = AwakiTheme.extra.textMuted, fontSize = 12.sp) },
                     singleLine = true,
                     modifier = Modifier
                       .weight(1f)
@@ -496,8 +515,8 @@ fun FilesScreen(
                     colors = TextFieldDefaults.colors(
                       focusedContainerColor = Color.Transparent,
                       unfocusedContainerColor = Color.Transparent,
-                      focusedTextColor = TextPrimary,
-                      unfocusedTextColor = TextPrimary,
+                      focusedTextColor = MaterialTheme.colorScheme.onSurface,
+                      unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
                       focusedIndicatorColor = Color.Transparent,
                       unfocusedIndicatorColor = Color.Transparent
                     )
@@ -507,7 +526,7 @@ fun FilesScreen(
                       onClick = { searchQuery = "" },
                       modifier = Modifier.size(28.dp)
                     ) {
-                      Icon(Icons.Default.Clear, contentDescription = "Clear", tint = TextMuted, modifier = Modifier.size(16.dp))
+                      Icon(Icons.Default.Clear, contentDescription = "Clear", tint = AwakiTheme.extra.textMuted, modifier = Modifier.size(16.dp))
                     }
                   }
                 }
@@ -526,8 +545,8 @@ fun FilesScreen(
                   Surface(
                     onClick = { activeCategory = category },
                     shape = RoundedCornerShape(14.dp),
-                    color = if (isSelected) ElectricBlue else DarkSurfaceElevated,
-                    border = BorderStroke(1.dp, if (isSelected) ElectricBlueGlow else DarkBorderSubtle),
+                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainer,
+                    border = BorderStroke(1.dp, if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant),
                     modifier = Modifier.height(28.dp)
                   ) {
                     Box(
@@ -536,7 +555,7 @@ fun FilesScreen(
                     ) {
                       Text(
                         text = category.label,
-                        color = if (isSelected) Color.White else TextSecondary,
+                        color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 11.sp,
                         fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal
                       )
@@ -553,8 +572,8 @@ fun FilesScreen(
               modifier = Modifier
                 .fillMaxWidth()
                 .height(2.dp),
-              color = ElectricBlueGlow,
-              trackColor = DarkSurfaceElevated
+              color = MaterialTheme.colorScheme.primary,
+              trackColor = MaterialTheme.colorScheme.surfaceContainer
             )
           }
         }
@@ -564,8 +583,8 @@ fun FilesScreen(
       // Bottom Action Toolbar: Quick Create
       Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = DarkSurface,
-        border = BorderStroke(1.dp, DarkBorderSubtle)
+        color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
       ) {
         Row(
           modifier = Modifier
@@ -586,7 +605,7 @@ fun FilesScreen(
               .weight(1f)
               .height(42.dp)
               .testTag("btn_add_file"),
-            colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
+            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
             shape = RoundedCornerShape(8.dp)
           ) {
             Icon(Icons.Default.Add, contentDescription = "Add File", modifier = Modifier.size(16.dp))
@@ -605,13 +624,13 @@ fun FilesScreen(
               .weight(1f)
               .height(42.dp)
               .testTag("btn_add_folder"),
-            border = BorderStroke(1.dp, DarkBorder),
-            colors = ButtonDefaults.outlinedButtonColors(containerColor = DarkSurfaceElevated),
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+            colors = ButtonDefaults.outlinedButtonColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
             shape = RoundedCornerShape(8.dp)
           ) {
-            Icon(Icons.Outlined.CreateNewFolder, contentDescription = "Add Folder", tint = TextPrimary, modifier = Modifier.size(16.dp))
+            Icon(Icons.Outlined.CreateNewFolder, contentDescription = "Add Folder", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(16.dp))
             Spacer(modifier = Modifier.width(6.dp))
-            Text("New Folder", fontSize = 13.sp, color = TextPrimary)
+            Text("New Folder", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurface)
           }
         }
       }
@@ -633,10 +652,10 @@ fun FilesScreen(
             horizontalAlignment = Alignment.CenterHorizontally
           ) {
             Spacer(modifier = Modifier.height(24.dp))
-            CircularProgressIndicator(color = ElectricBlueGlow, modifier = Modifier.size(28.dp), strokeWidth = 2.5.dp)
+            CircularProgressIndicator(color = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp), strokeWidth = 2.5.dp)
             Spacer(modifier = Modifier.height(8.dp))
-            Text("Indexing workspace files…", color = TextSecondary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-            Text("Building file tree structure and checking Git status", color = TextMuted, fontSize = 11.sp)
+            Text("Indexing workspace files…", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+            Text("Building file tree structure and checking Git status", color = AwakiTheme.extra.textMuted, fontSize = 11.sp)
           }
         }
 
@@ -679,13 +698,13 @@ fun FilesScreen(
               ) {
                 Text(
                   text = "SEARCH RESULTS (${searchResults.size})",
-                  color = TextMuted,
+                  color = AwakiTheme.extra.textMuted,
                   fontSize = 10.sp,
                   fontWeight = FontWeight.Bold
                 )
                 Text(
                   text = "Matching \"$searchQuery\"",
-                  color = ElectricBlueGlow,
+                  color = MaterialTheme.colorScheme.primary,
                   fontSize = 11.sp
                 )
               }
@@ -773,7 +792,7 @@ fun FilesScreen(
 
     AlertDialog(
       onDismissRequest = { showFileOptionsDialog = false },
-      containerColor = DarkSurface,
+      containerColor = MaterialTheme.colorScheme.surface,
       shape = RoundedCornerShape(12.dp),
       title = {
         Row(
@@ -786,7 +805,7 @@ fun FilesScreen(
           Column(modifier = Modifier.weight(1f)) {
             Text(
               text = file.name,
-              color = TextPrimary,
+              color = MaterialTheme.colorScheme.onSurface,
               fontSize = 15.sp,
               fontWeight = FontWeight.Bold,
               fontFamily = FontFamily.Monospace,
@@ -795,7 +814,7 @@ fun FilesScreen(
             )
             Text(
               text = "${formatFileSize(file.sizeBytes)} • ${file.path}",
-              color = TextMuted,
+              color = AwakiTheme.extra.textMuted,
               fontSize = 10.sp,
               fontFamily = FontFamily.Monospace,
               maxLines = 1,
@@ -811,7 +830,7 @@ fun FilesScreen(
             icon = Icons.Outlined.Edit,
             title = "Open in Editor",
             subtitle = "View and edit source code in active tab",
-            tint = ElectricBlueGlow
+            tint = MaterialTheme.colorScheme.primary
           ) {
             showFileOptionsDialog = false
             viewModel.openFile(file)
@@ -823,7 +842,7 @@ fun FilesScreen(
             icon = Icons.Default.AutoAwesome,
             title = "Ask AI Agent",
             subtitle = "Explain, refactor, find bugs, or write tests",
-            tint = CyanAccent
+            tint = MaterialTheme.colorScheme.secondary
           ) {
             showFileOptionsDialog = false
             showAskAgentDialog = true
@@ -835,7 +854,7 @@ fun FilesScreen(
               icon = Icons.Outlined.Difference,
               title = "View Git Changes & Diff",
               subtitle = "Inspect additions, deletions, and working tree changes",
-              tint = WarningAmber
+              tint = AwakiTheme.extra.warning
             ) {
               showFileOptionsDialog = false
               onNavigate(AppDestination.DIFF)
@@ -846,7 +865,7 @@ fun FilesScreen(
               icon = if (isStaged) Icons.AutoMirrored.Outlined.Undo else Icons.Outlined.CheckCircleOutline,
               title = if (isStaged) "Unstage File" else "Stage File with Git",
               subtitle = if (isStaged) "Remove from staging area" else "Stage changes for next commit",
-              tint = TerminalGreen
+              tint = AwakiTheme.extra.success
             ) {
               showFileOptionsDialog = false
               if (isStaged) viewModel.unstageFile(file.path) else viewModel.stageFile(file.path)
@@ -858,7 +877,7 @@ fun FilesScreen(
             icon = Icons.Outlined.ContentCopy,
             title = "Copy Relative Path",
             subtitle = file.path,
-            tint = TextSecondary
+            tint = MaterialTheme.colorScheme.onSurfaceVariant
           ) {
             showFileOptionsDialog = false
             clipboardManager.setText(AnnotatedString(file.path))
@@ -869,7 +888,7 @@ fun FilesScreen(
             icon = Icons.Outlined.FolderSpecial,
             title = "Duplicate File",
             subtitle = "Create a copy with identical content",
-            tint = TextSecondary
+            tint = MaterialTheme.colorScheme.onSurfaceVariant
           ) {
             showFileOptionsDialog = false
             viewModel.duplicateFile(file.path)
@@ -880,7 +899,7 @@ fun FilesScreen(
             icon = Icons.Outlined.DriveFileRenameOutline,
             title = "Rename File",
             subtitle = "Change file name or extension",
-            tint = TextSecondary
+            tint = MaterialTheme.colorScheme.onSurfaceVariant
           ) {
             showFileOptionsDialog = false
             renameInput = file.name
@@ -892,7 +911,7 @@ fun FilesScreen(
             icon = Icons.Outlined.Delete,
             title = "Delete File",
             subtitle = "Permanently remove from workspace",
-            tint = DangerRed
+            tint = MaterialTheme.colorScheme.error
           ) {
             showFileOptionsDialog = false
             showDeleteConfirmDialog = true
@@ -902,7 +921,7 @@ fun FilesScreen(
       confirmButton = {},
       dismissButton = {
         TextButton(onClick = { showFileOptionsDialog = false }) {
-          Text("Close", color = TextMuted)
+          Text("Close", color = AwakiTheme.extra.textMuted)
         }
       }
     )
@@ -913,22 +932,22 @@ fun FilesScreen(
     val folder = selectedFileForMenu!!
     AlertDialog(
       onDismissRequest = { showFolderOptionsDialog = false },
-      containerColor = DarkSurface,
+      containerColor = MaterialTheme.colorScheme.surface,
       shape = RoundedCornerShape(12.dp),
       title = {
         Row(verticalAlignment = Alignment.CenterVertically) {
-          Icon(Icons.Filled.Folder, contentDescription = null, tint = ElectricBlueGlow, modifier = Modifier.size(20.dp))
+          Icon(Icons.Filled.Folder, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
           Spacer(modifier = Modifier.width(8.dp))
           Column {
             Text(
               text = folder.name,
-              color = TextPrimary,
+              color = MaterialTheme.colorScheme.onSurface,
               fontSize = 15.sp,
               fontWeight = FontWeight.Bold
             )
             Text(
               text = folder.path,
-              color = TextMuted,
+              color = AwakiTheme.extra.textMuted,
               fontSize = 10.sp,
               fontFamily = FontFamily.Monospace
             )
@@ -941,7 +960,7 @@ fun FilesScreen(
             icon = Icons.Default.Add,
             title = "New File in this folder",
             subtitle = "Create file under ${folder.path}/",
-            tint = ElectricBlueGlow
+            tint = MaterialTheme.colorScheme.primary
           ) {
             showFolderOptionsDialog = false
             targetFolderForCreation = folder.path
@@ -953,7 +972,7 @@ fun FilesScreen(
             icon = Icons.Outlined.CreateNewFolder,
             title = "New Subfolder",
             subtitle = "Create subfolder under ${folder.path}/",
-            tint = CyanAccent
+            tint = MaterialTheme.colorScheme.secondary
           ) {
             showFolderOptionsDialog = false
             targetFolderForCreation = folder.path
@@ -965,7 +984,7 @@ fun FilesScreen(
             icon = Icons.Outlined.ContentCopy,
             title = "Copy Folder Path",
             subtitle = folder.path,
-            tint = TextSecondary
+            tint = MaterialTheme.colorScheme.onSurfaceVariant
           ) {
             showFolderOptionsDialog = false
             clipboardManager.setText(AnnotatedString(folder.path))
@@ -975,7 +994,7 @@ fun FilesScreen(
             icon = Icons.Outlined.DriveFileRenameOutline,
             title = "Rename Folder",
             subtitle = "Change directory name",
-            tint = TextSecondary
+            tint = MaterialTheme.colorScheme.onSurfaceVariant
           ) {
             showFolderOptionsDialog = false
             renameInput = folder.name
@@ -986,7 +1005,7 @@ fun FilesScreen(
             icon = Icons.Outlined.Delete,
             title = "Delete Folder",
             subtitle = "Permanently delete folder and all contents",
-            tint = DangerRed
+            tint = MaterialTheme.colorScheme.error
           ) {
             showFolderOptionsDialog = false
             showDeleteConfirmDialog = true
@@ -996,7 +1015,7 @@ fun FilesScreen(
       confirmButton = {},
       dismissButton = {
         TextButton(onClick = { showFolderOptionsDialog = false }) {
-          Text("Close", color = TextMuted)
+          Text("Close", color = AwakiTheme.extra.textMuted)
         }
       }
     )
@@ -1007,20 +1026,20 @@ fun FilesScreen(
     val file = selectedFileForMenu!!
     AlertDialog(
       onDismissRequest = { showDeleteConfirmDialog = false },
-      containerColor = DarkSurface,
+      containerColor = MaterialTheme.colorScheme.surface,
       shape = RoundedCornerShape(12.dp),
       icon = {
         Icon(
           imageVector = Icons.Outlined.Warning,
           contentDescription = "Warning",
-          tint = DangerRed,
+          tint = MaterialTheme.colorScheme.error,
           modifier = Modifier.size(32.dp)
         )
       },
       title = {
         Text(
           text = if (file.isDirectory) "Delete Folder?" else "Delete File?",
-          color = TextPrimary,
+          color = MaterialTheme.colorScheme.onSurface,
           fontSize = 16.sp,
           fontWeight = FontWeight.Bold
         )
@@ -1033,17 +1052,17 @@ fun FilesScreen(
             } else {
               "Are you sure you want to permanently delete \"${file.name}\"?"
             },
-            color = TextSecondary,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             fontSize = 13.sp
           )
           Surface(
-            color = DarkBackground,
+            color = MaterialTheme.colorScheme.background,
             shape = RoundedCornerShape(6.dp),
             modifier = Modifier.fillMaxWidth()
           ) {
             Text(
               text = file.path,
-              color = DangerRed,
+              color = MaterialTheme.colorScheme.error,
               fontSize = 11.sp,
               fontFamily = FontFamily.Monospace,
               modifier = Modifier.padding(8.dp)
@@ -1051,7 +1070,7 @@ fun FilesScreen(
           }
           Text(
             text = "This action is permanent and cannot be undone.",
-            color = TextMuted,
+            color = AwakiTheme.extra.textMuted,
             fontSize = 11.sp
           )
         }
@@ -1062,7 +1081,7 @@ fun FilesScreen(
             viewModel.deleteFile(file.path)
             showDeleteConfirmDialog = false
           },
-          colors = ButtonDefaults.buttonColors(containerColor = DangerRed)
+          colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
         ) {
           Icon(Icons.Outlined.Delete, contentDescription = null, modifier = Modifier.size(14.dp))
           Spacer(modifier = Modifier.width(4.dp))
@@ -1071,7 +1090,7 @@ fun FilesScreen(
       },
       dismissButton = {
         TextButton(onClick = { showDeleteConfirmDialog = false }) {
-          Text("Cancel", color = TextSecondary)
+          Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
       }
     )
@@ -1084,13 +1103,13 @@ fun FilesScreen(
 
     AlertDialog(
       onDismissRequest = { showNewFileDialog = false },
-      containerColor = DarkSurface,
+      containerColor = MaterialTheme.colorScheme.surface,
       shape = RoundedCornerShape(12.dp),
       title = {
         Row(verticalAlignment = Alignment.CenterVertically) {
-          Icon(Icons.AutoMirrored.Outlined.Article, contentDescription = null, tint = ElectricBlueGlow, modifier = Modifier.size(18.dp))
+          Icon(Icons.AutoMirrored.Outlined.Article, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
           Spacer(modifier = Modifier.width(8.dp))
-          Text("Create New File", color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+          Text("Create New File", color = MaterialTheme.colorScheme.onSurface, fontSize = 16.sp, fontWeight = FontWeight.Bold)
         }
       },
       text = {
@@ -1098,35 +1117,35 @@ fun FilesScreen(
           if (targetFolderForCreation.isNotBlank()) {
             Text(
               text = "Target directory: $targetFolderForCreation/",
-              color = CyanAccent,
+              color = MaterialTheme.colorScheme.secondary,
               fontSize = 11.sp,
               fontFamily = FontFamily.Monospace
             )
           }
-          Text("Enter file name or relative path:", color = TextSecondary, fontSize = 12.sp)
+          Text("Enter file name or relative path:", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
           TextField(
             value = newFileNameInput,
             onValueChange = {
               newFileNameInput = it
               hasError = false
             },
-            placeholder = { Text("e.g. utils.ts, components/Button.tsx", color = TextMuted, fontSize = 12.sp) },
+            placeholder = { Text("e.g. utils.ts, components/Button.tsx", color = AwakiTheme.extra.textMuted, fontSize = 12.sp) },
             singleLine = true,
             isError = hasError,
             modifier = Modifier
               .fillMaxWidth()
               .testTag("input_new_file"),
             colors = TextFieldDefaults.colors(
-              focusedContainerColor = DarkBackground,
-              unfocusedContainerColor = DarkBackground,
-              focusedTextColor = TextPrimary,
-              unfocusedTextColor = TextPrimary,
-              focusedIndicatorColor = ElectricBlue,
-              unfocusedIndicatorColor = DarkBorder
+              focusedContainerColor = MaterialTheme.colorScheme.background,
+              unfocusedContainerColor = MaterialTheme.colorScheme.background,
+              focusedTextColor = MaterialTheme.colorScheme.onSurface,
+              unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+              focusedIndicatorColor = MaterialTheme.colorScheme.primary,
+              unfocusedIndicatorColor = MaterialTheme.colorScheme.outline
             )
           )
           if (hasError) {
-            Text(errorMessage, color = DangerRed, fontSize = 11.sp)
+            Text(errorMessage, color = MaterialTheme.colorScheme.error, fontSize = 11.sp)
           }
         }
       },
@@ -1149,14 +1168,14 @@ fun FilesScreen(
               errorMessage = "Failed to create file (already exists or invalid path)"
             }
           },
-          colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue)
+          colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
         ) {
           Text("Create & Open")
         }
       },
       dismissButton = {
         TextButton(onClick = { showNewFileDialog = false }) {
-          Text("Cancel", color = TextMuted)
+          Text("Cancel", color = AwakiTheme.extra.textMuted)
         }
       }
     )
@@ -1169,13 +1188,13 @@ fun FilesScreen(
 
     AlertDialog(
       onDismissRequest = { showNewFolderDialog = false },
-      containerColor = DarkSurface,
+      containerColor = MaterialTheme.colorScheme.surface,
       shape = RoundedCornerShape(12.dp),
       title = {
         Row(verticalAlignment = Alignment.CenterVertically) {
-          Icon(Icons.Outlined.CreateNewFolder, contentDescription = null, tint = CyanAccent, modifier = Modifier.size(18.dp))
+          Icon(Icons.Outlined.CreateNewFolder, contentDescription = null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(18.dp))
           Spacer(modifier = Modifier.width(8.dp))
-          Text("Create New Folder", color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+          Text("Create New Folder", color = MaterialTheme.colorScheme.onSurface, fontSize = 16.sp, fontWeight = FontWeight.Bold)
         }
       },
       text = {
@@ -1183,35 +1202,35 @@ fun FilesScreen(
           if (targetFolderForCreation.isNotBlank()) {
             Text(
               text = "Parent directory: $targetFolderForCreation/",
-              color = CyanAccent,
+              color = MaterialTheme.colorScheme.secondary,
               fontSize = 11.sp,
               fontFamily = FontFamily.Monospace
             )
           }
-          Text("Enter folder name or path:", color = TextSecondary, fontSize = 12.sp)
+          Text("Enter folder name or path:", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
           TextField(
             value = newFolderNameInput,
             onValueChange = {
               newFolderNameInput = it
               hasError = false
             },
-            placeholder = { Text("e.g. services, hooks, assets", color = TextMuted, fontSize = 12.sp) },
+            placeholder = { Text("e.g. services, hooks, assets", color = AwakiTheme.extra.textMuted, fontSize = 12.sp) },
             singleLine = true,
             isError = hasError,
             modifier = Modifier
               .fillMaxWidth()
               .testTag("input_new_folder"),
             colors = TextFieldDefaults.colors(
-              focusedContainerColor = DarkBackground,
-              unfocusedContainerColor = DarkBackground,
-              focusedTextColor = TextPrimary,
-              unfocusedTextColor = TextPrimary,
-              focusedIndicatorColor = CyanAccent,
-              unfocusedIndicatorColor = DarkBorder
+              focusedContainerColor = MaterialTheme.colorScheme.background,
+              unfocusedContainerColor = MaterialTheme.colorScheme.background,
+              focusedTextColor = MaterialTheme.colorScheme.onSurface,
+              unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+              focusedIndicatorColor = MaterialTheme.colorScheme.secondary,
+              unfocusedIndicatorColor = MaterialTheme.colorScheme.outline
             )
           )
           if (hasError) {
-            Text(errorMessage, color = DangerRed, fontSize = 11.sp)
+            Text(errorMessage, color = MaterialTheme.colorScheme.error, fontSize = 11.sp)
           }
         }
       },
@@ -1233,14 +1252,14 @@ fun FilesScreen(
               errorMessage = "Failed to create folder"
             }
           },
-          colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue)
+          colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
         ) {
           Text("Create Folder")
         }
       },
       dismissButton = {
         TextButton(onClick = { showNewFolderDialog = false }) {
-          Text("Cancel", color = TextMuted)
+          Text("Cancel", color = AwakiTheme.extra.textMuted)
         }
       }
     )
@@ -1251,19 +1270,19 @@ fun FilesScreen(
     val file = selectedFileForMenu!!
     AlertDialog(
       onDismissRequest = { showRenameDialog = false },
-      containerColor = DarkSurface,
+      containerColor = MaterialTheme.colorScheme.surface,
       shape = RoundedCornerShape(12.dp),
       title = {
         Text(
           text = "Rename ${if (file.isDirectory) "Folder" else "File"}",
-          color = TextPrimary,
+          color = MaterialTheme.colorScheme.onSurface,
           fontSize = 16.sp,
           fontWeight = FontWeight.Bold
         )
       },
       text = {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-          Text("Current: ${file.name}", color = TextMuted, fontSize = 11.sp)
+          Text("Current: ${file.name}", color = AwakiTheme.extra.textMuted, fontSize = 11.sp)
           TextField(
             value = renameInput,
             onValueChange = { renameInput = it },
@@ -1272,12 +1291,12 @@ fun FilesScreen(
               .fillMaxWidth()
               .testTag("input_rename_file"),
             colors = TextFieldDefaults.colors(
-              focusedContainerColor = DarkBackground,
-              unfocusedContainerColor = DarkBackground,
-              focusedTextColor = TextPrimary,
-              unfocusedTextColor = TextPrimary,
-              focusedIndicatorColor = ElectricBlue,
-              unfocusedIndicatorColor = DarkBorder
+              focusedContainerColor = MaterialTheme.colorScheme.background,
+              unfocusedContainerColor = MaterialTheme.colorScheme.background,
+              focusedTextColor = MaterialTheme.colorScheme.onSurface,
+              unfocusedTextColor = MaterialTheme.colorScheme.onSurface,
+              focusedIndicatorColor = MaterialTheme.colorScheme.primary,
+              unfocusedIndicatorColor = MaterialTheme.colorScheme.outline
             )
           )
         }
@@ -1291,14 +1310,14 @@ fun FilesScreen(
               showRenameDialog = false
             }
           },
-          colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue)
+          colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
         ) {
           Text("Rename")
         }
       },
       dismissButton = {
         TextButton(onClick = { showRenameDialog = false }) {
-          Text("Cancel", color = TextMuted)
+          Text("Cancel", color = AwakiTheme.extra.textMuted)
         }
       }
     )
@@ -1309,15 +1328,15 @@ fun FilesScreen(
     val file = selectedFileForMenu!!
     AlertDialog(
       onDismissRequest = { showAskAgentDialog = false },
-      containerColor = DarkSurface,
+      containerColor = MaterialTheme.colorScheme.surface,
       shape = RoundedCornerShape(12.dp),
       title = {
         Row(verticalAlignment = Alignment.CenterVertically) {
-          Icon(Icons.Default.AutoAwesome, contentDescription = "Agent", tint = ElectricBlueGlow, modifier = Modifier.size(20.dp))
+          Icon(Icons.Default.AutoAwesome, contentDescription = "Agent", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
           Spacer(modifier = Modifier.width(8.dp))
           Column {
-            Text("Ask Agent on ${file.name}", color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
-            Text("Select an automated task to launch with AI", color = TextMuted, fontSize = 11.sp)
+            Text("Ask Agent on ${file.name}", color = MaterialTheme.colorScheme.onSurface, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            Text("Select an automated task to launch with AI", color = AwakiTheme.extra.textMuted, fontSize = 11.sp)
           }
         }
       },
@@ -1366,7 +1385,7 @@ fun FilesScreen(
       confirmButton = {},
       dismissButton = {
         TextButton(onClick = { showAskAgentDialog = false }) {
-          Text("Cancel", color = TextMuted)
+          Text("Cancel", color = AwakiTheme.extra.textMuted)
         }
       }
     )
@@ -1396,8 +1415,8 @@ private fun FileTreeItemRow(
       .fillMaxWidth()
       .clip(RoundedCornerShape(6.dp))
       .clickable(onClick = onClick),
-    color = if (file.isDirectory) DarkSurfaceElevated else DarkSurface,
-    border = BorderStroke(1.dp, if (file.isDirectory) DarkBorderSubtle else Color.Transparent)
+    color = if (file.isDirectory) MaterialTheme.colorScheme.surfaceContainer else MaterialTheme.colorScheme.surface,
+    border = BorderStroke(1.dp, if (file.isDirectory) MaterialTheme.colorScheme.outlineVariant else Color.Transparent)
   ) {
     Row(
       modifier = Modifier
@@ -1420,7 +1439,7 @@ private fun FileTreeItemRow(
           Icon(
             imageVector = if (isExpanded) Icons.Default.ExpandMore else Icons.AutoMirrored.Filled.KeyboardArrowRight,
             contentDescription = if (isExpanded) "Collapse" else "Expand",
-            tint = TextMuted,
+            tint = AwakiTheme.extra.textMuted,
             modifier = Modifier.size(16.dp)
           )
           Spacer(modifier = Modifier.width(3.dp))
@@ -1446,7 +1465,7 @@ private fun FileTreeItemRow(
           ) {
             Text(
               text = file.name,
-              color = if (gitState != FileGitState.NONE) gitState.badgeColor else TextPrimary,
+              color = gitState.badgeInk(),
               fontSize = 13.sp,
               fontWeight = if (file.isDirectory) FontWeight.SemiBold else FontWeight.Medium,
               fontFamily = if (!file.isDirectory) FontFamily.Monospace else FontFamily.Default,
@@ -1457,13 +1476,13 @@ private fun FileTreeItemRow(
             // Git Status Badge (M, S, U, !)
             if (gitState != FileGitState.NONE) {
               Surface(
-                color = gitState.bgColor,
+                color = gitState.badgeWash(),
                 shape = RoundedCornerShape(3.dp),
-                border = BorderStroke(0.5.dp, gitState.badgeColor)
+                border = BorderStroke(0.5.dp, gitState.badgeInk())
               ) {
                 Text(
                   text = gitState.label,
-                  color = gitState.badgeColor,
+                  color = gitState.badgeInk(),
                   fontSize = 9.sp,
                   fontWeight = FontWeight.Bold,
                   modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
@@ -1475,11 +1494,11 @@ private fun FileTreeItemRow(
             if (diffCounts != null && (diffCounts.first > 0 || diffCounts.second > 0)) {
               Row(verticalAlignment = Alignment.CenterVertically) {
                 if (diffCounts.first > 0) {
-                  Text("+${diffCounts.first}", color = TerminalGreen, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                  Text("+${diffCounts.first}", color = AwakiTheme.extra.success, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
                 }
                 if (diffCounts.second > 0) {
                   Spacer(modifier = Modifier.width(3.dp))
-                  Text("-${diffCounts.second}", color = DangerRed, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                  Text("-${diffCounts.second}", color = MaterialTheme.colorScheme.error, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
                 }
               }
             }
@@ -1489,7 +1508,7 @@ private fun FileTreeItemRow(
           if (showFullPath) {
             Text(
               text = file.path,
-              color = TextMuted,
+              color = AwakiTheme.extra.textMuted,
               fontSize = 10.sp,
               fontFamily = FontFamily.Monospace,
               maxLines = 1,
@@ -1507,7 +1526,7 @@ private fun FileTreeItemRow(
         if (!file.isDirectory && file.sizeBytes > 0) {
           Text(
             text = formatFileSize(file.sizeBytes),
-            color = TextMuted,
+            color = AwakiTheme.extra.textMuted,
             fontSize = 10.sp,
             fontFamily = FontFamily.Monospace,
             modifier = Modifier.padding(end = 4.dp)
@@ -1522,7 +1541,7 @@ private fun FileTreeItemRow(
             Icon(
               imageVector = Icons.Default.AutoAwesome,
               contentDescription = "Ask Agent",
-              tint = CyanAccent,
+              tint = MaterialTheme.colorScheme.secondary,
               modifier = Modifier.size(15.dp)
             )
           }
@@ -1535,7 +1554,7 @@ private fun FileTreeItemRow(
           Icon(
             imageVector = Icons.Outlined.MoreVert,
             contentDescription = "Options",
-            tint = TextMuted,
+            tint = AwakiTheme.extra.textMuted,
             modifier = Modifier.size(16.dp)
           )
         }
@@ -1561,8 +1580,8 @@ private fun FileOptionRowItem(
       .fillMaxWidth()
       .clip(RoundedCornerShape(8.dp))
       .clickable(onClick = onClick),
-    color = DarkBackground,
-    border = BorderStroke(1.dp, DarkBorderSubtle)
+    color = MaterialTheme.colorScheme.background,
+    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
   ) {
     Row(
       modifier = Modifier
@@ -1581,8 +1600,8 @@ private fun FileOptionRowItem(
       }
       Spacer(modifier = Modifier.width(10.dp))
       Column(modifier = Modifier.weight(1f)) {
-        Text(text = title, color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-        Text(text = subtitle, color = TextMuted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(text = title, color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+        Text(text = subtitle, color = AwakiTheme.extra.textMuted, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
       }
     }
   }
@@ -1599,8 +1618,8 @@ private fun AgentTaskPromptItem(
       .fillMaxWidth()
       .clip(RoundedCornerShape(8.dp))
       .clickable(onClick = onClick),
-    color = DarkBackground,
-    border = BorderStroke(1.dp, DarkBorderSubtle)
+    color = MaterialTheme.colorScheme.background,
+    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
   ) {
     Row(
       modifier = Modifier
@@ -1611,13 +1630,13 @@ private fun AgentTaskPromptItem(
       Icon(
         imageVector = Icons.Default.AutoAwesome,
         contentDescription = null,
-        tint = CyanAccent,
+        tint = MaterialTheme.colorScheme.secondary,
         modifier = Modifier.size(16.dp)
       )
       Spacer(modifier = Modifier.width(10.dp))
       Column(modifier = Modifier.weight(1f)) {
-        Text(text = title, color = ElectricBlueGlow, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-        Text(text = desc, color = TextMuted, fontSize = 11.sp)
+        Text(text = title, color = MaterialTheme.colorScheme.primary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+        Text(text = desc, color = AwakiTheme.extra.textMuted, fontSize = 11.sp)
       }
     }
   }
@@ -1639,15 +1658,15 @@ private fun EmptyWorkspaceView(
     Icon(
       imageVector = Icons.Outlined.FolderOpen,
       contentDescription = null,
-      tint = TextMuted,
+      tint = AwakiTheme.extra.textMuted,
       modifier = Modifier.size(56.dp)
     )
     Spacer(modifier = Modifier.height(16.dp))
-    Text("Empty Workspace", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+    Text("Empty Workspace", color = MaterialTheme.colorScheme.onSurface, fontSize = 18.sp, fontWeight = FontWeight.Bold)
     Spacer(modifier = Modifier.height(6.dp))
     Text(
       "No project files found in this workspace directory yet.",
-      color = TextSecondary,
+      color = MaterialTheme.colorScheme.onSurfaceVariant,
       fontSize = 12.sp,
       textAlign = androidx.compose.ui.text.style.TextAlign.Center
     )
@@ -1655,24 +1674,24 @@ private fun EmptyWorkspaceView(
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
       Button(
         onClick = onCreateReadme,
-        colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
+        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
         shape = RoundedCornerShape(8.dp)
       ) {
         Text("Create README.md", fontSize = 12.sp)
       }
       OutlinedButton(
         onClick = onCreateFile,
-        border = BorderStroke(1.dp, DarkBorder),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
         shape = RoundedCornerShape(8.dp)
       ) {
-        Text("Create index.ts", color = TextPrimary, fontSize = 12.sp)
+        Text("Create index.ts", color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp)
       }
     }
     Spacer(modifier = Modifier.height(10.dp))
     TextButton(onClick = onOpenTerminal) {
-      Icon(Icons.Outlined.Terminal, contentDescription = null, tint = TerminalGreen, modifier = Modifier.size(16.dp))
+      Icon(Icons.Outlined.Terminal, contentDescription = null, tint = AwakiTheme.extra.success, modifier = Modifier.size(16.dp))
       Spacer(modifier = Modifier.width(6.dp))
-      Text("Open Linux Terminal", color = TerminalGreen, fontSize = 12.sp)
+      Text("Open Linux Terminal", color = AwakiTheme.extra.success, fontSize = 12.sp)
     }
   }
 }
@@ -1689,20 +1708,20 @@ private fun EmptySearchView(query: String, onClear: () -> Unit) {
     Icon(
       imageVector = Icons.Default.Search,
       contentDescription = null,
-      tint = TextMuted,
+      tint = AwakiTheme.extra.textMuted,
       modifier = Modifier.size(48.dp)
     )
     Spacer(modifier = Modifier.height(12.dp))
-    Text("No matching files", color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+    Text("No matching files", color = MaterialTheme.colorScheme.onSurface, fontSize = 16.sp, fontWeight = FontWeight.Bold)
     Spacer(modifier = Modifier.height(4.dp))
-    Text("No files or folders found matching \"$query\"", color = TextMuted, fontSize = 12.sp)
+    Text("No files or folders found matching \"$query\"", color = AwakiTheme.extra.textMuted, fontSize = 12.sp)
     Spacer(modifier = Modifier.height(16.dp))
     OutlinedButton(
       onClick = onClear,
-      border = BorderStroke(1.dp, DarkBorder),
+      border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
       shape = RoundedCornerShape(8.dp)
     ) {
-      Text("Clear Search", color = TextPrimary, fontSize = 12.sp)
+      Text("Clear Search", color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp)
     }
   }
 }
@@ -1718,25 +1737,26 @@ private fun formatFileSize(bytes: Long): String = when {
   else -> String.format(java.util.Locale.US, "%.1f MB", bytes / (1024.0 * 1024.0))
 }
 
+@Composable
 private fun getFileIconAndColor(name: String, isDirectory: Boolean, isExpanded: Boolean): Pair<ImageVector, Color> {
   if (isDirectory) {
-    return if (isExpanded) Icons.Filled.FolderOpen to ElectricBlueGlow else Icons.Filled.Folder to ElectricBlue
+    return if (isExpanded) Icons.Filled.FolderOpen to MaterialTheme.colorScheme.primary else Icons.Filled.Folder to MaterialTheme.colorScheme.primary
   }
   val ext = name.substringAfterLast('.', "").lowercase()
   return when (ext) {
-    "ts", "js" -> Icons.Outlined.Code to CyanAccent
-    "tsx", "jsx" -> Icons.Outlined.Code to CyanAccent
-    "kt", "kts", "java" -> Icons.Outlined.Code to IndigoAccent
-    "py" -> Icons.Outlined.Code to WarningAmber
-    "rs", "go", "c", "cpp", "h", "hpp" -> Icons.Outlined.Code to SyntaxKeyword
-    "json" -> Icons.Outlined.DataObject to WarningAmber
-    "yaml", "yml", "toml" -> Icons.Outlined.DataObject to WarningAmber
-    "md", "txt", "rst" -> Icons.AutoMirrored.Outlined.Article to ElectricBlueGlow
-    "html", "htm", "xml" -> Icons.Outlined.Language to SyntaxFunction
-    "css", "scss", "sass", "less" -> Icons.Outlined.Language to SyntaxType
-    "sh", "bash", "zsh" -> Icons.Outlined.Terminal to TerminalGreen
-    "png", "jpg", "jpeg", "svg", "webp", "gif", "ico" -> Icons.Outlined.Image to TerminalGreen
-    "gradle", "properties", "env", "lock" -> Icons.Outlined.Settings to TextSecondary
-    else -> Icons.AutoMirrored.Outlined.InsertDriveFile to TextSecondary
+    "ts", "js" -> Icons.Outlined.Code to MaterialTheme.colorScheme.secondary
+    "tsx", "jsx" -> Icons.Outlined.Code to MaterialTheme.colorScheme.secondary
+    "kt", "kts", "java" -> Icons.Outlined.Code to MaterialTheme.colorScheme.tertiary
+    "py" -> Icons.Outlined.Code to AwakiTheme.extra.warning
+    "rs", "go", "c", "cpp", "h", "hpp" -> Icons.Outlined.Code to AwakiTheme.extra.syntaxKeyword
+    "json" -> Icons.Outlined.DataObject to AwakiTheme.extra.warning
+    "yaml", "yml", "toml" -> Icons.Outlined.DataObject to AwakiTheme.extra.warning
+    "md", "txt", "rst" -> Icons.AutoMirrored.Outlined.Article to MaterialTheme.colorScheme.primary
+    "html", "htm", "xml" -> Icons.Outlined.Language to AwakiTheme.extra.syntaxFunction
+    "css", "scss", "sass", "less" -> Icons.Outlined.Language to AwakiTheme.extra.syntaxType
+    "sh", "bash", "zsh" -> Icons.Outlined.Terminal to AwakiTheme.extra.success
+    "png", "jpg", "jpeg", "svg", "webp", "gif", "ico" -> Icons.Outlined.Image to AwakiTheme.extra.success
+    "gradle", "properties", "env", "lock" -> Icons.Outlined.Settings to MaterialTheme.colorScheme.onSurfaceVariant
+    else -> Icons.AutoMirrored.Outlined.InsertDriveFile to MaterialTheme.colorScheme.onSurfaceVariant
   }
 }

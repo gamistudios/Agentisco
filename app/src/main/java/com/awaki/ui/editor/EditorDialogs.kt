@@ -13,6 +13,7 @@ import androidx.compose.material.icons.automirrored.filled.*
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -31,6 +32,7 @@ import com.awaki.editor.syntax.Language
 import com.awaki.editor.syntax.SymbolKind
 import com.awaki.editor.syntax.SyntaxTheme
 import com.awaki.ui.theme.*
+import com.awaki.ui.theme.AwakiTheme
 
 /**
  * Go to line dialog with validation and direct jump.
@@ -58,7 +60,7 @@ fun GoToLineDialog(
             isError = true
           }
         },
-        colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
+        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
         modifier = Modifier.testTag("btn_confirm_goto_line")
       ) {
         Text("Jump")
@@ -66,18 +68,18 @@ fun GoToLineDialog(
     },
     dismissButton = {
       TextButton(onClick = onDismiss) {
-        Text("Cancel", color = TextSecondary)
+        Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant)
       }
     },
     title = {
       Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Icon(Icons.Default.Pin, contentDescription = null, tint = CyanAccent, modifier = Modifier.size(20.dp))
-        Text("Go to Line", color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Icon(Icons.Default.Pin, contentDescription = null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(20.dp))
+        Text("Go to Line", color = MaterialTheme.colorScheme.onSurface, fontSize = 16.sp, fontWeight = FontWeight.Bold)
       }
     },
     text = {
       Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Enter line number between 1 and $totalLines:", color = TextSecondary, fontSize = 13.sp)
+        Text("Enter line number between 1 and $totalLines:", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp)
         OutlinedTextField(
           value = lineInput,
           onValueChange = {
@@ -97,19 +99,19 @@ fun GoToLineDialog(
           }),
           isError = isError,
           colors = OutlinedTextFieldDefaults.colors(
-            focusedBorderColor = ElectricBlueGlow,
-            unfocusedBorderColor = DarkBorder,
-            focusedTextColor = TextPrimary,
-            unfocusedTextColor = TextPrimary
+            focusedBorderColor = MaterialTheme.colorScheme.primary,
+            unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+            focusedTextColor = MaterialTheme.colorScheme.onSurface,
+            unfocusedTextColor = MaterialTheme.colorScheme.onSurface
           ),
           modifier = Modifier.fillMaxWidth().testTag("input_goto_line")
         )
         if (isError) {
-          Text("Invalid line number", color = DangerRed, fontSize = 11.sp)
+          Text("Invalid line number", color = MaterialTheme.colorScheme.error, fontSize = 11.sp)
         }
       }
     },
-    containerColor = DarkSurface,
+    containerColor = MaterialTheme.colorScheme.surface,
     shape = RoundedCornerShape(16.dp)
   )
 }
@@ -133,8 +135,8 @@ fun GoToSymbolSheet(
 
   ModalBottomSheet(
     onDismissRequest = onDismiss,
-    containerColor = DarkSurface,
-    dragHandle = { BottomSheetDefaults.DragHandle(color = DarkBorder) },
+    containerColor = MaterialTheme.colorScheme.surface,
+    dragHandle = { BottomSheetDefaults.DragHandle(color = MaterialTheme.colorScheme.outline) },
     modifier = Modifier.testTag("sheet_goto_symbol")
   ) {
     Column(
@@ -149,10 +151,10 @@ fun GoToSymbolSheet(
         verticalAlignment = Alignment.CenterVertically
       ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-          Icon(Icons.AutoMirrored.Filled.Segment, contentDescription = null, tint = CyanAccent, modifier = Modifier.size(20.dp))
-          Text("File Symbols & Outline", color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+          Icon(Icons.AutoMirrored.Filled.Segment, contentDescription = null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(20.dp))
+          Text("File Symbols & Outline", color = MaterialTheme.colorScheme.onSurface, fontSize = 16.sp, fontWeight = FontWeight.Bold)
         }
-        Text("${symbols.size} symbols", color = TextMuted, fontSize = 12.sp)
+        Text("${symbols.size} symbols", color = AwakiTheme.extra.textMuted, fontSize = 12.sp)
       }
 
       Spacer(modifier = Modifier.height(12.dp))
@@ -161,14 +163,14 @@ fun GoToSymbolSheet(
       OutlinedTextField(
         value = searchQuery,
         onValueChange = { searchQuery = it },
-        placeholder = { Text("Filter symbols...", color = TextMuted, fontSize = 13.sp) },
-        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = TextMuted, modifier = Modifier.size(16.dp)) },
+        placeholder = { Text("Filter symbols...", color = AwakiTheme.extra.textMuted, fontSize = 13.sp) },
+        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, tint = AwakiTheme.extra.textMuted, modifier = Modifier.size(16.dp)) },
         singleLine = true,
         colors = OutlinedTextFieldDefaults.colors(
-          focusedBorderColor = ElectricBlueGlow,
-          unfocusedBorderColor = DarkBorder,
-          focusedTextColor = TextPrimary,
-          unfocusedTextColor = TextPrimary
+          focusedBorderColor = MaterialTheme.colorScheme.primary,
+          unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+          focusedTextColor = MaterialTheme.colorScheme.onSurface,
+          unfocusedTextColor = MaterialTheme.colorScheme.onSurface
         ),
         modifier = Modifier.fillMaxWidth().height(50.dp)
       )
@@ -182,7 +184,7 @@ fun GoToSymbolSheet(
             .height(120.dp),
           contentAlignment = Alignment.Center
         ) {
-          Text("No matching symbols found in file", color = TextMuted, fontSize = 13.sp)
+          Text("No matching symbols found in file", color = AwakiTheme.extra.textMuted, fontSize = 13.sp)
         }
       } else {
         LazyColumn(
@@ -197,7 +199,7 @@ fun GoToSymbolSheet(
                 onSelectSymbol(sym)
                 onDismiss()
               },
-              color = DarkSurfaceElevated,
+              color = MaterialTheme.colorScheme.surfaceContainer,
               shape = RoundedCornerShape(8.dp),
               modifier = Modifier.fillMaxWidth()
             ) {
@@ -211,19 +213,19 @@ fun GoToSymbolSheet(
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                   // Symbol kind icon
                   val (icon, color) = when (sym.kind) {
-                    SymbolKind.CLASS -> Icons.Default.Category to WarningAmber
-                    SymbolKind.INTERFACE -> Icons.Default.Handshake to CyanAccent
-                    SymbolKind.FUNCTION -> Icons.Default.Code to ElectricBlueGlow
-                    SymbolKind.STRUCT -> Icons.Default.Widgets to Color(0xFFDEA584)
-                    SymbolKind.ENUM -> Icons.AutoMirrored.Filled.List to Color(0xFFA78BFA)
-                    SymbolKind.HEADING -> Icons.Default.Title to TerminalGreen
-                    SymbolKind.VARIABLE -> Icons.Default.DataObject to TextSecondary
+                    SymbolKind.CLASS -> Icons.Default.Category to AwakiTheme.extra.warning
+                    SymbolKind.INTERFACE -> Icons.Default.Handshake to MaterialTheme.colorScheme.secondary
+                    SymbolKind.FUNCTION -> Icons.Default.Code to MaterialTheme.colorScheme.primary
+                    SymbolKind.STRUCT -> Icons.Default.Widgets to MaterialTheme.colorScheme.tertiary
+                    SymbolKind.ENUM -> Icons.AutoMirrored.Filled.List to AwakiTheme.extra.syntaxNumber
+                    SymbolKind.HEADING -> Icons.Default.Title to AwakiTheme.extra.success
+                    SymbolKind.VARIABLE -> Icons.Default.DataObject to MaterialTheme.colorScheme.onSurfaceVariant
                   }
                   Icon(icon, contentDescription = null, tint = color, modifier = Modifier.size(16.dp))
                   Column {
                     Text(
                       text = sym.name,
-                      color = TextPrimary,
+                      color = MaterialTheme.colorScheme.onSurface,
                       fontSize = 13.sp,
                       fontWeight = FontWeight.SemiBold,
                       fontFamily = FontFamily.Monospace
@@ -231,7 +233,7 @@ fun GoToSymbolSheet(
                     if (sym.signature.isNotBlank()) {
                       Text(
                         text = sym.signature,
-                        color = TextMuted,
+                        color = AwakiTheme.extra.textMuted,
                         fontSize = 11.sp,
                         fontFamily = FontFamily.Monospace
                       )
@@ -240,7 +242,7 @@ fun GoToSymbolSheet(
                 }
                 Text(
                   text = "Line ${sym.line}",
-                  color = ElectricBlueGlow,
+                  color = MaterialTheme.colorScheme.primary,
                   fontSize = 11.sp,
                   fontFamily = FontFamily.Monospace
                 )
@@ -273,12 +275,12 @@ fun LanguageSelectorDialog(
     onDismissRequest = onDismiss,
     confirmButton = {},
     dismissButton = {
-      TextButton(onClick = onDismiss) { Text("Close", color = TextSecondary) }
+      TextButton(onClick = onDismiss) { Text("Close", color = MaterialTheme.colorScheme.onSurfaceVariant) }
     },
     title = {
       Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Icon(Icons.Default.Translate, contentDescription = null, tint = CyanAccent, modifier = Modifier.size(20.dp))
-        Text("Select Language Mode", color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Icon(Icons.Default.Translate, contentDescription = null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(20.dp))
+        Text("Select Language Mode", color = MaterialTheme.colorScheme.onSurface, fontSize = 16.sp, fontWeight = FontWeight.Bold)
       }
     },
     text = {
@@ -286,7 +288,7 @@ fun LanguageSelectorDialog(
         OutlinedTextField(
           value = searchQuery,
           onValueChange = { searchQuery = it },
-          placeholder = { Text("Filter languages...", color = TextMuted, fontSize = 12.sp) },
+          placeholder = { Text("Filter languages...", color = AwakiTheme.extra.textMuted, fontSize = 12.sp) },
           singleLine = true,
           modifier = Modifier.fillMaxWidth().height(48.dp)
         )
@@ -304,7 +306,7 @@ fun LanguageSelectorDialog(
                 onSelectLanguage(lang)
                 onDismiss()
               },
-              color = if (isSelected) ElectricBlue.copy(alpha = 0.2f) else DarkSurfaceElevated,
+              color = if (isSelected) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f) else MaterialTheme.colorScheme.surfaceContainer,
               shape = RoundedCornerShape(6.dp),
               modifier = Modifier.fillMaxWidth()
             ) {
@@ -324,13 +326,13 @@ fun LanguageSelectorDialog(
                   )
                   Text(
                     text = lang.displayName,
-                    color = if (isSelected) ElectricBlueGlow else TextPrimary,
+                    color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
                     fontSize = 13.sp,
                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
                   )
                 }
                 if (isSelected) {
-                  Icon(Icons.Default.Check, contentDescription = null, tint = ElectricBlueGlow, modifier = Modifier.size(16.dp))
+                  Icon(Icons.Default.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
                 }
               }
             }
@@ -338,7 +340,7 @@ fun LanguageSelectorDialog(
         }
       }
     },
-    containerColor = DarkSurface,
+    containerColor = MaterialTheme.colorScheme.surface,
     shape = RoundedCornerShape(16.dp)
   )
 }
@@ -355,8 +357,8 @@ fun EditorSettingsSheet(
 ) {
   ModalBottomSheet(
     onDismissRequest = onDismiss,
-    containerColor = DarkSurface,
-    dragHandle = { BottomSheetDefaults.DragHandle(color = DarkBorder) }
+    containerColor = MaterialTheme.colorScheme.surface,
+    dragHandle = { BottomSheetDefaults.DragHandle(color = MaterialTheme.colorScheme.outline) }
   ) {
     Column(
       modifier = Modifier
@@ -367,8 +369,8 @@ fun EditorSettingsSheet(
       verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
       Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Icon(Icons.Default.Tune, contentDescription = null, tint = CyanAccent, modifier = Modifier.size(20.dp))
-        Text("Editor Preferences", color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Icon(Icons.Default.Tune, contentDescription = null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(20.dp))
+        Text("Editor Preferences", color = MaterialTheme.colorScheme.onSurface, fontSize = 16.sp, fontWeight = FontWeight.Bold)
       }
 
       // Font Size
@@ -377,23 +379,23 @@ fun EditorSettingsSheet(
           modifier = Modifier.fillMaxWidth(),
           horizontalArrangement = Arrangement.SpaceBetween
         ) {
-          Text("Font Size", color = TextPrimary, fontSize = 13.sp)
-          Text("${settings.fontSize} sp", color = CyanAccent, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+          Text("Font Size", color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp)
+          Text("${settings.fontSize} sp", color = MaterialTheme.colorScheme.secondary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
         }
         Slider(
           value = settings.fontSize.toFloat(),
           onValueChange = { onUpdateSettings(settings.copy(fontSize = it.toInt())) },
           valueRange = 10f..22f,
           steps = 11,
-          colors = SliderDefaults.colors(thumbColor = CyanAccent, activeTrackColor = ElectricBlue)
+          colors = SliderDefaults.colors(thumbColor = MaterialTheme.colorScheme.secondary, activeTrackColor = MaterialTheme.colorScheme.primary)
         )
       }
 
-      HorizontalDivider(color = DarkBorderSubtle)
+      HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
       // Theme Selection
       Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Color Theme", color = TextPrimary, fontSize = 13.sp)
+        Text("Color Theme", color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp)
         Row(
           modifier = Modifier
             .fillMaxWidth()
@@ -407,15 +409,15 @@ fun EditorSettingsSheet(
               onClick = { onUpdateSettings(settings.copy(syntaxThemeName = th.name)) },
               label = { Text(th.name, fontSize = 11.sp) },
               colors = FilterChipDefaults.filterChipColors(
-                selectedContainerColor = ElectricBlue.copy(alpha = 0.3f),
-                selectedLabelColor = ElectricBlueGlow
+                selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
+                selectedLabelColor = MaterialTheme.colorScheme.primary
               )
             )
           }
         }
       }
 
-      HorizontalDivider(color = DarkBorderSubtle)
+      HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
       // Toggle Switches
       Row(
@@ -424,13 +426,13 @@ fun EditorSettingsSheet(
         verticalAlignment = Alignment.CenterVertically
       ) {
         Column {
-          Text("Word Wrap", color = TextPrimary, fontSize = 13.sp)
-          Text("Wrap long lines horizontally", color = TextMuted, fontSize = 11.sp)
+          Text("Word Wrap", color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp)
+          Text("Wrap long lines horizontally", color = AwakiTheme.extra.textMuted, fontSize = 11.sp)
         }
         Switch(
           checked = settings.wordWrap,
           onCheckedChange = { onUpdateSettings(settings.copy(wordWrap = it)) },
-          colors = SwitchDefaults.colors(checkedThumbColor = ElectricBlueGlow, checkedTrackColor = ElectricBlue)
+          colors = SwitchDefaults.colors(checkedThumbColor = MaterialTheme.colorScheme.primary, checkedTrackColor = MaterialTheme.colorScheme.primary)
         )
       }
 
@@ -440,13 +442,13 @@ fun EditorSettingsSheet(
         verticalAlignment = Alignment.CenterVertically
       ) {
         Column {
-          Text("Show Line Numbers", color = TextPrimary, fontSize = 13.sp)
-          Text("Gutter line indicators", color = TextMuted, fontSize = 11.sp)
+          Text("Show Line Numbers", color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp)
+          Text("Gutter line indicators", color = AwakiTheme.extra.textMuted, fontSize = 11.sp)
         }
         Switch(
           checked = settings.showLineNumbers,
           onCheckedChange = { onUpdateSettings(settings.copy(showLineNumbers = it)) },
-          colors = SwitchDefaults.colors(checkedThumbColor = ElectricBlueGlow, checkedTrackColor = ElectricBlue)
+          colors = SwitchDefaults.colors(checkedThumbColor = MaterialTheme.colorScheme.primary, checkedTrackColor = MaterialTheme.colorScheme.primary)
         )
       }
 
@@ -456,13 +458,13 @@ fun EditorSettingsSheet(
         verticalAlignment = Alignment.CenterVertically
       ) {
         Column {
-          Text("Highlight Active Line", color = TextPrimary, fontSize = 13.sp)
-          Text("Subtle background glow on current line", color = TextMuted, fontSize = 11.sp)
+          Text("Highlight Active Line", color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp)
+          Text("Subtle background glow on current line", color = AwakiTheme.extra.textMuted, fontSize = 11.sp)
         }
         Switch(
           checked = settings.highlightActiveLine,
           onCheckedChange = { onUpdateSettings(settings.copy(highlightActiveLine = it)) },
-          colors = SwitchDefaults.colors(checkedThumbColor = ElectricBlueGlow, checkedTrackColor = ElectricBlue)
+          colors = SwitchDefaults.colors(checkedThumbColor = MaterialTheme.colorScheme.primary, checkedTrackColor = MaterialTheme.colorScheme.primary)
         )
       }
 
@@ -472,13 +474,13 @@ fun EditorSettingsSheet(
         verticalAlignment = Alignment.CenterVertically
       ) {
         Column {
-          Text("Auto Save", color = TextPrimary, fontSize = 13.sp)
-          Text("Save changes on switching tabs", color = TextMuted, fontSize = 11.sp)
+          Text("Auto Save", color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp)
+          Text("Save changes on switching tabs", color = AwakiTheme.extra.textMuted, fontSize = 11.sp)
         }
         Switch(
           checked = settings.autoSave,
           onCheckedChange = { onUpdateSettings(settings.copy(autoSave = it)) },
-          colors = SwitchDefaults.colors(checkedThumbColor = ElectricBlueGlow, checkedTrackColor = ElectricBlue)
+          colors = SwitchDefaults.colors(checkedThumbColor = MaterialTheme.colorScheme.primary, checkedTrackColor = MaterialTheme.colorScheme.primary)
         )
       }
     }
@@ -521,7 +523,7 @@ fun AiEditorActionDialog(
           }
         },
         enabled = customPrompt.isNotBlank(),
-        colors = ButtonDefaults.buttonColors(containerColor = ElectricBlue),
+        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
         modifier = Modifier.testTag("btn_send_ai_prompt")
       ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -531,12 +533,12 @@ fun AiEditorActionDialog(
       }
     },
     dismissButton = {
-      TextButton(onClick = onDismiss) { Text("Cancel", color = TextSecondary) }
+      TextButton(onClick = onDismiss) { Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant) }
     },
     title = {
       Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = ElectricBlueGlow, modifier = Modifier.size(20.dp))
-        Text("Agent Coding Assistant", color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+        Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(20.dp))
+        Text("Agent Coding Assistant", color = MaterialTheme.colorScheme.onSurface, fontSize = 16.sp, fontWeight = FontWeight.Bold)
       }
     },
     text = {
@@ -546,7 +548,7 @@ fun AiEditorActionDialog(
           .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(10.dp)
       ) {
-        Text("Select a quick action or write a custom prompt for $fileName:", color = TextSecondary, fontSize = 12.sp)
+        Text("Select a quick action or write a custom prompt for $fileName:", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
 
         // Quick action chips
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -556,9 +558,9 @@ fun AiEditorActionDialog(
                 onSendToAgent(prompt)
                 onDismiss()
               },
-              color = DarkSurfaceElevated,
+              color = MaterialTheme.colorScheme.surfaceContainer,
               shape = RoundedCornerShape(6.dp),
-              border = BorderStroke(1.dp, DarkBorderSubtle),
+              border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
               modifier = Modifier.fillMaxWidth()
             ) {
               Row(
@@ -568,8 +570,8 @@ fun AiEditorActionDialog(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
               ) {
-                Text(label, color = TextPrimary, fontSize = 12.sp)
-                Icon(Icons.Default.ChevronRight, contentDescription = null, tint = TextMuted, modifier = Modifier.size(16.dp))
+                Text(label, color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp)
+                Icon(Icons.Default.ChevronRight, contentDescription = null, tint = AwakiTheme.extra.textMuted, modifier = Modifier.size(16.dp))
               }
             }
           }
@@ -581,18 +583,18 @@ fun AiEditorActionDialog(
         OutlinedTextField(
           value = customPrompt,
           onValueChange = { customPrompt = it },
-          placeholder = { Text("Ask anything about this file...", color = TextMuted, fontSize = 12.sp) },
+          placeholder = { Text("Ask anything about this file...", color = AwakiTheme.extra.textMuted, fontSize = 12.sp) },
           colors = OutlinedTextFieldDefaults.colors(
-            focusedBorderColor = ElectricBlueGlow,
-            unfocusedBorderColor = DarkBorder,
-            focusedTextColor = TextPrimary,
-            unfocusedTextColor = TextPrimary
+            focusedBorderColor = MaterialTheme.colorScheme.primary,
+            unfocusedBorderColor = MaterialTheme.colorScheme.outline,
+            focusedTextColor = MaterialTheme.colorScheme.onSurface,
+            unfocusedTextColor = MaterialTheme.colorScheme.onSurface
           ),
           modifier = Modifier.fillMaxWidth().height(80.dp).testTag("input_custom_ai_prompt")
         )
       }
     },
-    containerColor = DarkSurface,
+    containerColor = MaterialTheme.colorScheme.surface,
     shape = RoundedCornerShape(16.dp)
   )
 }

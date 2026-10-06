@@ -22,6 +22,7 @@ import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -44,6 +45,7 @@ import androidx.core.content.FileProvider
 import coil.compose.AsyncImage
 import coil.compose.SubcomposeAsyncImage
 import com.awaki.ui.theme.*
+import com.awaki.ui.theme.AwakiTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -72,7 +74,7 @@ private fun ViewerScaffold(
   Column(
     modifier = Modifier
       .fillMaxSize()
-      .background(DarkBackground)
+      .background(MaterialTheme.colorScheme.background)
   ) {
     Box(
       modifier = Modifier
@@ -84,13 +86,13 @@ private fun ViewerScaffold(
     Row(
       modifier = Modifier
         .fillMaxWidth()
-        .background(DarkSurface)
+        .background(MaterialTheme.colorScheme.surface)
         .padding(horizontal = 12.dp, vertical = 6.dp),
       verticalAlignment = Alignment.CenterVertically,
       horizontalArrangement = Arrangement.SpaceBetween
     ) {
-      Text(fileName, color = TextSecondary, fontSize = 11.sp, fontFamily = FontFamily.Monospace, maxLines = 1)
-      Text(subtitle, color = TextMuted, fontSize = 11.sp)
+      Text(fileName, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp, fontFamily = FontFamily.Monospace, maxLines = 1)
+      Text(subtitle, color = AwakiTheme.extra.textMuted, fontSize = 11.sp)
     }
   }
 }
@@ -102,9 +104,9 @@ private fun ViewerMessage(icon: ImageVector, title: String, subtitle: String) {
     verticalArrangement = Arrangement.spacedBy(8.dp),
     modifier = Modifier.padding(24.dp)
   ) {
-    Icon(icon, null, tint = TextMuted, modifier = Modifier.size(40.dp))
-    Text(title, color = TextSecondary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-    Text(subtitle, color = TextMuted, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+    Icon(icon, null, tint = AwakiTheme.extra.textMuted, modifier = Modifier.size(40.dp))
+    Text(title, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+    Text(subtitle, color = AwakiTheme.extra.textMuted, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
   }
 }
 
@@ -167,8 +169,8 @@ fun ImagePreviewPane(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(10.dp)
           ) {
-            CircularProgressIndicator(color = CyanAccent, strokeWidth = 2.dp)
-            Text("Loading ${formatFileSize(fileSize)}…", color = TextMuted, fontSize = 11.sp)
+            CircularProgressIndicator(color = MaterialTheme.colorScheme.secondary, strokeWidth = 2.dp)
+            Text("Loading ${formatFileSize(fileSize)}…", color = AwakiTheme.extra.textMuted, fontSize = 11.sp)
           }
         },
         error = {
@@ -264,8 +266,8 @@ fun PdfPreviewPane(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(10.dp)
           ) {
-            CircularProgressIndicator(color = CyanAccent, strokeWidth = 2.dp)
-            Text("Rendering page ${pageIndex + 1}…", color = TextMuted, fontSize = 12.sp)
+            CircularProgressIndicator(color = MaterialTheme.colorScheme.secondary, strokeWidth = 2.dp)
+            Text("Rendering page ${pageIndex + 1}…", color = AwakiTheme.extra.textMuted, fontSize = 12.sp)
           }
         }
       }
@@ -274,7 +276,7 @@ fun PdfPreviewPane(
         Row(
           modifier = Modifier
             .fillMaxWidth()
-            .background(DarkSurface)
+            .background(MaterialTheme.colorScheme.surface)
             .padding(horizontal = 12.dp, vertical = 4.dp),
           horizontalArrangement = Arrangement.Center,
           verticalAlignment = Alignment.CenterVertically
@@ -284,11 +286,11 @@ fun PdfPreviewPane(
             enabled = pageIndex > 0,
             modifier = Modifier.size(32.dp)
           ) {
-            Icon(Icons.Default.ChevronLeft, "Previous page", tint = TextPrimary, modifier = Modifier.size(18.dp))
+            Icon(Icons.Default.ChevronLeft, "Previous page", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(18.dp))
           }
           Text(
             "Page ${pageIndex + 1} / $pageCount",
-            color = TextSecondary,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             fontSize = 12.sp,
             modifier = Modifier.padding(horizontal = 8.dp)
           )
@@ -297,7 +299,7 @@ fun PdfPreviewPane(
             enabled = pageIndex < pageCount - 1,
             modifier = Modifier.size(32.dp)
           ) {
-            Icon(Icons.Default.ChevronRight, "Next page", tint = TextPrimary, modifier = Modifier.size(18.dp))
+            Icon(Icons.Default.ChevronRight, "Next page", tint = MaterialTheme.colorScheme.onSurface, modifier = Modifier.size(18.dp))
           }
         }
       }
@@ -380,9 +382,9 @@ private fun AudioPlayerCard(file: File, fileName: String) {
   }
 
   Surface(
-    color = DarkSurface,
+    color = MaterialTheme.colorScheme.surface,
     shape = RoundedCornerShape(12.dp),
-    border = BorderStroke(1.dp, DarkBorder),
+    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
     modifier = Modifier.padding(24.dp)
   ) {
     Column(
@@ -390,8 +392,8 @@ private fun AudioPlayerCard(file: File, fileName: String) {
       horizontalAlignment = Alignment.CenterHorizontally,
       verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-      Icon(Icons.Default.MusicNote, null, tint = CyanAccent, modifier = Modifier.size(40.dp))
-      Text(fileName, color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, fontFamily = FontFamily.Monospace)
+      Icon(Icons.Default.MusicNote, null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(40.dp))
+      Text(fileName, color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, fontFamily = FontFamily.Monospace)
       Slider(
         value = if (durationMs > 0) (positionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f,
         onValueChange = { frac ->
@@ -402,14 +404,14 @@ private fun AudioPlayerCard(file: File, fileName: String) {
             positionMs = target
           }
         },
-        colors = SliderDefaults.colors(thumbColor = CyanAccent, activeTrackColor = CyanAccent)
+        colors = SliderDefaults.colors(thumbColor = MaterialTheme.colorScheme.secondary, activeTrackColor = MaterialTheme.colorScheme.secondary)
       )
       Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween
       ) {
-        Text(formatTime(positionMs), color = TextMuted, fontSize = 11.sp)
-        Text(formatTime(durationMs), color = TextMuted, fontSize = 11.sp)
+        Text(formatTime(positionMs), color = AwakiTheme.extra.textMuted, fontSize = 11.sp)
+        Text(formatTime(durationMs), color = AwakiTheme.extra.textMuted, fontSize = 11.sp)
       }
       Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
         IconButton(
@@ -424,12 +426,12 @@ private fun AudioPlayerCard(file: File, fileName: String) {
           },
           modifier = Modifier
             .size(48.dp)
-            .background(DarkSurfaceElevated, RoundedCornerShape(24.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainer, RoundedCornerShape(24.dp))
         ) {
           Icon(
             imageVector = if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
             contentDescription = if (playing) "Pause" else "Play",
-            tint = CyanAccent,
+            tint = MaterialTheme.colorScheme.secondary,
             modifier = Modifier.size(26.dp)
           )
         }
@@ -444,7 +446,7 @@ private fun AudioPlayerCard(file: File, fileName: String) {
           },
           modifier = Modifier.size(36.dp)
         ) {
-          Icon(Icons.Default.Replay, "Restart", tint = TextSecondary, modifier = Modifier.size(20.dp))
+          Icon(Icons.Default.Replay, "Restart", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(20.dp))
         }
       }
     }
@@ -473,9 +475,9 @@ fun OtherFilePreviewPane(
   val context = LocalContext.current
   ViewerScaffold(fileName = fileName, subtitle = formatFileSize(fileSize)) {
     Surface(
-      color = DarkSurface,
+      color = MaterialTheme.colorScheme.surface,
       shape = RoundedCornerShape(12.dp),
-      border = BorderStroke(1.dp, DarkBorder),
+      border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
       modifier = modifier.padding(16.dp)
     ) {
       Column(
@@ -483,14 +485,14 @@ fun OtherFilePreviewPane(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(10.dp)
       ) {
-        Icon(Icons.AutoMirrored.Filled.InsertDriveFile, null, tint = CyanAccent, modifier = Modifier.size(48.dp))
-        Text(fileName, color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, fontFamily = FontFamily.Monospace)
-        Text(title, color = TextSecondary, fontSize = 12.sp)
+        Icon(Icons.AutoMirrored.Filled.InsertDriveFile, null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(48.dp))
+        Text(fileName, color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, fontFamily = FontFamily.Monospace)
+        Text(title, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
         if (file != null) {
           Text(
             text = "Size: ${formatFileSize(fileSize)}  •  Modified: " +
               SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(file.lastModified())),
-            color = TextMuted,
+            color = AwakiTheme.extra.textMuted,
             fontSize = 11.sp
           )
           Spacer(modifier = Modifier.height(4.dp))
@@ -518,12 +520,12 @@ fun OtherFilePreviewPane(
                 ).show()
               }
             },
-            colors = ButtonDefaults.buttonColors(containerColor = DarkSurfaceElevated),
+            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
             modifier = Modifier.height(32.dp)
           ) {
-            Icon(Icons.AutoMirrored.Filled.OpenInNew, null, tint = CyanAccent, modifier = Modifier.size(14.dp))
+            Icon(Icons.AutoMirrored.Filled.OpenInNew, null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(14.dp))
             Spacer(modifier = Modifier.width(6.dp))
-            Text("Open Externally", color = TextPrimary, fontSize = 12.sp)
+            Text("Open Externally", color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp)
           }
         }
       }

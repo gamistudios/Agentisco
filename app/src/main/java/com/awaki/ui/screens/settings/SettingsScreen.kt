@@ -54,6 +54,7 @@ import androidx.compose.material.icons.outlined.Update
 import androidx.compose.material.icons.automirrored.outlined.WrapText
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -74,9 +75,7 @@ import com.awaki.core.model.AppDestination
 import com.awaki.editor.model.EditorSettings
 import com.awaki.ui.UpdateViewModel
 import com.awaki.ui.WorkspaceViewModel
-import com.awaki.ui.theme.DarkBackground
-import com.awaki.ui.theme.TextMuted
-import com.awaki.ui.theme.TextPrimary
+import com.awaki.ui.theme.AwakiTheme
 
 /**
  * Awaki's configuration, in one scrollable list rather than fourteen cards.
@@ -110,7 +109,7 @@ fun SettingsScreen(
   LazyColumn(
     modifier = modifier
       .fillMaxSize()
-      .background(DarkBackground)
+      .background(MaterialTheme.colorScheme.background)
       .padding(horizontal = 14.dp)
       .testTag("settings_list"),
     verticalArrangement = Arrangement.spacedBy(14.dp)
@@ -119,7 +118,7 @@ fun SettingsScreen(
       Column(
         modifier = Modifier
           .fillMaxWidth()
-          .background(DarkBackground)
+          .background(MaterialTheme.colorScheme.background)
           .padding(top = 10.dp, bottom = 12.dp)
       ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -127,12 +126,12 @@ fun SettingsScreen(
             onClick = { onNavigate(AppDestination.AGENT) },
             modifier = Modifier.size(32.dp).testTag("btn_settings_back")
           ) {
-            Icon(Icons.Default.ChevronLeft, contentDescription = "Back", tint = TextMuted)
+            Icon(Icons.Default.ChevronLeft, contentDescription = "Back", tint = AwakiTheme.extra.textMuted)
           }
           Spacer(modifier = Modifier.width(6.dp))
           Column {
-            Text("Settings", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-            Text("Every switch, value and list Awaki keeps", color = TextMuted, fontSize = 11.sp)
+            Text("Settings", color = MaterialTheme.colorScheme.onSurface, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            Text("Every switch, value and list Awaki keeps", color = AwakiTheme.extra.textMuted, fontSize = 11.sp)
           }
         }
         Spacer(modifier = Modifier.height(10.dp))

@@ -7,13 +7,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
-import com.awaki.ui.theme.DarkSurfaceHighlight
-import com.awaki.ui.theme.ElectricBlue
 
 /**
  * Slim 2dp download progress bar pinned to the very top of the header.
@@ -39,13 +38,13 @@ fun DownloadProgressIndicator(
             .fillMaxWidth()
             .height(2.dp)
             .clip(RoundedCornerShape(1.dp))
-            .background(DarkSurfaceHighlight)
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth(animatedProgress)
                 .height(2.dp)
-                .background(ElectricBlue)
+                .background(MaterialTheme.colorScheme.primary)
         )
     }
 }

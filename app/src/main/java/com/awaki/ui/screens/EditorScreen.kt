@@ -13,6 +13,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -37,6 +38,7 @@ import com.awaki.ui.WorkspaceViewModel
 import com.awaki.ui.components.DevKeyboardBar
 import com.awaki.ui.editor.*
 import com.awaki.ui.theme.*
+import com.awaki.ui.theme.AwakiTheme
 import kotlinx.coroutines.launch
 
 @Composable
@@ -567,15 +569,15 @@ fun EditorScreen(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(12.dp)
           ) {
-            Icon(Icons.Default.Code, contentDescription = null, tint = DarkBorder, modifier = Modifier.size(54.dp))
-            Text("No files open", color = TextMuted, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+            Icon(Icons.Default.Code, contentDescription = null, tint = MaterialTheme.colorScheme.outline, modifier = Modifier.size(54.dp))
+            Text("No files open", color = AwakiTheme.extra.textMuted, fontSize = 15.sp, fontWeight = FontWeight.Medium)
             Button(
               onClick = { onNavigate(AppDestination.FILES) },
-              colors = ButtonDefaults.buttonColors(containerColor = DarkSurfaceElevated)
+              colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceContainer)
             ) {
-              Icon(Icons.Default.FolderOpen, contentDescription = null, tint = CyanAccent, modifier = Modifier.size(16.dp))
+              Icon(Icons.Default.FolderOpen, contentDescription = null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(16.dp))
               Spacer(modifier = Modifier.width(6.dp))
-              Text("Browse Project Files", color = TextPrimary, fontSize = 12.sp)
+              Text("Browse Project Files", color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp)
             }
           }
         }
@@ -660,8 +662,8 @@ fun EditorScreen(
     AnimatedVisibility(visible = showAgentSplitPane) {
       Surface(
         modifier = Modifier.fillMaxWidth(),
-        color = DarkSurface,
-        border = androidx.compose.foundation.BorderStroke(1.dp, DarkBorder)
+        color = MaterialTheme.colorScheme.surface,
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
       ) {
         Column(modifier = Modifier.padding(10.dp)) {
           Row(
@@ -673,13 +675,13 @@ fun EditorScreen(
               Icon(
                 imageVector = Icons.Default.AutoAwesome,
                 contentDescription = "Agent",
-                tint = ElectricBlueGlow,
+                tint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.size(14.dp)
               )
               Spacer(modifier = Modifier.width(6.dp))
               Text(
                 text = "Agent active on $activeFileName",
-                color = ElectricBlueGlow,
+                color = MaterialTheme.colorScheme.primary,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.SemiBold
               )
@@ -689,14 +691,14 @@ fun EditorScreen(
               onClick = { showAgentSplitPane = false },
               modifier = Modifier.size(20.dp)
             ) {
-              Icon(Icons.Default.Close, contentDescription = "Close", tint = TextMuted, modifier = Modifier.size(14.dp))
+              Icon(Icons.Default.Close, contentDescription = "Close", tint = AwakiTheme.extra.textMuted, modifier = Modifier.size(14.dp))
             }
           }
 
           Spacer(modifier = Modifier.height(4.dp))
           Text(
             text = "Code edits and recommendations are synced. Tap below to review diffs or ask questions.",
-            color = TextSecondary,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             fontSize = 11.sp,
             lineHeight = 16.sp
           )
@@ -710,16 +712,16 @@ fun EditorScreen(
               onClick = { onNavigate(AppDestination.DIFF) },
               modifier = Modifier.height(28.dp),
               contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
-              border = androidx.compose.foundation.BorderStroke(1.dp, ElectricBlue.copy(alpha = 0.5f))
+              border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
             ) {
-              Text("Review Changes", color = ElectricBlueGlow, fontSize = 11.sp)
+              Text("Review Changes", color = MaterialTheme.colorScheme.primary, fontSize = 11.sp)
             }
 
             TextButton(
               onClick = { onNavigate(AppDestination.AGENT) },
               modifier = Modifier.height(28.dp)
             ) {
-              Text("Ask Agent", color = CyanAccent, fontSize = 11.sp)
+              Text("Ask Agent", color = MaterialTheme.colorScheme.secondary, fontSize = 11.sp)
             }
           }
         }

@@ -20,6 +20,7 @@ import androidx.compose.material.icons.automirrored.outlined.*
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -56,6 +57,7 @@ import com.awaki.editor.syntax.SyntaxHighlighter
 import com.awaki.editor.syntax.SyntaxTheme
 import com.awaki.ui.components.MarkdownText
 import com.awaki.ui.theme.*
+import com.awaki.ui.theme.AwakiTheme
 
 /**
  * Clean, compact breadcrumbs bar showing project name, path hierarchy,
@@ -80,8 +82,8 @@ fun EditorBreadcrumbsBar(
 
   Surface(
     modifier = modifier.fillMaxWidth(),
-    color = DarkSurface,
-    border = BorderStroke(0.5.dp, DarkBorderSubtle)
+    color = MaterialTheme.colorScheme.surface,
+    border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant)
   ) {
     Row(
       modifier = Modifier
@@ -105,7 +107,7 @@ fun EditorBreadcrumbsBar(
           Icon(
             imageVector = Icons.Default.FolderOpen,
             contentDescription = "Reveal in Files",
-            tint = CyanAccent,
+            tint = MaterialTheme.colorScheme.secondary,
             modifier = Modifier.size(14.dp)
           )
         }
@@ -115,7 +117,7 @@ fun EditorBreadcrumbsBar(
         // Project root
         Text(
           text = projectName.ifBlank { "Project" },
-          color = TextMuted,
+          color = AwakiTheme.extra.textMuted,
           fontSize = 11.sp,
           fontWeight = FontWeight.Medium,
           fontFamily = FontFamily.Monospace
@@ -125,14 +127,14 @@ fun EditorBreadcrumbsBar(
         for ((idx, seg) in pathSegments.withIndex()) {
           Text(
             text = " / ",
-            color = DarkBorder,
+            color = MaterialTheme.colorScheme.outline,
             fontSize = 10.sp,
             fontFamily = FontFamily.Monospace
           )
           val isLast = idx == pathSegments.lastIndex
           Text(
             text = seg,
-            color = if (isLast) TextPrimary else TextSecondary,
+            color = if (isLast) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
             fontSize = 11.sp,
             fontWeight = if (isLast) FontWeight.SemiBold else FontWeight.Normal,
             fontFamily = FontFamily.Monospace,
@@ -147,7 +149,7 @@ fun EditorBreadcrumbsBar(
             modifier = Modifier
               .size(6.dp)
               .clip(CircleShape)
-              .background(WarningAmber)
+              .background(AwakiTheme.extra.warning)
           )
         }
       }
@@ -163,7 +165,7 @@ fun EditorBreadcrumbsBar(
           // Stats pill (lines, chars)
           Text(
             text = "${lineCount}L  ${charCount}C",
-            color = TextMuted,
+            color = AwakiTheme.extra.textMuted,
             fontSize = 10.sp,
             fontFamily = FontFamily.Monospace
           )
@@ -229,8 +231,8 @@ fun EditorTabBar(
 
   Surface(
     modifier = modifier.fillMaxWidth(),
-    color = DarkSurfaceElevated,
-    border = BorderStroke(0.5.dp, DarkBorderSubtle)
+    color = MaterialTheme.colorScheme.surfaceContainer,
+    border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant)
   ) {
     Row(
       modifier = Modifier.fillMaxWidth(),
@@ -252,10 +254,10 @@ fun EditorTabBar(
           Box(
             modifier = Modifier
               .clip(RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp))
-              .background(if (isActive) DarkBackground else DarkSurface)
+              .background(if (isActive) MaterialTheme.colorScheme.background else MaterialTheme.colorScheme.surface)
               .border(
                 1.dp,
-                if (isActive) ElectricBlue.copy(alpha = 0.6f) else DarkBorderSubtle,
+                if (isActive) MaterialTheme.colorScheme.primary.copy(alpha = 0.6f) else MaterialTheme.colorScheme.outlineVariant,
                 RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp)
               )
               .clickable { onSelectTab(index) }
@@ -277,7 +279,7 @@ fun EditorTabBar(
               // File name
               Text(
                 text = tab.file.name,
-                color = if (isActive) TextPrimary else TextSecondary,
+                color = if (isActive) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 11.sp,
                 fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal,
                 fontFamily = FontFamily.Monospace,
@@ -290,7 +292,7 @@ fun EditorTabBar(
                   modifier = Modifier
                     .size(8.dp)
                     .clip(CircleShape)
-                    .background(WarningAmber)
+                    .background(AwakiTheme.extra.warning)
                     .clickable { onCloseTab(index) }
                     .testTag("tab_dirty_dot_${tab.file.name}")
                 )
@@ -306,7 +308,7 @@ fun EditorTabBar(
                 Icon(
                   imageVector = Icons.Default.Close,
                   contentDescription = "Close Tab",
-                  tint = if (isActive) TextSecondary else TextMuted,
+                  tint = if (isActive) MaterialTheme.colorScheme.onSurfaceVariant else AwakiTheme.extra.textMuted,
                   modifier = Modifier.size(11.dp)
                 )
               }
@@ -326,7 +328,7 @@ fun EditorTabBar(
           Icon(
             imageVector = Icons.Default.MoreVert,
             contentDescription = "Tabs Menu",
-            tint = TextSecondary,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.size(16.dp)
           )
         }
@@ -334,19 +336,19 @@ fun EditorTabBar(
         DropdownMenu(
           expanded = showTabMenu,
           onDismissRequest = { showTabMenu = false },
-          modifier = Modifier.background(DarkSurface)
+          modifier = Modifier.background(MaterialTheme.colorScheme.surface)
         ) {
           DropdownMenuItem(
-            text = { Text("Close Other Tabs", color = TextPrimary, fontSize = 12.sp) },
-            leadingIcon = { Icon(Icons.Default.ClearAll, contentDescription = null, tint = TextMuted, modifier = Modifier.size(16.dp)) },
+            text = { Text("Close Other Tabs", color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp) },
+            leadingIcon = { Icon(Icons.Default.ClearAll, contentDescription = null, tint = AwakiTheme.extra.textMuted, modifier = Modifier.size(16.dp)) },
             onClick = {
               showTabMenu = false
               onCloseOtherTabs(activeTabIndex)
             }
           )
           DropdownMenuItem(
-            text = { Text("Close All Tabs", color = TextPrimary, fontSize = 12.sp) },
-            leadingIcon = { Icon(Icons.Default.Close, contentDescription = null, tint = DangerRed, modifier = Modifier.size(16.dp)) },
+            text = { Text("Close All Tabs", color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp) },
+            leadingIcon = { Icon(Icons.Default.Close, contentDescription = null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(16.dp)) },
             onClick = {
               showTabMenu = false
               onCloseAllTabs()
@@ -354,8 +356,8 @@ fun EditorTabBar(
           )
           if (hasClosedTabs) {
             DropdownMenuItem(
-              text = { Text("Reopen Closed Tab", color = TextPrimary, fontSize = 12.sp) },
-              leadingIcon = { Icon(Icons.Default.Restore, contentDescription = null, tint = CyanAccent, modifier = Modifier.size(16.dp)) },
+              text = { Text("Reopen Closed Tab", color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp) },
+              leadingIcon = { Icon(Icons.Default.Restore, contentDescription = null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(16.dp)) },
               onClick = {
                 showTabMenu = false
                 onReopenLastClosedTab()
@@ -403,8 +405,8 @@ fun EditorActionBar(
 
   Surface(
     modifier = modifier.fillMaxWidth(),
-    color = DarkSurface,
-    border = BorderStroke(0.5.dp, DarkBorderSubtle)
+    color = MaterialTheme.colorScheme.surface,
+    border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant)
   ) {
     Row(
       modifier = Modifier
@@ -422,8 +424,8 @@ fun EditorActionBar(
         Button(
           onClick = onSave,
           colors = ButtonDefaults.buttonColors(
-            containerColor = if (isDirty) ElectricBlue else DarkSurfaceElevated,
-            contentColor = if (isDirty) Color.White else TextSecondary
+            containerColor = if (isDirty) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainer,
+            contentColor = if (isDirty) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
           ),
           contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
           modifier = Modifier
@@ -454,13 +456,13 @@ fun EditorActionBar(
           modifier = Modifier
             .size(28.dp)
             .clip(RoundedCornerShape(4.dp))
-            .background(DarkSurfaceElevated)
+            .background(MaterialTheme.colorScheme.surfaceContainer)
             .testTag("btn_editor_undo")
         ) {
           Icon(
             imageVector = Icons.AutoMirrored.Filled.Undo,
             contentDescription = "Undo",
-            tint = if (canUndo) ElectricBlueGlow else TextMuted,
+            tint = if (canUndo) MaterialTheme.colorScheme.primary else AwakiTheme.extra.textMuted,
             modifier = Modifier.size(14.dp)
           )
         }
@@ -472,13 +474,13 @@ fun EditorActionBar(
           modifier = Modifier
             .size(28.dp)
             .clip(RoundedCornerShape(4.dp))
-            .background(DarkSurfaceElevated)
+            .background(MaterialTheme.colorScheme.surfaceContainer)
             .testTag("btn_editor_redo")
         ) {
           Icon(
             imageVector = Icons.AutoMirrored.Filled.Redo,
             contentDescription = "Redo",
-            tint = if (canRedo) ElectricBlueGlow else TextMuted,
+            tint = if (canRedo) MaterialTheme.colorScheme.primary else AwakiTheme.extra.textMuted,
             modifier = Modifier.size(14.dp)
           )
         }
@@ -489,13 +491,13 @@ fun EditorActionBar(
           modifier = Modifier
             .size(28.dp)
             .clip(RoundedCornerShape(4.dp))
-            .background(if (isFindOpen) ElectricBlue.copy(alpha = 0.25f) else DarkSurfaceElevated)
+            .background(if (isFindOpen) MaterialTheme.colorScheme.primary.copy(alpha = 0.25f) else MaterialTheme.colorScheme.surfaceContainer)
             .testTag("btn_editor_find")
         ) {
           Icon(
             imageVector = Icons.Default.Search,
             contentDescription = "Find and Replace",
-            tint = if (isFindOpen) ElectricBlueGlow else TextSecondary,
+            tint = if (isFindOpen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.size(14.dp)
           )
         }
@@ -512,29 +514,29 @@ fun EditorActionBar(
             onClick = onOpenHtmlPreview,
             modifier = Modifier.height(28.dp).testTag("btn_html_preview"),
             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-            border = BorderStroke(1.dp, CyanAccent.copy(alpha = 0.6f))
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.secondary.copy(alpha = 0.6f))
           ) {
-            Icon(Icons.Default.Language, contentDescription = null, tint = CyanAccent, modifier = Modifier.size(13.dp))
+            Icon(Icons.Default.Language, contentDescription = null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(13.dp))
             Spacer(modifier = Modifier.width(4.dp))
-            Text("Preview", color = CyanAccent, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+            Text("Preview", color = MaterialTheme.colorScheme.secondary, fontSize = 11.sp, fontWeight = FontWeight.Medium)
           }
         } else if (isSvgFile) {
           OutlinedButton(
             onClick = onToggleSvgRender,
             modifier = Modifier.height(28.dp).testTag(if (isSvgRenderActive) "btn_svg_source" else "btn_svg_render"),
             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-            border = BorderStroke(1.dp, ElectricBlueGlow.copy(alpha = 0.7f))
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.7f))
           ) {
             Icon(
               imageVector = if (isSvgRenderActive) Icons.Outlined.Code else Icons.Outlined.Visibility,
               contentDescription = null,
-              tint = ElectricBlueGlow,
+              tint = MaterialTheme.colorScheme.primary,
               modifier = Modifier.size(13.dp)
             )
             Spacer(modifier = Modifier.width(4.dp))
             Text(
               text = if (isSvgRenderActive) "Source" else "Render",
-              color = ElectricBlueGlow,
+              color = MaterialTheme.colorScheme.primary,
               fontSize = 11.sp,
               fontWeight = FontWeight.Medium
             )
@@ -544,18 +546,18 @@ fun EditorActionBar(
             onClick = onToggleMarkdownPreview,
             modifier = Modifier.height(28.dp).testTag("btn_markdown_preview"),
             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-            border = BorderStroke(1.dp, if (isMarkdownPreviewActive) ElectricBlueGlow else DarkBorder)
+            border = BorderStroke(1.dp, if (isMarkdownPreviewActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline)
           ) {
             Icon(
               imageVector = if (isMarkdownPreviewActive) Icons.Outlined.Edit else Icons.Outlined.Visibility,
               contentDescription = null,
-              tint = if (isMarkdownPreviewActive) ElectricBlueGlow else TextSecondary,
+              tint = if (isMarkdownPreviewActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
               modifier = Modifier.size(13.dp)
             )
             Spacer(modifier = Modifier.width(4.dp))
             Text(
               text = if (isMarkdownPreviewActive) "Edit" else "Preview",
-              color = if (isMarkdownPreviewActive) ElectricBlueGlow else TextSecondary,
+              color = if (isMarkdownPreviewActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
               fontSize = 11.sp
             )
           }
@@ -565,10 +567,10 @@ fun EditorActionBar(
             modifier = Modifier
               .size(28.dp)
               .clip(RoundedCornerShape(4.dp))
-              .background(DarkSurfaceElevated)
+              .background(MaterialTheme.colorScheme.surfaceContainer)
               .testTag("btn_format_json")
           ) {
-            Icon(Icons.Default.AutoFixHigh, contentDescription = "Format JSON", tint = CyanAccent, modifier = Modifier.size(14.dp))
+            Icon(Icons.Default.AutoFixHigh, contentDescription = "Format JSON", tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(14.dp))
           }
         }
 
@@ -578,13 +580,13 @@ fun EditorActionBar(
           modifier = Modifier
             .size(28.dp)
             .clip(RoundedCornerShape(4.dp))
-            .background(DarkSurfaceElevated)
+            .background(MaterialTheme.colorScheme.surfaceContainer)
             .testTag("btn_editor_symbols")
         ) {
           Icon(
             imageVector = Icons.AutoMirrored.Filled.Segment,
             contentDescription = "Go to Symbol",
-            tint = TextSecondary,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.size(14.dp)
           )
         }
@@ -595,14 +597,14 @@ fun EditorActionBar(
           modifier = Modifier
             .size(28.dp)
             .clip(RoundedCornerShape(4.dp))
-            .background(ElectricBlue.copy(alpha = 0.15f))
-            .border(1.dp, ElectricBlue.copy(alpha = 0.4f), RoundedCornerShape(4.dp))
+            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
+            .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f), RoundedCornerShape(4.dp))
             .testTag("btn_editor_ai")
         ) {
           Icon(
             imageVector = Icons.Default.AutoAwesome,
             contentDescription = "AI Assistant",
-            tint = ElectricBlueGlow,
+            tint = MaterialTheme.colorScheme.primary,
             modifier = Modifier.size(14.dp)
           )
         }
@@ -613,13 +615,13 @@ fun EditorActionBar(
           modifier = Modifier
             .size(28.dp)
             .clip(RoundedCornerShape(4.dp))
-            .background(DarkSurfaceElevated)
+            .background(MaterialTheme.colorScheme.surfaceContainer)
             .testTag("btn_editor_diff")
         ) {
           Icon(
             imageVector = Icons.Outlined.Difference,
             contentDescription = "Review Diffs",
-            tint = CyanAccent,
+            tint = MaterialTheme.colorScheme.secondary,
             modifier = Modifier.size(14.dp)
           )
         }
@@ -631,13 +633,13 @@ fun EditorActionBar(
             modifier = Modifier
               .size(28.dp)
               .clip(RoundedCornerShape(4.dp))
-              .background(DarkSurfaceElevated)
+              .background(MaterialTheme.colorScheme.surfaceContainer)
               .testTag("btn_editor_more_actions")
           ) {
             Icon(
               imageVector = Icons.Default.MoreHoriz,
               contentDescription = "More Actions",
-              tint = TextSecondary,
+              tint = MaterialTheme.colorScheme.onSurfaceVariant,
               modifier = Modifier.size(14.dp)
             )
           }
@@ -645,27 +647,27 @@ fun EditorActionBar(
           DropdownMenu(
             expanded = showOverflowMenu,
             onDismissRequest = { showOverflowMenu = false },
-            modifier = Modifier.background(DarkSurface)
+            modifier = Modifier.background(MaterialTheme.colorScheme.surface)
           ) {
             DropdownMenuItem(
-              text = { Text("Go to Line...", color = TextPrimary, fontSize = 12.sp) },
-              leadingIcon = { Icon(Icons.Default.Pin, contentDescription = null, tint = CyanAccent, modifier = Modifier.size(16.dp)) },
+              text = { Text("Go to Line...", color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp) },
+              leadingIcon = { Icon(Icons.Default.Pin, contentDescription = null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(16.dp)) },
               onClick = {
                 showOverflowMenu = false
                 onOpenGoToLine()
               }
             )
             DropdownMenuItem(
-              text = { Text(if (isWordWrapEnabled) "Disable Word Wrap" else "Enable Word Wrap", color = TextPrimary, fontSize = 12.sp) },
-              leadingIcon = { Icon(Icons.AutoMirrored.Filled.WrapText, contentDescription = null, tint = TextMuted, modifier = Modifier.size(16.dp)) },
+              text = { Text(if (isWordWrapEnabled) "Disable Word Wrap" else "Enable Word Wrap", color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp) },
+              leadingIcon = { Icon(Icons.AutoMirrored.Filled.WrapText, contentDescription = null, tint = AwakiTheme.extra.textMuted, modifier = Modifier.size(16.dp)) },
               onClick = {
                 showOverflowMenu = false
                 onToggleWordWrap()
               }
             )
             DropdownMenuItem(
-              text = { Text("Editor Settings", color = TextPrimary, fontSize = 12.sp) },
-              leadingIcon = { Icon(Icons.Default.Settings, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(16.dp)) },
+              text = { Text("Editor Settings", color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp) },
+              leadingIcon = { Icon(Icons.Default.Settings, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp)) },
               onClick = {
                 showOverflowMenu = false
                 onOpenSettings()
@@ -699,8 +701,8 @@ fun EditorFindReplaceBar(
 
   Surface(
     modifier = modifier.fillMaxWidth(),
-    color = DarkSurfaceElevated,
-    border = BorderStroke(1.dp, DarkBorder)
+    color = MaterialTheme.colorScheme.surfaceContainer,
+    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)
   ) {
     Column(modifier = Modifier.padding(6.dp)) {
       // Search Row
@@ -717,7 +719,7 @@ fun EditorFindReplaceBar(
           Icon(
             imageVector = if (showReplaceRow) Icons.Default.KeyboardArrowDown else Icons.AutoMirrored.Filled.KeyboardArrowRight,
             contentDescription = "Toggle Replace",
-            tint = TextMuted,
+            tint = AwakiTheme.extra.textMuted,
             modifier = Modifier.size(16.dp)
           )
         }
@@ -728,8 +730,8 @@ fun EditorFindReplaceBar(
             .weight(1f)
             .height(30.dp)
             .clip(RoundedCornerShape(4.dp))
-            .background(DarkBackground)
-            .border(1.dp, DarkBorderSubtle, RoundedCornerShape(4.dp))
+            .background(MaterialTheme.colorScheme.background)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(4.dp))
             .padding(horizontal = 8.dp),
           contentAlignment = Alignment.CenterStart
         ) {
@@ -737,12 +739,12 @@ fun EditorFindReplaceBar(
             value = state.findQuery,
             onValueChange = onQueryChange,
             singleLine = true,
-            textStyle = TextStyle(color = TextPrimary, fontSize = 12.sp, fontFamily = FontFamily.Monospace),
-            cursorBrush = SolidColor(ElectricBlueGlow),
+            textStyle = TextStyle(color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp, fontFamily = FontFamily.Monospace),
+            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
             modifier = Modifier.fillMaxWidth().testTag("input_find_query"),
             decorationBox = { innerTextField ->
               if (state.findQuery.isEmpty()) {
-                Text("Find...", color = TextMuted, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                Text("Find...", color = AwakiTheme.extra.textMuted, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
               }
               innerTextField()
             }
@@ -752,7 +754,7 @@ fun EditorFindReplaceBar(
         // Match count indicator
         Text(
           text = if (state.totalMatches > 0) "${state.currentMatchIndex + 1}/${state.totalMatches}" else "0/0",
-          color = if (state.totalMatches > 0) TextSecondary else TextMuted,
+          color = if (state.totalMatches > 0) MaterialTheme.colorScheme.onSurfaceVariant else AwakiTheme.extra.textMuted,
           fontSize = 11.sp,
           fontFamily = FontFamily.Monospace
         )
@@ -762,11 +764,11 @@ fun EditorFindReplaceBar(
           modifier = Modifier
             .size(26.dp)
             .clip(RoundedCornerShape(4.dp))
-            .background(if (state.matchCase) ElectricBlue.copy(alpha = 0.25f) else Color.Transparent)
+            .background(if (state.matchCase) MaterialTheme.colorScheme.primary.copy(alpha = 0.25f) else Color.Transparent)
             .clickable(onClick = onToggleCase),
           contentAlignment = Alignment.Center
         ) {
-          Text("Aa", color = if (state.matchCase) ElectricBlueGlow else TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+          Text("Aa", color = if (state.matchCase) MaterialTheme.colorScheme.primary else AwakiTheme.extra.textMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
         }
 
         // Whole Word [\b]
@@ -774,11 +776,11 @@ fun EditorFindReplaceBar(
           modifier = Modifier
             .size(26.dp)
             .clip(RoundedCornerShape(4.dp))
-            .background(if (state.wholeWord) ElectricBlue.copy(alpha = 0.25f) else Color.Transparent)
+            .background(if (state.wholeWord) MaterialTheme.colorScheme.primary.copy(alpha = 0.25f) else Color.Transparent)
             .clickable(onClick = onToggleWord),
           contentAlignment = Alignment.Center
         ) {
-          Text("W", color = if (state.wholeWord) ElectricBlueGlow else TextMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+          Text("W", color = if (state.wholeWord) MaterialTheme.colorScheme.primary else AwakiTheme.extra.textMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
         }
 
         // Previous
@@ -787,7 +789,7 @@ fun EditorFindReplaceBar(
           enabled = state.totalMatches > 0,
           modifier = Modifier.size(24.dp).testTag("btn_find_prev")
         ) {
-          Icon(Icons.Default.ArrowUpward, contentDescription = "Previous", tint = if (state.totalMatches > 0) TextPrimary else TextMuted, modifier = Modifier.size(14.dp))
+          Icon(Icons.Default.ArrowUpward, contentDescription = "Previous", tint = if (state.totalMatches > 0) MaterialTheme.colorScheme.onSurface else AwakiTheme.extra.textMuted, modifier = Modifier.size(14.dp))
         }
 
         // Next
@@ -796,7 +798,7 @@ fun EditorFindReplaceBar(
           enabled = state.totalMatches > 0,
           modifier = Modifier.size(24.dp).testTag("btn_find_next")
         ) {
-          Icon(Icons.Default.ArrowDownward, contentDescription = "Next", tint = if (state.totalMatches > 0) TextPrimary else TextMuted, modifier = Modifier.size(14.dp))
+          Icon(Icons.Default.ArrowDownward, contentDescription = "Next", tint = if (state.totalMatches > 0) MaterialTheme.colorScheme.onSurface else AwakiTheme.extra.textMuted, modifier = Modifier.size(14.dp))
         }
 
         // Close
@@ -804,7 +806,7 @@ fun EditorFindReplaceBar(
           onClick = onClose,
           modifier = Modifier.size(24.dp).testTag("btn_find_close")
         ) {
-          Icon(Icons.Default.Close, contentDescription = "Close", tint = TextMuted, modifier = Modifier.size(14.dp))
+          Icon(Icons.Default.Close, contentDescription = "Close", tint = AwakiTheme.extra.textMuted, modifier = Modifier.size(14.dp))
         }
       }
 
@@ -822,8 +824,8 @@ fun EditorFindReplaceBar(
               .weight(1f)
               .height(30.dp)
               .clip(RoundedCornerShape(4.dp))
-              .background(DarkBackground)
-              .border(1.dp, DarkBorderSubtle, RoundedCornerShape(4.dp))
+              .background(MaterialTheme.colorScheme.background)
+              .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(4.dp))
               .padding(horizontal = 8.dp),
             contentAlignment = Alignment.CenterStart
           ) {
@@ -831,12 +833,12 @@ fun EditorFindReplaceBar(
               value = state.replaceQuery,
               onValueChange = onReplaceQueryChange,
               singleLine = true,
-              textStyle = TextStyle(color = TextPrimary, fontSize = 12.sp, fontFamily = FontFamily.Monospace),
-              cursorBrush = SolidColor(ElectricBlueGlow),
+              textStyle = TextStyle(color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp, fontFamily = FontFamily.Monospace),
+              cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
               modifier = Modifier.fillMaxWidth().testTag("input_replace_query"),
               decorationBox = { innerTextField ->
                 if (state.replaceQuery.isEmpty()) {
-                  Text("Replace with...", color = TextMuted, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                  Text("Replace with...", color = AwakiTheme.extra.textMuted, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
                 }
                 innerTextField()
               }
@@ -963,7 +965,7 @@ fun CodeEditorCanvas(
             lineHeight = lineHeightSp,
             fontFamily = FontFamily.Monospace
           ),
-          cursorBrush = SolidColor(ElectricBlueGlow)
+          cursorBrush = SolidColor(MaterialTheme.colorScheme.primary)
         )
       }
     }
@@ -1020,7 +1022,7 @@ fun CodeEditorCanvas(
                   ) {
                     Text(
                       text = "$lineNum",
-                      color = if (isActive) ElectricBlueGlow else theme.gutterText,
+                      color = if (isActive) MaterialTheme.colorScheme.primary else theme.gutterText,
                       fontSize = (settings.fontSize - 1).sp,
                       fontFamily = FontFamily.Monospace,
                       fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal
@@ -1056,7 +1058,7 @@ fun HtmlPreviewDialog(
     onDismissRequest = onDismiss,
     confirmButton = {
       TextButton(onClick = onDismiss) {
-        Text("Close", color = CyanAccent)
+        Text("Close", color = MaterialTheme.colorScheme.secondary)
       }
     },
     title = {
@@ -1066,8 +1068,8 @@ fun HtmlPreviewDialog(
         verticalAlignment = Alignment.CenterVertically
       ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-          Icon(Icons.Default.Language, contentDescription = null, tint = CyanAccent, modifier = Modifier.size(18.dp))
-          Text("HTML Live Preview", color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+          Icon(Icons.Default.Language, contentDescription = null, tint = MaterialTheme.colorScheme.secondary, modifier = Modifier.size(18.dp))
+          Text("HTML Live Preview", color = MaterialTheme.colorScheme.onSurface, fontSize = 15.sp, fontWeight = FontWeight.Bold)
         }
       }
     },
@@ -1095,7 +1097,7 @@ fun HtmlPreviewDialog(
         )
       }
     },
-    containerColor = DarkSurface,
+    containerColor = MaterialTheme.colorScheme.surface,
     shape = RoundedCornerShape(16.dp)
   )
 }
@@ -1111,13 +1113,13 @@ fun MarkdownPreviewPane(
   Box(
     modifier = modifier
       .fillMaxSize()
-      .background(DarkBackground)
+      .background(MaterialTheme.colorScheme.background)
       .padding(14.dp)
       .verticalScroll(rememberScrollState())
   ) {
     MarkdownText(
       text = content,
-      textColor = TextPrimary
+      textColor = MaterialTheme.colorScheme.onSurface
     )
   }
 }
