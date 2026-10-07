@@ -1,3 +1,1 @@
 * text=auto
-# The prebuilt Python runtime: gzip bytes the asset pipeline must not touch.
-*.pack binary

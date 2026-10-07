@@ -9,10 +9,10 @@ import kotlinx.serialization.json.Json
 /**
  * One prebuilt Python runtime, as the catalog describes it.
  *
- * The bundle is assembled by `tools/local-runtime/build-awaki-runtime.sh` out of prebuilt wheels —
- * nothing is compiled, anywhere — and ships inside the APK, so a phone only ever has to check the
- * bytes it was given and unpack them. The digest is both the integrity check and the identity: a
- * build of the app that carries a different archive holds a different runtime, and the installer
+ * The bundle is assembled by `tools/local-runtime/build-awaki-runtime.sh` on a native ARM64
+ * Linux machine and ships inside the APK, so a phone only ever has to check the bytes it was
+ * given and unpack them. The digest is both the integrity check and the identity: a build of
+ * the app that carries a different archive holds a different runtime, and the installer
  * replaces the old one without being asked.
  */
 @Serializable

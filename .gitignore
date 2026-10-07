@@ -33,11 +33,7 @@ generate-keystore.sh
 debug.keystore.base64
 # Section files staged into the Python model server; never part of the app.
 .scratch/
-# Built model runtimes: artifacts until --install-into-repo puts them in the app's assets.
-/dist/
-/tools/local-runtime/out/
-/tools/local-runtime/cache/
-# Wheels fetched to assemble a runtime, and the phone's own venv dropped beside the repo to inspect.
-# Neither is a source file; the bundle that ships is the one under app/src/main/assets.
-*.whl
+# The phone's own venv dropped beside the repo to inspect, and wheels fetched to look at it.
+# Neither is a source file and neither belongs in a commit.
 /venv_archive.tar.gz
+*.whl
