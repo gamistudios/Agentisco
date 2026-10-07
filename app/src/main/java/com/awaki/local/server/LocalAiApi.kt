@@ -225,11 +225,6 @@ class LocalAiApi(
       }
     }
 
-    // A call the decoder never let us name is not work the caller can run. Its text still belongs
-    // to the answer, so it joins the content here for both shapes of reply rather than being the
-    // thing a stream promised and never delivered.
-    val markup = answer.revealUnnamed()
-
     val finishReason = finishReasonFor(finish, answer)
 
     if (!stream) return Reply.Body(200, completionJson(id, created, request.model, answer, finishReason))
@@ -237,9 +232,6 @@ class LocalAiApi(
     // A turn that showed no text — an empty answer, or markup the runtime consumed — still
     // has to open its stream the way every other one does: role first, then the end.
     if (!clientGone && !headSent) emitHead()
-    if (!clientGone && markup.isNotEmpty()) {
-      emit(chunk(id, created, request.model, JSONObject().put("content", markup), null))
-    }
     emit(chunk(id, created, request.model, JSONObject(), finishReason))
     emit("[DONE]")
     return Reply.Streamed(200)
@@ -308,6 +300,10 @@ internal class Answer {
    * name is the empty string, and the agent then spends a round being told that no such tool
    * exists — for a model that was trying to end its turn, once per turn. So a call's fragments wait
    * here until something names it, and go out together with the delta that does.
+   *
+   * A call that is never named never goes out at all. Its bytes are the model's markup rather than
+   * an answer, and they belong neither in `tool_calls` nor in `content`: the turn reads as finished
+   * with nothing offered, which is what actually happened.
    */
   fun publish(delta: LocalAnswerDelta): List<LocalAnswerDelta> {
     val call = delta.toolCall
@@ -327,25 +323,6 @@ internal class Answer {
     held.forEach { append(it) }
     append(delta)
     return held + delta
-  }
-
-  /**
-   * The text of every call that ended without naming itself, added to the answer as content.
-   *
-   * A turn that finishes with a nameless call is a model writing markup no reader could attribute.
-   * It is not work the caller can run and it is not nothing: the bytes are what the model chose to
-   * say, so they reach the user as text instead of vanishing from an otherwise empty answer.
-   */
-  fun revealUnnamed(): String {
-    if (pending.isEmpty()) return ""
-    val pieces = pending.values.flatten()
-    pending.clear()
-    // Whatever text came alongside the markup is part of the answer on its own; only the call's
-    // bytes have no reader left, and those go out as the text the model actually wrote.
-    pieces.forEach { append(it.copy(toolCall = null)) }
-    val markup = pieces.joinToString("") { it.toolCall?.argumentsJson.orEmpty() }
-    if (markup.isNotEmpty()) text.append(markup)
-    return markup
   }
 
   fun append(delta: LocalAnswerDelta) {

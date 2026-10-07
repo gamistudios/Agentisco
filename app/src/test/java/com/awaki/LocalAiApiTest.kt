@@ -439,11 +439,14 @@ class LocalAiApiTest {
 
     /**
      * A model that ends its turn on a stray marker produces markup no reader can attribute to a tool.
-     * That is not work the caller can run, and it is not nothing: the bytes are what the model chose
-     * to say, so they reach the user as text instead of vanishing from an empty answer.
+     * It is not work the caller can run, so it never goes out as `tool_calls` — and it is not an
+     * answer either, so it never goes out as `content` either. Putting those bytes in front of the
+     * user as text is what made an agent answer a row of `{}`, one chunk per argument fragment of a
+     * call that was never named. The turn reads as finished with nothing offered, which is what
+     * actually happened.
      */
     @Test
-    fun `a call that never names itself is answered as text, not as a tool`() = runTest {
+    fun `a call that never names itself reaches the client as neither a tool nor as text`() = runTest {
         val (api, fake) = apiFor("alpha")
         fake.sessionScript = { session ->
             session.reply = listOf("<|call|>")
@@ -459,16 +462,18 @@ class LocalAiApiTest {
         )
 
         assertTrue(chunks.none { it.contains("\"tool_calls\"") })
+        // The stream still opens the way every answer does — role first, then the reason it ended —
+        // with the unattributable bytes carried by neither.
         assertEquals(
-            listOf("assistant", "<|call|>", null, "[DONE]"),
+            listOf("assistant", null, "[DONE]"),
             chunks.map { if (it == "[DONE]") it else JSONObject(it).chunkText() }
         )
-        assertEquals("stop", JSONObject(chunks[2]).getJSONArray("choices").getJSONObject(0).getString("finish_reason"))
+        assertEquals("stop", JSONObject(chunks[1]).getJSONArray("choices").getJSONObject(0).getString("finish_reason"))
 
         val choice = bodyOf(complete(api, oneTurn)).getJSONArray("choices").getJSONObject(0)
         // A name-less call is not a call: a client that reads `tool_calls` here would run nothing.
         assertTrue(choice.getJSONObject("message").isNull("tool_calls"))
-        assertEquals("<|call|>", choice.getJSONObject("message").getString("content"))
+        assertEquals("", choice.getJSONObject("message").getString("content"))
         assertEquals("stop", choice.getString("finish_reason"))
     }
 
