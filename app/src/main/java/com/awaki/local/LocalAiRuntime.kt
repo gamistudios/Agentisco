@@ -3,6 +3,7 @@ package com.awaki.local
 import com.awaki.data.repository.LocalModelRepository
 import com.awaki.local.model.LocalModel
 import com.awaki.local.runtime.LoadedModelInfo
+import com.awaki.local.runtime.LocalEngineDiagnostics
 import com.awaki.local.runtime.LocalEngineException
 import com.awaki.local.runtime.LocalInferenceEngine
 import com.awaki.local.server.LocalAiApi
@@ -131,6 +132,13 @@ class LocalAiRuntime(
 
   /** Gives the resident model's memory back; the next request loads it again. */
   suspend fun releaseModel() = engine.release()
+
+  /**
+   * What this device and this build of the engine are, for a screen that has to explain a model
+   * that never answers. Reaching the engine is the point: the answer is a measurement, not a guess
+   * about whether the APK that shipped was compiled to run fast.
+   */
+  fun engineDiagnostics(): LocalEngineDiagnostics = engine.diagnostics()
 
   /**
    * Brings [modelId] into memory on purpose, rather than as the first thing a turn has to

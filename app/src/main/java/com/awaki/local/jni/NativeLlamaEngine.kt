@@ -6,6 +6,7 @@ import com.awaki.local.runtime.LoadedModelInfo
 import com.awaki.local.runtime.LocalAnswerDelta
 import com.awaki.local.runtime.LocalChatInputs
 import com.awaki.local.runtime.LocalChatRequest
+import com.awaki.local.runtime.LocalEngineDiagnostics
 import com.awaki.local.runtime.LocalEngineException
 import com.awaki.local.runtime.LocalFinishReason
 import com.awaki.local.runtime.LocalModelEngine
@@ -54,6 +55,35 @@ class NativeLlamaEngine(
    */
   override fun systemThreads(): Int =
     native?.nativeSystemThreads()?.takeIf { it > 0 } ?: Runtime.getRuntime().availableProcessors()
+
+  /**
+   * The device and build facts, read with no model loaded.
+   *
+   * Handle 0 asks the engine what a model *would* run on, which is the honest answer here: the
+   * numbers that explain a slow turn are properties of the packaged code and of the silicon, and
+   * the screen that shows them is open while no model is in memory too.
+   */
+  override fun diagnostics(): LocalEngineDiagnostics {
+    val api = native ?: return LocalEngineDiagnostics.noEngine.copy(reason = unavailableReason)
+    val json = runCatching { JSONObject(api.nativeEngineDiagnostics(0L).toStringUtf8()) }.getOrNull()
+      ?: return LocalEngineDiagnostics.noEngine.copy(reason = "The engine reported unreadable diagnostics")
+    val backends = json.optJSONArray("backends").jsonObjectList().map { node ->
+      val description = node.optString("description")
+      val name = node.optString("name")
+      if (description.isBlank()) name else "$name: $description"
+    }
+    return LocalEngineDiagnostics(
+      enginePresent = true,
+      compiledOptimized = json.optBoolean("optimized", false),
+      coresSeen = json.optInt("coresSeen", 0),
+      decodeThreads = json.optInt("decodeThreads", 0),
+      batchThreads = json.optInt("batchThreads", 0),
+      pooledWorkers = json.optBoolean("pooledWorkers", false),
+      availableMb = json.optLong("availableMb", -1L).takeIf { it >= 0 },
+      backends = backends,
+      systemInfo = json.optString("systemInfo")
+    )
+  }
 
   override fun load(path: String, runtime: LocalRuntimeSettings): LoadedLocalModel {
     val api = native ?: throw LocalEngineException(NativeLlama.unavailableReasonText ?: NO_ENGINE)
@@ -495,6 +525,9 @@ private fun ByteArray.toStringUtf8(): String = String(this, StandardCharsets.UTF
 
 private fun JSONArray?.stringList(): List<String> =
   if (this == null) emptyList() else (0 until length()).map { optString(it) }
+
+private fun JSONArray?.jsonObjectList(): List<JSONObject> =
+  if (this == null) emptyList() else (0 until length()).mapNotNull { optJSONObject(it) }
 
 private fun JSONArray?.deltaList(): List<LocalAnswerDelta> =
   if (this == null) emptyList() else (0 until length()).map { i ->

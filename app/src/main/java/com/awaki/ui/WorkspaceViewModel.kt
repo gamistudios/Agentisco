@@ -20,8 +20,10 @@ import com.awaki.data.repository.WorkspaceRepository
 import com.awaki.editor.model.EditorSettings
 import com.awaki.editor.model.EditorTab
 import com.awaki.editor.syntax.Language
+import com.awaki.local.runtime.LocalEngineDiagnostics
 import com.awaki.workspace.git.*
 import com.awaki.workspace.buildrun.*
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -1446,6 +1448,26 @@ class WorkspaceViewModel(
 
   /** The single model in memory, so the list can mark the one it is holding. */
   val localResidentModelId: StateFlow<String?> = repository.localResidentModelId
+
+  private val _localEngineDiagnostics = MutableStateFlow<LocalEngineDiagnostics?>(null)
+
+  /** What this device and this build of the engine are, or null while nobody has asked. */
+  val localEngineDiagnostics: StateFlow<LocalEngineDiagnostics?> = _localEngineDiagnostics.asStateFlow()
+
+  /**
+   * Reads the engine's own numbers, and only the first time anybody asks.
+   *
+   * Off the main thread because the first call into the native library maps it, and a settings row
+   * that freezes the screen while that happens looks like the app hanging rather than like a
+   * measurement. Cached afterwards: these are properties of the build and of the silicon, and they
+   * do not change while the process lives.
+   */
+  fun refreshLocalEngineDiagnostics() {
+    if (_localEngineDiagnostics.value != null) return
+    viewModelScope.launch(Dispatchers.Default) {
+      _localEngineDiagnostics.value = repository.localEngineDiagnostics()
+    }
+  }
 
   /**
    * Puts [modelId] into memory now. Opening a model takes seconds on a phone, and a turn that

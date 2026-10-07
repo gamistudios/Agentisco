@@ -125,6 +125,17 @@ class WorkspaceRepository(
     localAi?.residentModelId ?: kotlinx.coroutines.flow.MutableStateFlow(null)
 
   /**
+   * What this device and this build of the engine are.
+   *
+   * Read from the engine rather than inferred, because the four numbers that explain a slow or
+   * silent turn - whether the packaged code was compiled to run fast, which CPU kernels the device
+   * accepted, what its cores plan to, and how much memory is left to give - are exactly the ones
+   * nobody outside the process can guess.
+   */
+  fun localEngineDiagnostics(): com.awaki.local.runtime.LocalEngineDiagnostics =
+    localAi?.engineDiagnostics() ?: com.awaki.local.runtime.LocalEngineDiagnostics.noEngine
+
+  /**
    * Puts [modelId] into memory now, so its first turn does not begin with a load. The failure
    * arrives as the sentence the user should read, which is why this reaches through the runtime
    * rather than asking the screen to guess what went wrong.

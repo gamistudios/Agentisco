@@ -74,6 +74,14 @@ class LocalInferenceEngine(
   fun systemThreads(): Int = engine.systemThreads()
 
   /**
+   * What this device and this build of the engine are, straight from the engine.
+   *
+   * No lock and no model needed: these are properties of the process and of the silicon, and the
+   * screen that shows them is open while nothing is resident too.
+   */
+  fun diagnostics(): LocalEngineDiagnostics = engine.diagnostics()
+
+  /**
    * Answers one turn with [model], streaming the answer through [onDelta].
    *
    * [settings] overrides the model's saved generation numbers for this request only, which is

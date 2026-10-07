@@ -29,6 +29,15 @@ interface LocalModelEngine {
   fun systemThreads(): Int
 
   /**
+   * What this device and this build of the engine are.
+   *
+   * Describes the machine, not the resident model, so it answers with nothing loaded: the faults it
+   * exists to explain — a turn that never ends, a model decoding at walking pace — are build and
+   * silicon facts, and a phone that cannot be plugged into a computer still has a settings screen.
+   */
+  fun diagnostics(): LocalEngineDiagnostics = LocalEngineDiagnostics.noEngine
+
+  /**
    * Makes [path] the resident model with [runtime] settings, and returns its handle.
    *
    * Throws [LocalEngineException] with a reason the user can act on when the file will not
@@ -183,6 +192,66 @@ data class LoadedModelInfo(
   /** Context the runtime actually created, which may be smaller than requested. */
   val contextSize: Int
 )
+
+/**
+ * The facts a slow or silent turn is judged by, read from inside the engine.
+ *
+ * Each one is a different explanation for the same experience, and the app could not previously
+ * tell any of them apart: [compiledOptimized] false means the packaged code is an order of
+ * magnitude off and the model will look broken rather than slow; [backends] holding only a
+ * baseline kernel set means the phone was handed the conservative kernels it is several times
+ * slower with; [pooledWorkers] false means every token pays for building a thread pool; a low
+ * [availableMb] means the next context size asked for is the one that will be refused.
+ *
+ * The thread counts are what this device's cores plan to, before any per-model override: a decode
+ * step ends in a barrier all its workers wait at, so the plan keeps the little cores out of it and
+ * lets prefill use them, which is a different number for each kind of work.
+ */
+data class LocalEngineDiagnostics(
+  val enginePresent: Boolean,
+  val compiledOptimized: Boolean,
+  val coresSeen: Int,
+  val decodeThreads: Int,
+  val batchThreads: Int,
+  val pooledWorkers: Boolean,
+  /** Memory the kernel could still hand a model, or null when this device reports nothing. */
+  val availableMb: Long?,
+  /** The CPU kernel sets shipped in this build, in the order the device scored them. */
+  val backends: List<String> = emptyList(),
+  val systemInfo: String = "",
+  /** Why nothing is reported, when the engine itself is not there. */
+  val reason: String = ""
+) {
+  /** Lines for the settings screen, each one a fact a reader can act on. */
+  fun lines(): List<String> = when {
+    !enginePresent -> listOf(reason)
+    else -> buildList {
+      add(
+        if (compiledOptimized) "Engine build: optimised"
+        else "Engine build: UNOPTIMISED - this APK runs the model several times slower than it should"
+      )
+      add("Cores seen: $coresSeen - $decodeThreads decoding, $batchThreads prefiling")
+      add(if (pooledWorkers) "Worker threads: reused between steps" else "Worker threads: rebuilt for every step")
+      availableMb?.let { add("Memory available: $it MB") }
+      // One line per kernel set the device accepted, because the fault this shows is a missing
+      // one: a build whose modern variants are refused answers a fast phone with baseline NEON.
+      backends.forEach { add("Kernel set: $it") }
+    }
+  }
+
+  companion object {
+    val noEngine = LocalEngineDiagnostics(
+      enginePresent = false,
+      compiledOptimized = false,
+      coresSeen = 0,
+      decodeThreads = 0,
+      batchThreads = 0,
+      pooledWorkers = false,
+      availableMb = null,
+      reason = "This build has no on-device inference engine"
+    )
+  }
+}
 
 /** An engine failure worth showing the user, as opposed to a stack trace. */
 open class LocalEngineException(message: String, cause: Throwable? = null) : Exception(message, cause)

@@ -19,6 +19,7 @@ import com.awaki.local.runtime.LocalChatInputs
 import com.awaki.local.runtime.LocalChatMessage
 import com.awaki.local.runtime.LocalChatRequest
 import com.awaki.local.runtime.LocalChatTool
+import com.awaki.local.runtime.LocalEngineDiagnostics
 import com.awaki.local.runtime.LocalEngineException
 import com.awaki.local.runtime.LocalFinishReason
 import com.awaki.local.runtime.LocalInferenceEngine
@@ -123,10 +124,14 @@ class LocalInferenceEngineTest {
         val sessions = mutableListOf<FakeSession>()
         var threadCount = 8
         var loadFailure: Throwable? = null
+        /** What this fake's build and silicon are, as the engine would report them. */
+        var reportedDiagnostics: LocalEngineDiagnostics = LocalEngineDiagnostics.noEngine
 
         override val isAvailable: Boolean get() = available
 
         override fun systemThreads(): Int = threadCount
+
+        override fun diagnostics(): LocalEngineDiagnostics = reportedDiagnostics
 
         override fun load(path: String, runtime: LocalRuntimeSettings): LoadedLocalModel {
             loadFailure?.let { throw it }
@@ -627,5 +632,74 @@ class LocalInferenceEngineTest {
             "the new model answers the request, not the one that was swapped out",
             fake.sessions.last().requests.single().inputs.tools.isNotEmpty()
         )
+    }
+
+    // ---- engine diagnostics ----
+
+    /**
+     * The numbers a slow or silent turn is judged by. A phone cannot be plugged into a computer to
+     * find out why it decodes at a walking pace, so the screen shows what the engine itself
+     * reports — and the app must report exactly that, rather than a guess about the device.
+     */
+    @Test
+    fun `what the engine says about this build is what the app reports`() {
+        val fake = FakeEngine().apply {
+            reportedDiagnostics = LocalEngineDiagnostics(
+                enginePresent = true,
+                compiledOptimized = true,
+                coresSeen = 8,
+                decodeThreads = 2,
+                batchThreads = 8,
+                pooledWorkers = true,
+                availableMb = 1_240,
+                backends = listOf("armv8_2dot0", "android_armv9", "android_armv8_2_0"),
+                systemInfo = "CPU: ARMV8_2_FMA"
+            )
+        }
+
+        val report = engineFor(repositoryFor(ggufBytes(4096)), fake).diagnostics()
+
+        assertEquals(fake.reportedDiagnostics, report)
+        val lines = report.lines()
+        assertTrue("the build must be named as optimised: $lines", lines.contains("Engine build: optimised"))
+        assertTrue(lines.contains("Cores seen: 8 - 2 decoding, 8 prefiling"))
+        assertTrue(lines.contains("Worker threads: reused between steps"))
+        assertTrue(lines.contains("Memory available: 1240 MB"))
+        assertEquals(3, lines.count { it.startsWith("Kernel set:") })
+    }
+
+    /**
+     * The one fault this exists to catch. A debug build of this app compiled the inference kernels
+     * with no optimisation at all, which made every model look broken rather than slow — an order
+     * of magnitude of prefill time with nothing in the interface to explain it. The absence of the
+     * optimisation has to be the loudest line the screen has.
+     */
+    @Test
+    fun `a build that was not compiled to run fast says so in those words`() {
+        val lines = LocalEngineDiagnostics(
+            enginePresent = true,
+            compiledOptimized = false,
+            coresSeen = 8,
+            decodeThreads = 4,
+            batchThreads = 8,
+            pooledWorkers = false,
+            availableMb = null
+        ).lines()
+
+        assertTrue(
+            "unoptimised code must be named, not left to be guessed: $lines",
+            lines.first().contains("UNOPTIMISED")
+        )
+        assertTrue(lines.any { it.contains("rebuilt for every step") })
+        // A device that reports no free memory says nothing about it rather than inventing a number.
+        assertTrue(lines.none { it.contains("Memory available") })
+    }
+
+    @Test
+    fun `a build with no engine at all reports the reason instead of a table of zeros`() {
+        val lines = LocalEngineDiagnostics.noEngine.lines()
+
+        assertEquals(1, lines.size)
+        assertTrue(lines.single().contains("no on-device inference engine"))
     }
 }

@@ -59,7 +59,17 @@ class NativeLlama private constructor() {
 
   external fun nativeLastError(): ByteArray
 
+  /** CPU threads this device's thread plan decodes with, which is not its core count. */
   external fun nativeSystemThreads(): Int
+
+  /**
+   * What this device and this build are: optimisation state, kernel sets, core plan, free memory.
+   *
+   * Works with handle 0, where it reports what a model *would* run on. Every slow or silent turn
+   * is a property of one of these numbers, and a phone that is not plugged into a computer cannot
+   * show logcat to whoever has to fix it.
+   */
+  external fun nativeEngineDiagnostics(handle: Long): ByteArray
 
   // ---- chat templates, in the engine's own code ----
 
