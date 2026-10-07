@@ -87,6 +87,9 @@ fun LocalModelsSection(
   val unloading by viewModel.localModelUnloading.collectAsState()
   val loadErrors by viewModel.localModelLoadErrors.collectAsState()
 
+  var engineOpen by remember { mutableStateOf(false) }
+  val engine by viewModel.localEngineDiagnostics.collectAsState()
+
   var addOpen by remember { mutableStateOf(false) }
   var settingsFor by remember { mutableStateOf<LocalModel?>(null) }
   var infoFor by remember { mutableStateOf<LocalModel?>(null) }
@@ -208,6 +211,13 @@ fun LocalModelsSection(
 
     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
       MiniAction("Check for updates") { viewModel.refreshLocalModels() }
+      // The engine's own numbers, behind a tap rather than in logcat: a phone that decodes at a
+      // tenth of the speed it should, or refuses to answer at all, is usually a build fact or a
+      // core-count fact, and the person holding it is the one who has to say which.
+      MiniAction(if (engineOpen) "Hide engine" else "Engine status") {
+        engineOpen = !engineOpen
+        if (engineOpen) viewModel.refreshLocalEngineDiagnostics()
+      }
       Text(
         viewModel.localAiNote ?: when (installedCount) {
           0 -> "Nothing installed to run"
@@ -219,6 +229,30 @@ fun LocalModelsSection(
         maxLines = 2,
         overflow = TextOverflow.Ellipsis
       )
+    }
+
+    if (engineOpen) {
+      Spacer(modifier = Modifier.height(8.dp))
+      Column(
+        modifier = Modifier
+          .fillMaxWidth()
+          .clip(RoundedCornerShape(8.dp))
+          .background(MaterialTheme.colorScheme.surfaceContainer)
+          .padding(10.dp)
+          .testTag("local_engine_diagnostics")
+      ) {
+        val lines = engine?.lines() ?: listOf("Reading this device…")
+        lines.forEach { line ->
+          Text(
+            line,
+            color = AwakiTheme.extra.textMuted,
+            fontSize = 10.sp,
+            fontFamily = FontFamily.Monospace,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+          )
+        }
+      }
     }
   }
 
@@ -417,31 +451,15 @@ internal fun LocalModelCard(
       horizontalArrangement = Arrangement.spacedBy(6.dp),
       verticalAlignment = Alignment.CenterVertically
     ) {
+      // Whether the model's bytes are in memory and where those bytes came from are two different
+      // questions, so they get two controls. They shared one `when` chain until now, and the chain
+      // let a row answer only one: the model the chat is actually using is installed, selected and
+      // re-downloadable, so it offered the re-download and no way back out of memory - until a turn
+      // happened to leave it resident and the same row offered Unload instead of Load.
       when {
-        state?.isBusy == true -> MiniAction(
-          label = "Cancel",
-          tint = MaterialTheme.colorScheme.error,
-          modifier = Modifier.testTag("btn_local_cancel_${model.id}"),
-          onClick = onCancel
-        )
-        // An imported model has nothing to fetch, nothing to update from and no second
-        // copy to re-download: its bytes only ever arrive from the picker, so the row
-        // says so by offering no such button.
-        !model.isImported && (status == LocalModelInstallStatus.NOT_INSTALLED || status == LocalModelInstallStatus.FAILED) -> MiniAction(
-          label = if (resumable) "Resume" else "Download",
-          tint = MaterialTheme.colorScheme.primary,
-          modifier = Modifier.testTag("btn_local_install_${model.id}"),
-          onClick = onInstall
-        )
-        !model.isImported && status == LocalModelInstallStatus.UPDATE_AVAILABLE -> MiniAction(
-          label = "Update",
-          tint = MaterialTheme.colorScheme.primary,
-          modifier = Modifier.testTag("btn_local_update_${model.id}"),
-          onClick = onInstall
-        )
-        // Reading the file and allocating the cache takes seconds, and releasing a model the
-        // agent is answering with has to wait for that turn; either way a row that claims
-        // nothing while it works leaves the tap looking like it went nowhere.
+        // Reading the file and allocating the cache takes seconds, and releasing a model the agent
+        // is answering with has to wait for that turn; either way a row that claims nothing while
+        // it works leaves the tap looking like it went nowhere.
         loading || unloading -> Box(
           modifier = Modifier
             .clip(RoundedCornerShape(6.dp))
@@ -457,18 +475,41 @@ internal fun LocalModelCard(
             fontWeight = FontWeight.Medium
           )
         }
-        // Bytes in memory are only useful while something wants them, so the button that put
-        // them there becomes the button that takes them out again.
+        // Bytes in memory are only useful while something wants them, so the button that put them
+        // there becomes the button that takes them out again.
         model.installed && resident -> MiniAction(
           label = "Unload",
           modifier = Modifier.testTag("btn_local_unload_${model.id}"),
           onClick = onUnload
         )
-        model.installed && !selected && !resident -> MiniAction(
+        model.installed -> MiniAction(
           label = "Load",
           tint = MaterialTheme.colorScheme.primary,
           modifier = Modifier.testTag("btn_local_load_${model.id}"),
           onClick = onLoad
+        )
+      }
+      when {
+        state?.isBusy == true -> MiniAction(
+          label = "Cancel",
+          tint = MaterialTheme.colorScheme.error,
+          modifier = Modifier.testTag("btn_local_cancel_${model.id}"),
+          onClick = onCancel
+        )
+        // An imported model has nothing to fetch, nothing to update from and no second copy to
+        // re-download: its bytes only ever arrive from the picker, so the row says so by offering
+        // no such button.
+        !model.isImported && status == LocalModelInstallStatus.UPDATE_AVAILABLE -> MiniAction(
+          label = "Update",
+          tint = MaterialTheme.colorScheme.primary,
+          modifier = Modifier.testTag("btn_local_update_${model.id}"),
+          onClick = onInstall
+        )
+        !model.isImported && (status == LocalModelInstallStatus.NOT_INSTALLED || status == LocalModelInstallStatus.FAILED) -> MiniAction(
+          label = if (resumable) "Resume" else "Download",
+          tint = MaterialTheme.colorScheme.primary,
+          modifier = Modifier.testTag("btn_local_install_${model.id}"),
+          onClick = onInstall
         )
         model.installed && selected && !model.isImported -> MiniAction(
           label = "Re-download",

@@ -306,12 +306,18 @@ class LocalModelsUiTest {
     compose.onNodeWithText("142 MB · ctx ${LocalRuntimeSettings.DEFAULT_CONTEXT} · max 200 · built in").assertExists()
   }
 
+  /**
+   * Whether a model's bytes are in memory and where those bytes came from are two questions, and
+   * the row the agent is pointed at has to answer both: its file can be replaced, and a turn
+   * asked of it right now would begin with a load. One `when` chain used to make the row pick a
+   * single answer, and it picked the file - which left the model in use with no way to be loaded.
+   */
   @Test
-  fun `the model in use offers a fresh copy of its bytes, not a second load`() {
+  fun `the model in use is offered its memory and its bytes as two separate controls`() {
     renderCard(null, installed = true, selected = true)
     compose.onNodeWithText("Installed · in use").assertExists()
-    compose.onNodeWithText("Re-download").assertExists()
-    compose.onNodeWithText("Load").assertDoesNotExist()
+    compose.onNodeWithTag("btn_local_load_lfm2").assertExists()
+    compose.onNodeWithTag("btn_local_redownload_lfm2").assertExists()
   }
 
   @Test
@@ -322,14 +328,16 @@ class LocalModelsUiTest {
     compose.onNodeWithTag("btn_local_unload_lfm2").assertExists()
   }
 
-  /** The model the agent is pointed at is the one most likely to be resident, and giving its
-   * memory back matters more there than fetching a second copy of bytes that already work. */
+  /** Residency is the only thing the memory slot answers, so the row that offered a Load while the
+   * model sat on disk offers the Unload that hands what it took back — and keeps its byte-level
+   * actions, which are about the file and were never in competition with these. */
   @Test
-  fun `the model in memory is offered an unload before a fresh copy of its bytes`() {
+  fun `the model in memory is offered the way back out, beside its bytes`() {
     renderCard(null, installed = true, selected = true, resident = true)
     compose.onNodeWithText("Installed · in use · in memory").assertExists()
     compose.onNodeWithTag("btn_local_unload_lfm2").assertExists()
-    compose.onNodeWithText("Re-download").assertDoesNotExist()
+    compose.onNodeWithTag("btn_local_load_lfm2").assertDoesNotExist()
+    compose.onNodeWithTag("btn_local_redownload_lfm2").assertExists()
   }
 
   @Test
@@ -459,6 +467,22 @@ class LocalModelsUiTest {
 
     compose.onNodeWithTag("btn_import_local_model").assertIsDisplayed()
     compose.onNodeWithTag("btn_add_local_model").assertIsDisplayed()
+  }
+
+  /**
+   * The engine's own numbers have to be reachable from the phone, not only from logcat: the
+   * person holding it is the one who can say whether the build is the problem or the silicon is.
+   */
+  @Test
+  fun `the section opens the engine's report on this device`() = runTest {
+    val viewModel = viewModelWith("lfm2")
+    compose.setContent {
+      AwakiTheme { LocalModelsSection(viewModel) }
+    }
+
+    compose.onNodeWithTag("local_engine_diagnostics").assertDoesNotExist()
+    compose.onNodeWithText("Engine status").performClick()
+    compose.onNodeWithTag("local_engine_diagnostics").assertIsDisplayed()
   }
 
   // ---- the section over a real install ----
