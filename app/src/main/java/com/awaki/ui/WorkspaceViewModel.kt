@@ -1468,6 +1468,32 @@ class WorkspaceViewModel(
     }
   }
 
+  private val _localModelUnloading = MutableStateFlow<Set<String>>(emptySet())
+
+  /**
+   * The rows waiting for memory to come back. Unloading waits on the same lock a turn holds, so
+   * pressing it mid-answer is a request that lands when the answer does, and the row has to say
+   * it heard the press while it waits.
+   */
+  val localModelUnloading: StateFlow<Set<String>> = _localModelUnloading.asStateFlow()
+
+  /**
+   * Takes [modelId] out of memory again. Only what is actually resident can be handed back, and
+   * the engine holds one model, so the row that asks is the one holding it.
+   */
+  fun unloadLocalModel(modelId: String) {
+    if (modelId in _localModelUnloading.value) return
+    if (repository.localResidentModelId.value != modelId) return
+    _localModelUnloading.value = _localModelUnloading.value + modelId
+    viewModelScope.launch {
+      try {
+        repository.unloadLocalModel()
+      } finally {
+        _localModelUnloading.value = _localModelUnloading.value - modelId
+      }
+    }
+  }
+
   /**
    * Adds a model from a URL the user typed. The result comes back to the form, because
    * a rejected URL is the form's problem to explain, not the list's.

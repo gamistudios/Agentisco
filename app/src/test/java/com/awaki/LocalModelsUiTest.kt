@@ -221,6 +221,7 @@ class LocalModelsUiTest {
     selected: Boolean = false,
     resident: Boolean = false,
     loading: Boolean = false,
+    unloading: Boolean = false,
     loadError: String? = null
   ) {
     val shown = model(installed || state?.status == LocalModelInstallStatus.INSTALLED, configuration)
@@ -232,8 +233,10 @@ class LocalModelsUiTest {
           selected = selected,
           resident = resident,
           loading = loading,
+          unloading = unloading,
           loadError = loadError,
-          onInstall = {}, onCancel = {}, onSettings = {}, onInfo = {}, onLoad = {}, onRedownload = {}, onDelete = {}, onForget = {}
+          onInstall = {}, onCancel = {}, onSettings = {}, onInfo = {}, onLoad = {}, onUnload = {},
+          onRedownload = {}, onDelete = {}, onForget = {}
         )
       }
     }
@@ -312,10 +315,29 @@ class LocalModelsUiTest {
   }
 
   @Test
-  fun `a model already in memory says so and offers no second load`() {
+  fun `a model already in memory says so and offers the way back out of it`() {
     renderCard(null, installed = true, resident = true)
     compose.onNodeWithText("Installed · in memory").assertExists()
     compose.onNodeWithText("Load").assertDoesNotExist()
+    compose.onNodeWithTag("btn_local_unload_lfm2").assertExists()
+  }
+
+  /** The model the agent is pointed at is the one most likely to be resident, and giving its
+   * memory back matters more there than fetching a second copy of bytes that already work. */
+  @Test
+  fun `the model in memory is offered an unload before a fresh copy of its bytes`() {
+    renderCard(null, installed = true, selected = true, resident = true)
+    compose.onNodeWithText("Installed · in use · in memory").assertExists()
+    compose.onNodeWithTag("btn_local_unload_lfm2").assertExists()
+    compose.onNodeWithText("Re-download").assertDoesNotExist()
+  }
+
+  @Test
+  fun `an unload in flight shows the wait instead of a button that would ask twice`() {
+    renderCard(null, installed = true, resident = true, unloading = true)
+    compose.onNodeWithTag("local_model_unloading_lfm2").assertExists()
+    compose.onNodeWithText("Unloading…").assertExists()
+    compose.onNodeWithText("Unload").assertDoesNotExist()
   }
 
   @Test
@@ -356,7 +378,8 @@ class LocalModelsUiTest {
   private fun renderCardFor(
     shown: LocalModel,
     state: LocalModelInstallState? = null,
-    selected: Boolean = false
+    selected: Boolean = false,
+    resident: Boolean = false
   ) {
     compose.setContent {
       AwakiTheme {
@@ -364,10 +387,12 @@ class LocalModelsUiTest {
           model = shown,
           state = state,
           selected = selected,
-          resident = false,
+          resident = resident,
           loading = false,
+          unloading = false,
           loadError = null,
-          onInstall = {}, onCancel = {}, onSettings = {}, onInfo = {}, onLoad = {}, onRedownload = {}, onDelete = {}, onForget = {}
+          onInstall = {}, onCancel = {}, onSettings = {}, onInfo = {}, onLoad = {}, onUnload = {},
+          onRedownload = {}, onDelete = {}, onForget = {}
         )
       }
     }
@@ -406,6 +431,14 @@ class LocalModelsUiTest {
 
     compose.onNodeWithText("Update").assertDoesNotExist()
     compose.onNodeWithText("Load").assertExists()
+  }
+
+  @Test
+  fun `an imported model in memory is handed back the same way`() {
+    renderCardFor(imported(installed = true), resident = true)
+
+    compose.onNodeWithTag("btn_local_unload_lfm2").assertExists()
+    compose.onNodeWithText("Load").assertDoesNotExist()
   }
 
   @Test
@@ -479,6 +512,29 @@ class LocalModelsUiTest {
     // engine is holding, with no second Load action to tap by accident.
     compose.onNodeWithText("Installed · in use · in memory").assertIsDisplayed()
     compose.onNodeWithText("Load").assertDoesNotExist()
+  }
+
+  /**
+   * The round trip the button exists for: bytes come into memory on a tap and go back out on
+   * another, and the row says which of the two it is holding.
+   */
+  @Test
+  fun `unloading gives the model's memory back and the row stops claiming it`() = runTest {
+    val viewModel = viewModelWith("lfm2")
+    compose.setContent {
+      AwakiTheme { LocalModelsSection(viewModel) }
+    }
+
+    compose.onNodeWithText("Load").performClick()
+    compose.onNodeWithText("Installed · in use · in memory").assertIsDisplayed()
+
+    compose.onNodeWithTag("btn_local_unload_lfm2").performClick()
+    assertNull(viewModel.localResidentModelId.value)
+    // Still the model the agent is pointed at, just no longer in RAM: the next turn pays the
+    // load, and the row says so instead of offering a wait.
+    compose.onNodeWithText("Installed · in use").assertIsDisplayed()
+    compose.onNodeWithText("Re-download").assertIsDisplayed()
+    compose.onNodeWithText("Unloading…").assertDoesNotExist()
   }
 
   /** The page Settings opens: the section under a header that returns where it came from. */

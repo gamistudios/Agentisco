@@ -135,6 +135,15 @@ class WorkspaceRepository(
         "This build has no on-device model to load."
       )
 
+  /**
+   * Takes whatever is resident out of memory again. A load is a few hundred megabytes the phone
+   * keeps until it is told otherwise, and asking is the only way a user gets them back — the
+   * runtime holds at most one model, so the next turn or load pays for itself either way.
+   */
+  suspend fun unloadLocalModel() {
+    localAi?.releaseModel()
+  }
+
   /** The registry record for the turn currently running, if any. */
   private var agentTurnWorkId: String? = null
 

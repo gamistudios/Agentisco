@@ -12,8 +12,10 @@ import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
@@ -123,7 +125,7 @@ class LocalModelsScreenshotTest {
             model = model(false),
             state = null,
             selected = false,
-            onInstall = {}, onCancel = {}, onSettings = {}, onInfo = {}, onLoad = {},
+            onInstall = {}, onCancel = {}, onSettings = {}, onInfo = {}, onLoad = {}, onUnload = {},
             onRedownload = {}, onDelete = {}, onForget = {}
           )
           Spacer(modifier = Modifier.height(12.dp))
@@ -138,7 +140,7 @@ class LocalModelsScreenshotTest {
               )
             ),
             selected = false,
-            onInstall = {}, onCancel = {}, onSettings = {}, onInfo = {}, onLoad = {},
+            onInstall = {}, onCancel = {}, onSettings = {}, onInfo = {}, onLoad = {}, onUnload = {},
             onRedownload = {}, onDelete = {}, onForget = {}
           )
           Spacer(modifier = Modifier.height(12.dp))
@@ -146,7 +148,7 @@ class LocalModelsScreenshotTest {
             model = model(true),
             state = LocalModelInstallState(LocalModelInstallStatus.INSTALLED),
             selected = true,
-            onInstall = {}, onCancel = {}, onSettings = {}, onInfo = {}, onLoad = {},
+            onInstall = {}, onCancel = {}, onSettings = {}, onInfo = {}, onLoad = {}, onUnload = {},
             onRedownload = {}, onDelete = {}, onForget = {}
           )
           Spacer(modifier = Modifier.height(12.dp))
@@ -156,7 +158,7 @@ class LocalModelsScreenshotTest {
               LocalModelInstallStatus.UPDATE_AVAILABLE
             ),
             selected = false,
-            onInstall = {}, onCancel = {}, onSettings = {}, onInfo = {}, onLoad = {},
+            onInstall = {}, onCancel = {}, onSettings = {}, onInfo = {}, onLoad = {}, onUnload = {},
             onRedownload = {}, onDelete = {}, onForget = {}
           )
         }
@@ -198,7 +200,7 @@ class LocalModelsScreenshotTest {
             ),
             state = LocalModelInstallState(LocalModelInstallStatus.INSTALLED),
             selected = false,
-            onInstall = {}, onCancel = {}, onSettings = {}, onInfo = {}, onLoad = {},
+            onInstall = {}, onCancel = {}, onSettings = {}, onInfo = {}, onLoad = {}, onUnload = {},
             onRedownload = {}, onDelete = {}, onForget = {}
           )
           Spacer(modifier = Modifier.height(12.dp))
@@ -216,17 +218,40 @@ class LocalModelsScreenshotTest {
               progress = LocalModelProgress(bytesTransferred = 367_001_600L, totalBytes = 0L)
             ),
             selected = false,
-            onInstall = {}, onCancel = {}, onSettings = {}, onInfo = {}, onLoad = {},
+            onInstall = {}, onCancel = {}, onSettings = {}, onInfo = {}, onLoad = {}, onUnload = {},
+            onRedownload = {}, onDelete = {}, onForget = {}
+          )
+          Spacer(modifier = Modifier.height(12.dp))
+          // In memory is the state with something to give back, and a model nobody publishes
+          // still has its weights loaded, so its row spends that on an unload alone.
+          LocalModelCard(
+            model = model(true).copy(
+              builtIn = false,
+              sourceUrl = "",
+              downloadUrl = "",
+              name = "Tiny Qwen",
+              quantization = "Q4_K_M",
+              sizeBytes = 734_003_200L
+            ),
+            state = LocalModelInstallState(LocalModelInstallStatus.INSTALLED),
+            selected = false,
+            resident = true,
+            onInstall = {}, onCancel = {}, onSettings = {}, onInfo = {}, onLoad = {}, onUnload = {},
             onRedownload = {}, onDelete = {}, onForget = {}
           )
         }
       }
     }
 
-    compose.onNodeWithText("700 MB · main · ctx 4096 · max 200 · from this device").assertExists()
+    // Two installed rows — the same bytes in memory and out of it — and one still copying.
+    compose.onAllNodesWithText("700 MB · main · ctx 4096 · max 200 · from this device").assertCountEquals(2)
     compose.onNodeWithText("700 MB · main · from this device").assertExists()
     compose.onNodeWithText("Importing").assertExists()
     compose.onNodeWithText("350 MB copied").assertExists()
+    compose.onNodeWithText("Installed").assertExists()
+    compose.onNodeWithText("Installed · in memory").assertExists()
+    compose.onAllNodesWithText("Load").assertCountEquals(1)
+    compose.onAllNodesWithText("Unload").assertCountEquals(1)
     compose.onRoot().captureRoboImage(filePath = "src/test/screenshots/local_model_import.png")
   }
 

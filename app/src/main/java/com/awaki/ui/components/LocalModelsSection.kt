@@ -84,6 +84,7 @@ fun LocalModelsSection(
   val selectedId by viewModel.selectedModel.collectAsState()
   val residentId by viewModel.localResidentModelId.collectAsState()
   val loading by viewModel.localModelLoading.collectAsState()
+  val unloading by viewModel.localModelUnloading.collectAsState()
   val loadErrors by viewModel.localModelLoadErrors.collectAsState()
 
   var addOpen by remember { mutableStateOf(false) }
@@ -182,6 +183,7 @@ fun LocalModelsSection(
         selected = selectedId?.id == LocalAiRuntime.recordId(model.id),
         resident = residentId == model.id,
         loading = model.id in loading,
+        unloading = model.id in unloading,
         loadError = loadErrors[model.id],
         onInstall = { viewModel.installLocalModel(model.id) },
         onCancel = { viewModel.cancelLocalInstall(model.id) },
@@ -194,6 +196,9 @@ fun LocalModelsSection(
           viewModel.localModelSelectable(model.id)?.let(viewModel::selectModel)
           viewModel.loadLocalModel(model.id)
         },
+        // Whatever a load took into memory is the user's to hand back: a phone about to do
+        // something else should not be holding weights nobody is asking a question of.
+        onUnload = { viewModel.unloadLocalModel(model.id) },
         onRedownload = { viewModel.redownloadLocalModel(model.id) },
         onDelete = { confirmDelete = model },
         onForget = { viewModel.forgetLocalModel(model.id) }
@@ -293,12 +298,14 @@ internal fun LocalModelCard(
   selected: Boolean,
   resident: Boolean = false,
   loading: Boolean = false,
+  unloading: Boolean = false,
   loadError: String? = null,
   onInstall: () -> Unit,
   onCancel: () -> Unit,
   onSettings: () -> Unit,
   onInfo: () -> Unit,
   onLoad: () -> Unit,
+  onUnload: () -> Unit,
   onRedownload: () -> Unit,
   onDelete: () -> Unit,
   onForget: () -> Unit
@@ -432,20 +439,31 @@ internal fun LocalModelCard(
           modifier = Modifier.testTag("btn_local_update_${model.id}"),
           onClick = onInstall
         )
-        // Reading the file and allocating the cache takes seconds, and a row that claims
-        // nothing while it does would leave the tap looking like it went nowhere.
-        loading -> Box(
+        // Reading the file and allocating the cache takes seconds, and releasing a model the
+        // agent is answering with has to wait for that turn; either way a row that claims
+        // nothing while it works leaves the tap looking like it went nowhere.
+        loading || unloading -> Box(
           modifier = Modifier
             .clip(RoundedCornerShape(6.dp))
             .background(MaterialTheme.colorScheme.surfaceContainer)
             .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(6.dp))
             .padding(horizontal = 10.dp, vertical = 4.dp)
-            .testTag("local_model_loading_${model.id}")
+            .testTag(if (unloading) "local_model_unloading_${model.id}" else "local_model_loading_${model.id}")
         ) {
-          Text("Loading…", color = AwakiTheme.extra.warning, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+          Text(
+            if (unloading) "Unloading…" else "Loading…",
+            color = AwakiTheme.extra.warning,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Medium
+          )
         }
-        // Once the bytes are in memory there is nothing left for this button to do, and a
-        // second press would only be a wait with no answer at the end of it.
+        // Bytes in memory are only useful while something wants them, so the button that put
+        // them there becomes the button that takes them out again.
+        model.installed && resident -> MiniAction(
+          label = "Unload",
+          modifier = Modifier.testTag("btn_local_unload_${model.id}"),
+          onClick = onUnload
+        )
         model.installed && !selected && !resident -> MiniAction(
           label = "Load",
           tint = MaterialTheme.colorScheme.primary,
