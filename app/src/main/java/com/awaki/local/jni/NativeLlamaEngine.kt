@@ -374,8 +374,12 @@ private class AnswerReader(
     val engineDeltas = turn.parse(text, final)
     val fallbackDeltas = fallback!!.feed(newText(text), final)
     return when {
-      // The engine recognised a call: it knows this model's dialect, so it keeps reading it.
-      engineDeltas.any { it.toolCall != null } -> engineWins(held + engineDeltas, final)
+      // The engine recognised a call and named it: it knows this model's dialect, so it keeps
+      // reading it. A call with no name in it is not that yet — an incremental parser reports the
+      // markup of a call before the tokens that spell its tool arrive, and the model that ends its
+      // turn with a stray marker reports nothing at all. Handing that to the engine alone is what
+      // puts a tool named "" in front of the caller, so the decision waits for a name.
+      engineDeltas.any { it.toolCall?.name?.isNotEmpty() == true } -> engineWins(held + engineDeltas, final)
       fallback.askedForTool -> {
         usingFallback = true
         deciding = false

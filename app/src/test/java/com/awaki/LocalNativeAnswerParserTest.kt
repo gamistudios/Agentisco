@@ -212,4 +212,34 @@ class LocalNativeAnswerParserTest {
     assertEquals("The answer is in ", parser.feed("The answer is in [").joinToString("") { it.content })
     assertEquals("[", parser.feed("", final = true).joinToString("") { it.content })
   }
+
+  /**
+   * The `{"tool": …}` dialect is the one shape whose arguments are written before its name is
+   * readable: the object only names its function once it closes, while its arguments stream token by
+   * token from the first one. Announcing those pieces is how a call named `""` reaches the caller —
+   * so they wait here and go out once, whole, with the name that finally identifies them.
+   */
+  @Test
+  fun `arguments that arrive before the name are announced with it, once`() {
+    val parser = NativeAnswerParser(names = names)
+    val pieces = listOf(
+      """{"tool": "read_""",
+      """file", "arguments": {"pa""",
+      """th": "a.txt"}}"""
+    )
+    val deltas = pieces.flatMap { parser.feed(it) } + parser.feed("", final = true)
+
+    val announced = deltas.mapNotNull { it.toolCall }
+    assertTrue("no call goes out without a name: $announced", announced.none { it.name.isEmpty() })
+    assertEquals("one opening delta carries the whole call", 1, announced.size)
+    assertEquals("read_file", announced[0].name)
+    assertJson("""{"path": "a.txt"}""", announced[0].argumentsJson)
+
+    // And the reassembled answer the non-streaming caller reads agrees with the stream.
+    val answer = Answer()
+    deltas.forEach { answer.append(it) }
+    assertEquals(1, answer.toolCalls.size)
+    assertJson("""{"path": "a.txt"}""", answer.toolCalls[0].argumentsJson)
+    assertEquals("", answer.content)
+  }
 }

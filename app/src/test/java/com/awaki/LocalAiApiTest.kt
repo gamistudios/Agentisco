@@ -375,6 +375,103 @@ class LocalAiApiTest {
         assertEquals("", choice.getJSONObject("message").getString("content"))
     }
 
+    /**
+     * The same call, read from a parser that only names it in its last piece: a growing JSON object
+     * has its arguments written before its name is readable, so the first fragments say nothing
+     * about which tool is meant. Forwarding those as they arrive is what puts a tool named `""` in
+     * front of a caller that then tries to run it.
+     */
+    private fun lateNamedCall(session: com.awaki.local.FakeSession) {
+        session.reply = listOf("""{"path":"a""", """","file":"b"}""")
+        session.deltas = { piece ->
+            listOf(
+                LocalAnswerDelta(
+                  toolCallIndex = 0,
+                  toolCall = LocalToolCall(
+                    id = if (piece.startsWith("{")) "call_1" else "",
+                    name = if (piece.startsWith("\"")) "read_file" else "",
+                    argumentsJson = piece
+                  )
+                )
+            )
+        }
+    }
+
+    @Test
+    fun `a call that names itself late streams its bytes once, under that name`() = runTest {
+        val (api, fake) = apiFor("alpha")
+        fake.sessionScript = { session -> lateNamedCall(session) }
+        val chunks = mutableListOf<String>()
+
+        call(
+            api, "POST", "/v1/chat/completions",
+            """{"model":"alpha","stream":true,"messages":[{"role":"user","content":"hi"}]}""", chunks
+        )
+
+        val streamed = chunks.filter { it != "[DONE]" }.flatMap { chunk ->
+            val calls = JSONObject(chunk).getJSONArray("choices").getJSONObject(0)
+                .getJSONObject("delta").optJSONArray("tool_calls") ?: return@flatMap emptyList()
+            (0 until calls.length()).map { calls.getJSONObject(it) }
+        }
+        assertEquals(2, streamed.size)
+        // Nothing is announced while the call could still turn out to be markup, and what was held
+        // back goes out with the name that identifies it — in the order the model wrote it.
+        assertFalse(streamed[0].getJSONObject("function").has("name"))
+        assertEquals("""{"path":"a""", streamed[0].getJSONObject("function").getString("arguments"))
+        assertEquals("read_file", streamed[1].getJSONObject("function").getString("name"))
+        assertEquals("""","file":"b"}""", streamed[1].getJSONObject("function").getString("arguments"))
+    }
+
+    @Test
+    fun `a call that names itself late is reassembled whole for a client that asked for one body`() = runTest {
+        val (api, fake) = apiFor("alpha")
+        fake.sessionScript = { session -> lateNamedCall(session) }
+
+        val assembled = bodyOf(complete(api, oneTurn)).getJSONArray("choices").getJSONObject(0)
+            .getJSONObject("message").getJSONArray("tool_calls").getJSONObject(0)
+
+        // The held pieces are the call's own bytes, so the body cannot get arguments with the front
+        // of them missing just because the stream was not reading them yet.
+        assertEquals("call_1", assembled.getString("id"))
+        assertEquals("read_file", assembled.getJSONObject("function").getString("name"))
+        assertEquals("""{"path":"a","file":"b"}""", assembled.getJSONObject("function").getString("arguments"))
+    }
+
+    /**
+     * A model that ends its turn on a stray marker produces markup no reader can attribute to a tool.
+     * That is not work the caller can run, and it is not nothing: the bytes are what the model chose
+     * to say, so they reach the user as text instead of vanishing from an empty answer.
+     */
+    @Test
+    fun `a call that never names itself is answered as text, not as a tool`() = runTest {
+        val (api, fake) = apiFor("alpha")
+        fake.sessionScript = { session ->
+            session.reply = listOf("<|call|>")
+            session.deltas = { piece ->
+                listOf(LocalAnswerDelta(toolCallIndex = 0, toolCall = LocalToolCall(id = "", name = "", argumentsJson = piece)))
+            }
+        }
+
+        val chunks = mutableListOf<String>()
+        call(
+            api, "POST", "/v1/chat/completions",
+            """{"model":"alpha","stream":true,"messages":[{"role":"user","content":"hi"}]}""", chunks
+        )
+
+        assertTrue(chunks.none { it.contains("\"tool_calls\"") })
+        assertEquals(
+            listOf("assistant", "<|call|>", null, "[DONE]"),
+            chunks.map { if (it == "[DONE]") it else JSONObject(it).chunkText() }
+        )
+        assertEquals("stop", JSONObject(chunks[2]).getJSONArray("choices").getJSONObject(0).getString("finish_reason"))
+
+        val choice = bodyOf(complete(api, oneTurn)).getJSONArray("choices").getJSONObject(0)
+        // A name-less call is not a call: a client that reads `tool_calls` here would run nothing.
+        assertTrue(choice.getJSONObject("message").isNull("tool_calls"))
+        assertEquals("<|call|>", choice.getJSONObject("message").getString("content"))
+        assertEquals("stop", choice.getString("finish_reason"))
+    }
+
     @Test
     fun `thinking streams in its own field instead of the answer`() = runTest {
         val (api, fake) = apiFor("alpha")
