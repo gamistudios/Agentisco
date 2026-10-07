@@ -17,6 +17,9 @@
 
 #include <llama.h>
 
+#include <ggml-backend.h>
+#include <ggml.h>
+
 #include <chat.h>
 
 #include <atomic>
@@ -29,6 +32,22 @@ struct Session {
   const llama_vocab *vocab = nullptr;
   int32_t n_batch = 512;
   std::atomic<bool> abort{false};
+
+  /**
+   * The worker threads this context decodes with, kept for the context's whole life.
+   *
+   * Without them ggml builds a pool for every graph evaluation and tears it down again, so each
+   * token pays for `n_threads` thread creations and joins - and the new threads are placed by the
+   * scheduler, which is free to put them on the little cores the thread count exists to avoid.
+   * Null when this build's CPU backend does not hand its pool constructor out.
+   */
+  ggml_threadpool_t threadpool = nullptr;
+  ggml_threadpool_t threadpool_batch = nullptr;
+
+  /** Cores this device actually runs on and the plan made from them, for the log and for Settings. */
+  int32_t cores_seen = 0;
+  int32_t n_threads = 0;
+  int32_t n_threads_batch = 0;
 
   /**
    * The prefix of the last prompt whose engine state is held in [snapshot].
@@ -48,6 +67,25 @@ struct Session {
 
   /** The chat template this model carries, plus its variants, parsed once at load. */
   common_chat_templates_ptr templates;
+
+  /**
+   * Special tokens whose text belongs to the answer, because this model's own template writes them.
+   *
+   * A tool call is one special token in this template and literal text in another, and a special
+   * token detokenizes to nothing unless it is asked for by name. So the turn's preserved list
+   * decides which markers reach the parsers: without it, a model that calls in markers has the
+   * markers deleted before anything that could read them sees them.
+   */
+  std::vector<llama_token> preserved_tokens;
+
+  /**
+   * Whether the current turn's grammar waits for a trigger before it constrains anything, and what
+   * the triggers are. Both come from the template alongside the grammar text, which is why they
+   * live here rather than crossing as extra arguments: the grammar arrives as a string, and a
+   * string carries no opinion about when it should start applying.
+   */
+  bool grammar_lazy = false;
+  std::vector<common_grammar_trigger> grammar_triggers;
 };
 
 /** Message of the last failure any part of this library hit. */

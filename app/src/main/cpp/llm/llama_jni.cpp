@@ -70,6 +70,116 @@ long read_cpu_max_freq(unsigned cpu) {
   return scanned == 1 ? khz : 0;
 }
 
+/** What this device's cores are, in the two numbers a turn is asked to work with. */
+struct ThreadPlan {
+  int32_t cores;
+  /** Threads for a single token, where the barrier at the end of the step is the whole cost. */
+  int32_t decode;
+  /** Threads for a chunk of the prompt, which is the same work over far fewer barriers. */
+  int32_t batch;
+};
+
+/**
+ * How many of this device's cores should be given the two kinds of work a turn is made of.
+ *
+ * A decode step ends in a barrier every worker waits at, so one thread parked on a little core
+ * holds up the fast ones and the step pays for it. Measured on this engine with the same prompt, a
+ * pool sized to every core was ten to fifteen times slower than one sized to the fast cluster.
+ *
+ * A prompt chunk is the opposite shape: the same work spread over far fewer, much wider graph
+ * evaluations, so the barrier is amortised and cores that are merely slow still add throughput.
+ * That is why prefill gets the wider number.
+ *
+ * The clusters come from the clock each core reports, which is the only portable description of
+ * big.LITTLE there is, with one correction: a device whose cores all report nearly the same top
+ * clock is not a device with no little cores, it is a device whose clocks do not tell them apart.
+ * A Helio G99 runs its six Cortex-A55s at 91 % of the frequency of its two A76s, and an A55 is
+ * nowhere near an A76. Where every core clears the cut-off, the cut-off is discarded and half of
+ * them are used - the same answer a device that reports no clocks at all gets.
+ */
+ThreadPlan thread_plan() {
+  unsigned total = std::thread::hardware_concurrency();
+  if (total == 0) total = 1;
+
+  long fastest = 0;
+  std::vector<long> clocks;
+  clocks.reserve(total);
+  for (unsigned cpu = 0; cpu < total; ++cpu) {
+    const long khz = read_cpu_max_freq(cpu);
+    if (khz <= 0) continue;
+    fastest = std::max(fastest, khz);
+    clocks.push_back(khz);
+  }
+
+  const int32_t cores = (int32_t) (clocks.empty() ? total : clocks.size());
+  const int32_t half = std::max(1, cores / 2);
+  if (clocks.empty()) return {/* cores = */ cores, /* decode = */ half, /* batch = */ cores};
+
+  int32_t fast = 0;
+  int32_t wide = 0;
+  for (const long khz : clocks) {
+    if (khz * 5 >= fastest * 4) ++fast;  // within 80 % of the top clock
+    if (khz * 2 >= fastest) ++wide;      // within 50 % of it
+  }
+  if (fast == 0) fast = 1;
+  if (fast >= cores) fast = half;
+  return {/* cores = */ cores, /* decode = */ fast, /* batch = */ std::max(fast, wide)};
+}
+
+using pool_new = ggml_threadpool_t (*)(struct ggml_threadpool_params *);
+
+/**
+ * The CPU backend's pool constructor, reached through the registry.
+ *
+ * The constructor lives in the CPU backend module rather than in libggml - this build ships the
+ * backends as modules - so it is only reachable this way, which is how llama.cpp's own callers get
+ * it. Null is not a failure: ggml then falls back to building a pool for every graph evaluation,
+ * which is what a device without the symbol has always done. Diagnostics reports which of the two
+ * this device is on, because the difference shows up as tokens per second and nothing else.
+ */
+pool_new threadpool_factory() {
+  ggml_backend_reg_t reg = ggml_backend_reg_by_name("CPU");
+  if (reg == nullptr) return nullptr;
+  return (pool_new) ggml_backend_reg_get_proc_address(reg, "ggml_threadpool_new");
+}
+
+/**
+ * The pool one model decodes with.
+ *
+ * Every graph evaluation without one builds `n_threads` threads, joins them and destroys them, and
+ * leaves their placement to a scheduler that is free to put a worker on a little core the thread
+ * count above was chosen to avoid. One pool per loaded model replaces that with threads created
+ * once, waiting on a condition between steps.
+ */
+ggml_threadpool_t new_threadpool(int32_t n_threads) {
+  const pool_new create = threadpool_factory();
+  if (create == nullptr || n_threads <= 0) return nullptr;
+  struct ggml_threadpool_params params = ggml_threadpool_params_default(n_threads);
+  return create(&params);
+}
+
+void free_threadpool(ggml_threadpool_t pool) {
+  if (pool == nullptr) return;
+  using pool_free = void (*)(ggml_threadpool_t);
+  ggml_backend_reg_t reg = ggml_backend_reg_by_name("CPU");
+  if (reg == nullptr) return;
+  const auto destroy = (pool_free) ggml_backend_reg_get_proc_address(reg, "ggml_threadpool_free");
+  if (destroy != nullptr) destroy(pool);
+}
+
+/** Whether the code running on this device was compiled to run fast, which the caller cannot guess. */
+bool compiled_optimized() {
+#ifdef __OPTIMIZE__
+  return true;
+#else
+  return false;
+#endif
+}
+
+const char *optimization_state() {
+  return compiled_optimized() ? "optimized" : "UNOPTIMIZED";
+}
+
 /** Kilobytes the kernel could still hand out, or -1 when /proc says nothing. */
 long mem_available_kb() {
   FILE *file = fopen("/proc/meminfo", "r");
@@ -141,6 +251,64 @@ std::string meta_string(llama_model *model, const char *key) {
   return std::string(buf, (size_t) (len < (int32_t) sizeof(buf) ? len : (int32_t) sizeof(buf) - 1));
 }
 
+/**
+ * The grammar that constrains this turn's answer, held off until the answer starts needing it.
+ *
+ * A grammar is tested against the whole vocabulary on every token, so a turn that ends in prose
+ * pays the full cost of a tool-call grammar it never uses. The template knows what opens a call in
+ * this model's dialect, so the constraint can wait for that and let the tokens before it be
+ * sampled plain. Applying it eagerly - which is what this did - makes every token of an on-device
+ * turn pay a pass it cannot use, on the one device that cannot afford it.
+ *
+ * A lazy grammar with nothing to trigger it would never engage, and a tool call would be answered
+ * unconstrained, which is worse than slow. So that case falls back to constraining from token zero.
+ */
+llama_sampler *grammar_sampler(const Session *s, const char *grammar) {
+  if (!s->grammar_lazy || s->grammar_triggers.empty()) {
+    return llama_sampler_init_grammar(s->vocab, grammar, "root");
+  }
+
+  std::vector<std::string> patterns;
+  std::vector<llama_token> tokens;
+  for (const auto &trigger : s->grammar_triggers) {
+    switch (trigger.type) {
+      case COMMON_GRAMMAR_TRIGGER_TYPE_WORD:
+        patterns.push_back(regex_escape(trigger.value));
+        break;
+      case COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN:
+        patterns.push_back(trigger.value);
+        break;
+      case COMMON_GRAMMAR_TRIGGER_TYPE_PATTERN_FULL: {
+        const std::string &pattern = trigger.value;
+        std::string anchored = pattern;
+        if (!anchored.empty()) {
+          if (anchored.front() != '^') anchored.insert(anchored.begin(), '^');
+          if (anchored.back() != '$') anchored.push_back('$');
+        } else {
+          anchored = "^$";
+        }
+        patterns.push_back(anchored);
+        break;
+      }
+      case COMMON_GRAMMAR_TRIGGER_TYPE_TOKEN:
+        tokens.push_back(trigger.token);
+        break;
+    }
+  }
+
+  std::vector<const char *> pattern_text;
+  pattern_text.reserve(patterns.size());
+  for (const auto &pattern : patterns) pattern_text.push_back(pattern.c_str());
+
+  return llama_sampler_init_grammar_lazy_patterns(
+      s->vocab, grammar, "root", pattern_text.data(), pattern_text.size(), tokens.data(), tokens.size());
+}
+
+/** Lets a cancelled request stop in the middle of a prompt, not only between its tokens. */
+bool aborted(void *user_data) {
+  return static_cast<Session *>(user_data)->abort.load();
+}
+
 llama_sampler *build_sampler(const Session *s,
                              jfloat temperature,
                              jint top_k,
@@ -154,7 +322,7 @@ llama_sampler *build_sampler(const Session *s,
   // Same order llama.cpp's own sampler builder uses: constrain, then discourage
   // repetition, then truncate the distribution, then sample from it.
   if (grammar != nullptr && grammar[0] != '\0') {
-    llama_sampler_chain_add(chain, llama_sampler_init_grammar(s->vocab, grammar, "root"));
+    llama_sampler_chain_add(chain, grammar_sampler(s, grammar));
   }
   if (repeat_penalty > 0.0f && repeat_penalty != 1.0f) {
     llama_sampler_chain_add(
@@ -204,10 +372,25 @@ Java_com_awaki_local_jni_NativeLlama_nativeInit(JNIEnv *env, jobject, jstring na
       nullptr);
 
   const char *dir = env->GetStringUTFChars(native_lib_dir, nullptr);
-  ggml_backend_load_all_from_path(dir);
+  const std::string library_dir(dir ? dir : "");
   env->ReleaseStringUTFChars(native_lib_dir, dir);
+  ggml_backend_load_all_from_path(library_dir.c_str());
 
   llama_backend_init();
+
+  // Three facts a slow or silent turn can be, none of which this engine used to say out loud:
+  // whether the code running was compiled to run fast, which of the CPU kernel sets this device
+  // was scored onto, and how many cores the thread plan chose from. All three are properties of
+  // the device rather than of a request, so they are logged once here and kept for the settings
+  // screen to read back.
+  const ThreadPlan plan = thread_plan();
+  const size_t devices = ggml_backend_dev_count();
+  LOGI("engine %s, %d cores, %d threads to decode and %zu to prefill, %zu backends from %s",
+       optimization_state(), plan.cores, plan.decode, plan.batch, devices, library_dir.c_str());
+  for (size_t i = 0; i < devices; ++i) {
+    const ggml_backend_dev_t dev = ggml_backend_dev_get(i);
+    LOGI("backend: %s | %s", ggml_backend_dev_name(dev), ggml_backend_dev_description(dev));
+  }
 }
 
 JNIEXPORT jlong JNICALL
@@ -244,31 +427,55 @@ Java_com_awaki_local_jni_NativeLlama_nativeLoadModel(JNIEnv *env,
   char arch[256] = {0};
   llama_model_meta_val_str(model, "general.architecture", arch, sizeof(arch));
 
+  const ThreadPlan plan = thread_plan();
   auto cparams = llama_context_default_params();
   cparams.n_ctx = (uint32_t) (ctx_size > 0 ? ctx_size : 0);
   // A larger batch is the same prefill work in fewer, wider graph evaluations, which on
   // CPU is most of what a phone has to give: 128 leaves the cores idle between chunks.
   cparams.n_batch = (uint32_t) (n_batch > 0 ? n_batch : 512);
   cparams.n_ubatch = cparams.n_batch;
-  cparams.n_threads = (int32_t) (threads > 0 ? threads : 0);
-  cparams.n_threads_batch = cparams.n_threads;
+  // Zero from Kotlin means the device decides, and llama.cpp's own default is a small fixed number
+  // that leaves most of a phone idle. A caller that names a count gets that count for both kinds of
+  // work, because it is the user's number and the plan's guess is not a reason to override it.
+  cparams.n_threads = threads > 0 ? (int32_t) threads : plan.decode;
+  cparams.n_threads_batch =
+      threads > 0 ? (int32_t) threads : std::max(cparams.n_threads, plan.batch);
+
+  // Allocated before the context, because the context is told to ask it whether to stop: an
+  // interrupt has to be able to land in the middle of a prompt, and a prompt is where a phone spends
+  // most of the wait a user is interrupting.
+  auto *s = new Session();
+  s->model = model;
+  s->cores_seen = plan.cores;
+  s->n_threads = cparams.n_threads;
+  s->n_threads_batch = cparams.n_threads_batch;
+  cparams.abort_callback = aborted;
+  cparams.abort_callback_data = s;
 
   llama_context *ctx = llama_init_from_model(model, cparams);
   if (ctx == nullptr) {
     llama_model_free(model);
+    delete s;
     set_error("Could not hold " + std::to_string(cparams.n_ctx) + " tokens of context for this " +
               (std::string(arch) + " model") + memory_note() +
               ". Lower the context size, or close other apps.");
     return 0;
   }
-  LOGI("context ready: %u tokens, batch %u, %d threads", cparams.n_ctx, cparams.n_batch, cparams.n_threads);
-
-  auto *s = new Session();
-  s->model = model;
   s->ctx = ctx;
   s->vocab = llama_model_get_vocab(model);
   s->n_batch = (int32_t) cparams.n_batch;
   g_last_error.clear();
+
+  // One pool for both kinds of work, sized to the larger of the two counts: ggml clamps a request
+  // to the threads a pool has rather than growing it, so a pool built to the decode number would
+  // quietly prefill at the decode number too.
+  s->threadpool = new_threadpool(std::max(cparams.n_threads, cparams.n_threads_batch));
+  if (s->threadpool != nullptr) {
+    llama_attach_threadpool(ctx, s->threadpool, nullptr);
+  }
+  LOGI("context ready: %u tokens, batch %u, %d threads to decode / %d to prefill%s",
+       cparams.n_ctx, cparams.n_batch, cparams.n_threads, cparams.n_threads_batch,
+       s->threadpool == nullptr ? ", pooled workers unavailable" : "");
 
   // Compile the template this file ships, once, at load. A model whose template does
   // not compile is still a usable model for plain completions, so the failure is
@@ -362,7 +569,6 @@ Java_com_awaki_local_jni_NativeLlama_nativeComplete(JNIEnv *env,
   }
 
   const uint32_t n_ctx = llama_n_ctx(s->ctx);
-  const llama_token eos = llama_vocab_eos(s->vocab);
   const int32_t limit = max_tokens > 0 ? max_tokens : 512;
 
   // A prompt that cannot fit is a caller error, not an engine fault. Letting decode
@@ -446,12 +652,19 @@ Java_com_awaki_local_jni_NativeLlama_nativeComplete(JNIEnv *env,
   if (prefill_ok && head > reuse) save_prefix_snapshot(s, tokens, head);
   if (prefill_ok) prefill_ok = evaluate(head, tokens.size());
   if (!prefill_ok) {
-    finish = -5;
-    set_error("Failed to evaluate prompt");
     // Where the engine stopped is not known, so nothing copied out before it can be trusted.
     s->snapshot.clear();
     s->snapshot.shrink_to_fit();
     s->prefix_tokens.clear();
+    if (s->abort.load()) {
+      // The caller stopped it partway through the prompt rather than the engine failing, which the
+      // runtime needs to hear as an abort: an error here would make it drop the model the user only
+      // wanted to interrupt, and their next turn would pay for a reload.
+      finish = 3;
+    } else {
+      finish = -5;
+      set_error("Failed to evaluate prompt");
+    }
   }
 
   const long prefill_ms = elapsed_ms(prefill_started);
@@ -486,14 +699,20 @@ Java_com_awaki_local_jni_NativeLlama_nativeComplete(JNIEnv *env,
     llama_sampler_accept(smpl, tok);
     generated++;
 
-    if (eos != LLAMA_TOKEN_NULL && tok == eos) {
+    if (llama_vocab_is_eog(s->vocab, tok)) {
       finish = 0;
       break;
     }
 
     char piece[256];
     const auto detok_started = std::chrono::steady_clock::now();
-    const int32_t written = llama_token_to_piece(s->vocab, tok, piece, sizeof(piece), 0, false);
+    // A special token's text is nothing at all unless it is asked for by name, so a model that
+    // writes its tool calls as markers had them deleted before either parser could see them. The
+    // turn's own template says which markers belong to an answer; a special token outside that list
+    // is still dropped, so markup the caller never asked for does not reach the screen either.
+    const bool preserved =
+        std::find(s->preserved_tokens.begin(), s->preserved_tokens.end(), tok) != s->preserved_tokens.end();
+    const int32_t written = llama_token_to_piece(s->vocab, tok, piece, sizeof(piece), 0, preserved);
     detok_ms += elapsed_ms(detok_started);
     if (written < 0) {
       finish = -6;
@@ -558,7 +777,17 @@ Java_com_awaki_local_jni_NativeLlama_nativeUnload(JNIEnv *, jobject, jlong handl
   Session *s = session_of(handle);
   if (s == nullptr) return;
   s->abort.store(true);
-  if (s->ctx) llama_free(s->ctx);
+  if (s->ctx) {
+    // The context only holds a pointer to the pool, so the pool outlives it and has to be released
+    // here: a model that is loaded and unloaded repeatedly would otherwise leave a pool of worker
+    // threads parked on every cycle, on a device whose whole problem is running out of memory.
+    llama_detach_threadpool(s->ctx);
+    llama_free(s->ctx);
+  }
+  free_threadpool(s->threadpool);
+  free_threadpool(s->threadpool_batch);
+  s->threadpool = nullptr;
+  s->threadpool_batch = nullptr;
   if (s->model) llama_model_free(s->model);
   delete s;
 }
@@ -574,35 +803,55 @@ Java_com_awaki_local_jni_NativeLlama_nativeLastError(JNIEnv *env, jobject) {
 }
 
 /**
+ * What this device and this build of the engine actually are.
+ *
+ * Every fault of the kind this app has had — a turn that never finishes, a model that decodes at
+ * walking pace, a phone that is much slower than the measurements on the desk — is a property of
+ * the build or of the silicon rather than of the request, and none of it used to be written
+ * anywhere the app could show. So the questions get answered from the inside: was this compiled to
+ * run fast, which kernel set did ggml score this CPU onto, how many cores does the thread plan see,
+ * and what could the device still hand out. A logcat dump is not something a user can paste into a
+ * bug report from a phone that is not plugged into a computer.
+ *
+ * Works with nothing loaded: the device facts do not come from a model.
+ */
+JNIEXPORT jbyteArray JNICALL
+Java_com_awaki_local_jni_NativeLlama_nativeEngineDiagnostics(JNIEnv *env, jobject, jlong handle) {
+  const ThreadPlan plan = thread_plan();
+  Session *s = session_of(handle);
+
+  std::string json = "{";
+  json += "\"optimized\":" + std::string(compiled_optimized() ? "true" : "false");
+  json += ",\"systemInfo\":" + common_json::make(llama_print_system_info()).dump_safe();
+  json += ",\"coresSeen\":" + std::to_string(plan.cores);
+  json += ",\"decodeThreads\":" + std::to_string(s != nullptr ? s->n_threads : plan.decode);
+  json += ",\"batchThreads\":" + std::to_string(s != nullptr ? s->n_threads_batch : plan.batch);
+  json += ",\"pooledWorkers\":" + std::string(threadpool_factory() != nullptr ? "true" : "false");
+  json += ",\"availableMb\":" + std::to_string(mem_available_kb() / 1024);
+  json += ",\"backends\":[";
+  const size_t devices = ggml_backend_dev_count();
+  for (size_t i = 0; i < devices; ++i) {
+    const ggml_backend_dev_t dev = ggml_backend_dev_get(i);
+    if (i > 0) json += ",";
+    json += "{\"name\":" + common_json::make(ggml_backend_dev_name(dev)).dump_safe();
+    json += ",\"description\":" + common_json::make(ggml_backend_dev_description(dev)).dump_safe() + "}";
+  }
+  json += "]}";
+  return to_bytes(env, json);
+}
+
+/**
  * A thread count this device can actually keep fed.
  *
- * Every llama_decode ends in a barrier the whole pool waits at, so one thread parked on
- * a little core holds up the big ones and the pool pays for it on every token. Measured
- * on this engine with the same prompt, a pool sized to every core was ten to fifteen
- * times slower than one sized to the top frequency cluster. The clusters come from the
- * clock each core reports, which is the only portable description of big.LITTLE there
- * is; a device that reports no clocks at all gets half its cores rather than all of them.
+ * This is the plan's decode number, not the core count: every llama_decode ends in a barrier the
+ * whole pool waits at, so one thread parked on a little core holds up the big ones and the pool pays
+ * for it on every token. Measured on this engine with the same prompt, a pool sized to every core
+ * was ten to fifteen times slower than one sized to the fast cluster. Settings shows this as the
+ * number "use all" means, and a caller that names its own count overrides it.
  */
 JNIEXPORT jint JNICALL
 Java_com_awaki_local_jni_NativeLlama_nativeSystemThreads(JNIEnv *, jobject) {
-  unsigned total = std::thread::hardware_concurrency();
-  if (total == 0) total = 1;
-
-  long fastest = 0;
-  std::vector<long> clocks;
-  for (unsigned cpu = 0; cpu < total; ++cpu) {
-    const long khz = read_cpu_max_freq(cpu);
-    if (khz <= 0) continue;
-    fastest = std::max(fastest, khz);
-    clocks.push_back(khz);
-  }
-  if (clocks.empty()) return (jint) std::max(1u, total / 2);
-
-  unsigned big = 0;
-  for (const long khz : clocks) {
-    if (khz * 10 >= fastest * 9) ++big;
-  }
-  return (jint) (big > 0 ? big : 1);
+  return (jint) thread_plan().decode;
 }
 
 }  // extern "C"

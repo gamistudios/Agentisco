@@ -22,6 +22,10 @@
 #include <chat.h>
 #include <json.h>
 
+#include <algorithm>
+#include <utility>
+#include <vector>
+
 namespace {
 
 std::string string_field(const common_json &obj, const char *key, const std::string &fallback = std::string()) {
@@ -62,6 +66,57 @@ struct ChatTurn {
 
 ChatTurn *turn_of(jlong handle) {
   return reinterpret_cast<ChatTurn *>(static_cast<intptr_t>(handle));
+}
+
+/**
+ * Points the session at the turn its next decode will answer for.
+ *
+ * A turn's demands do not fit in the grammar text that reaches `nativeComplete`, and two of them
+ * decide what the decode loop does with every token:
+ *
+ * - A preserved token arrives as text, less-than signs and all, and only the vocabulary can say
+ *   whether it is one token at all. Detokenizing a special token yields nothing unless that token
+ *   is named, so a model that marks its tool calls with markers had the markers deleted before
+ *   either parser could see them.
+ * - A trigger of type word is worth converting to a token when it tokenizes to one, because
+ *   matching a token is free where matching a pattern runs a regex over the vocabulary. That is
+ *   llama-server's hop too, and a word that becomes a token has to be preserved as well, since a
+ *   marker cannot be both invisible to the decoder and the thing the decoder watches for.
+ *
+ * One turn is open at a time by construction: the resident model is under a lock for the whole of a
+ * request, so recording the turn's demands on the session cannot race a decode that is not its own.
+ */
+void describe_turn_to(Session *s, const common_chat_params &p) {
+  std::vector<llama_token> preserved;
+  for (const auto &text : p.preserved_tokens) {
+    const std::vector<llama_token> ids = common_tokenize(s->vocab, text, false, true);
+    if (ids.size() == 1) preserved.push_back(ids[0]);
+  }
+
+  std::vector<common_grammar_trigger> triggers;
+  for (const auto &trigger : p.grammar_triggers) {
+    if (trigger.type != COMMON_GRAMMAR_TRIGGER_TYPE_WORD) {
+      triggers.push_back(trigger);
+      continue;
+    }
+    const std::vector<llama_token> ids = common_tokenize(s->vocab, trigger.value, false, true);
+    if (ids.size() != 1) {
+      triggers.push_back(trigger);
+      continue;
+    }
+    if (std::find(preserved.begin(), preserved.end(), ids[0]) == preserved.end()) {
+      preserved.push_back(ids[0]);
+    }
+    common_grammar_trigger as_token;
+    as_token.type = COMMON_GRAMMAR_TRIGGER_TYPE_TOKEN;
+    as_token.value = trigger.value;
+    as_token.token = ids[0];
+    triggers.push_back(std::move(as_token));
+  }
+
+  s->preserved_tokens = std::move(preserved);
+  s->grammar_lazy = p.grammar_lazy;
+  s->grammar_triggers = std::move(triggers);
 }
 
 /// The template hands back a serialized PEG parser while the parser wants an arena.
@@ -194,6 +249,7 @@ Java_com_awaki_local_jni_NativeLlama_nativeChatOpenTurn(JNIEnv *env, jobject, jl
     turn->params = common_chat_templates_apply(s->templates.get(), in);
     turn->parser_params = to_parser_params(turn->params, in.reasoning_format, true);
     turn->previous.role = "assistant";
+    describe_turn_to(s, turn->params);
     return static_cast<jlong>(reinterpret_cast<intptr_t>(turn));
   } catch (const std::exception &e) {
     set_error(std::string("This model's chat template rejected the request: ") + e.what());
