@@ -8,6 +8,35 @@ set(CMAKE_SHARED_LINKER_FLAGS
   "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384"
 )
 
+# The same flag on the module linker, because the CPU backends are MODULE targets, not
+# SHARED ones (GGML_BACKEND_DL builds them with add_library(... MODULE ...)). Without
+# this the libraries that actually hold the kernels are the only ones still 4 KB-aligned,
+# and on a 16 KB device dlopen refuses them - silently, with the baseline variant as the
+# only survivor, or with no CPU backend at all if every one of them is refused.
+set(CMAKE_MODULE_LINKER_FLAGS
+  "${CMAKE_MODULE_LINKER_FLAGS} -Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384"
+)
+
+# How fast a model runs on a phone is a build-flag fact before it is a code fact.
+#
+# Gradle picks CMAKE_BUILD_TYPE from the build type, and its debug build type maps to
+# CMake's Debug, so an APK assembled from `assembleDebug` compiles ggml, common and this
+# app's JNI bridge at -O0. An unoptimised ggml is an order of magnitude off on the
+# prefill an agent turn is dominated by, which the person holding the phone experiences
+# as the model never answering - not as a slow one. The debug APK is also the one the
+# build server publishes on every run.
+#
+# So the optimised flags are set here instead, for every configuration Gradle can pick,
+# and the native code in a debug APK is the same code the release ships. Overriding the
+# per-configuration variables rather than CMAKE_BUILD_TYPE is deliberate: the cache
+# variable is Gradle's to set, these are the compiler's, and shadowing them works no
+# matter which configuration is selected. Debug symbols go with -O0, and they were the
+# only thing making the packaged libraries large.
+foreach (gradle_config DEBUG RELEASE RELWITHDEBINFO MINSIZEREL)
+  set(CMAKE_C_FLAGS_${gradle_config}   "-O3 -DNDEBUG")
+  set(CMAKE_CXX_FLAGS_${gradle_config} "-O3 -DNDEBUG")
+endforeach ()
+
 add_library(termux SHARED termux.c)
 target_link_libraries(termux log)
 
