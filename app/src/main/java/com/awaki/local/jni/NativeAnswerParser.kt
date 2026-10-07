@@ -159,6 +159,8 @@ internal class NativeAnswerParser(
     val call = calls[index]
     if (call.name.isEmpty() && read.name.isNotEmpty()) call.name = read.name
 
+    val opening = !call.announced && call.name.isNotEmpty()
+    if (opening) call.announced = true
     val added = if (read.arguments.startsWith(call.arguments)) {
       val tail = read.arguments.substring(call.arguments.length)
       call.arguments = read.arguments
@@ -168,26 +170,13 @@ internal class NativeAnswerParser(
       // and a stream cannot take a piece back: keep the text already sent.
       ""
     }
-
-    if (call.name.isEmpty()) {
-      // Half a JSON object is the one shape that yields arguments before it yields a name, and a
-      // call with no name is a tool nobody can run. Keep the bytes; they go out with the name as
-      // soon as the answer supplies one.
-      if (added.isNotEmpty()) call.early.append(added)
-      return null
-    }
-
-    val opening = !call.announced
-    call.announced = true
-    val arguments = if (opening) call.early.toString() + added else added
-    call.early.setLength(0)
-    if (!opening && arguments.isEmpty()) return null
+    if (!opening && added.isEmpty()) return null
     return LocalAnswerDelta(
       toolCallIndex = index,
       toolCall = LocalToolCall(
         id = if (opening) call.id else "",
         name = if (opening) call.name else "",
-        argumentsJson = arguments,
+        argumentsJson = added,
       ),
     )
   }
@@ -196,9 +185,6 @@ internal class NativeAnswerParser(
     var name: String = ""
     var arguments: String = ""
     var announced: Boolean = false
-
-    /** Arguments read while the call still had no name, emitted with it once it does. */
-    val early = StringBuilder()
   }
 
   private class Segment(val text: String, val isCall: Boolean = false)

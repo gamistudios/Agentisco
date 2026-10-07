@@ -187,20 +187,18 @@ class LocalAiApi(
     var failure: LocalEngineException? = null
     try {
       finish = engine.chat(model, request.chatInputs, request.settings, request.seed) { delta ->
-        val publishable = answer.publish(delta)
+        answer.append(delta)
         // Only a client that went away is a reason to stop the decode; a caller that asked for
         // the answer in one piece has nowhere to push to and keeps going.
         if (!stream || clientGone) return@chat true
-        for (piece in publishable) {
-          val node = deltaNode(piece) ?: continue
-          if (!headSent && !emitHead()) {
-            clientGone = true
-            return@chat false
-          }
-          if (!emit(chunk(id, created, request.model, node, null))) {
-            clientGone = true
-            return@chat false
-          }
+        val node = deltaNode(delta) ?: return@chat true
+        if (!headSent && !emitHead()) {
+          clientGone = true
+          return@chat false
+        }
+        if (!emit(chunk(id, created, request.model, node, null))) {
+          clientGone = true
+          return@chat false
         }
         true
       }
@@ -276,54 +274,23 @@ class LocalAiApi(
  * A tool call streams as its name and id once and its arguments growing token by token, so
  * they are joined here by index — which is how a client that asked for one JSON body gets the
  * same calls a streaming client assembles for itself.
+ *
+ * What the engine parsed is what the client is given, in pieces and in order. This layer does not
+ * hold a call back waiting for its name to arrive: a stream that parks a fragment has to decide
+ * what to do with it when the turn ends, and both answers there are user-visible failures —
+ * dropping it leaves an empty message, forwarding it as text writes the model's markup on the
+ * screen. A call nobody ever named is refused where it is *run* instead (see AgentRuntime).
  */
 internal class Answer {
   private val text = StringBuilder()
   private val thinking = StringBuilder()
   private val calls = sortedMapOf<Int, LocalToolCall>()
 
-  /** Fragments of a call whose name has not arrived yet, held back by [publish]. */
-  private val pending = sortedMapOf<Int, MutableList<LocalAnswerDelta>>()
-
   val content: String get() = text.toString()
   val reasoning: String get() = thinking.toString()
 
   /** Only a call that named its function is one the caller can run. */
   val toolCalls: List<LocalToolCall> get() = calls.values.filter { it.name.isNotEmpty() }
-
-  /**
-   * The pieces of [delta] a client may be given, which is not always the delta itself.
-   *
-   * An incremental parser knows a call has started before it knows which tool the model meant: the
-   * dialect puts its arguments first, or the markup arrives one token at a time and only the last
-   * of them spells out a name. Forwarding those fragments as-is hands the caller a tool call whose
-   * name is the empty string, and the agent then spends a round being told that no such tool
-   * exists — for a model that was trying to end its turn, once per turn. So a call's fragments wait
-   * here until something names it, and go out together with the delta that does.
-   *
-   * A call that is never named never goes out at all. Its bytes are the model's markup rather than
-   * an answer, and they belong neither in `tool_calls` nor in `content`: the turn reads as finished
-   * with nothing offered, which is what actually happened.
-   */
-  fun publish(delta: LocalAnswerDelta): List<LocalAnswerDelta> {
-    val call = delta.toolCall
-    if (call == null) {
-      append(delta)
-      return listOf(delta)
-    }
-    val named = call.name.isNotEmpty() || calls[delta.toolCallIndex]?.name?.isNotEmpty() == true
-    if (!named) {
-      pending.getOrPut(delta.toolCallIndex) { mutableListOf() }.add(delta)
-      return emptyList()
-    }
-    val held = pending.remove(delta.toolCallIndex).orEmpty()
-    // The held fragments are this call's own bytes, so they join the reassembled call as well as
-    // the stream: a caller that asked for one JSON body would otherwise get arguments with the
-    // front of them missing.
-    held.forEach { append(it) }
-    append(delta)
-    return held + delta
-  }
 
   fun append(delta: LocalAnswerDelta) {
     text.append(delta.content)

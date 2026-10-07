@@ -216,11 +216,11 @@ class LocalNativeAnswerParserTest {
   /**
    * The `{"tool": …}` dialect is the one shape whose arguments are written before its name is
    * readable: the object only names its function once it closes, while its arguments stream token by
-   * token from the first one. Announcing those pieces is how a call named `""` reaches the caller —
-   * so they wait here and go out once, whole, with the name that finally identifies them.
+   * token from the first one. This reader is a stream, not a decision — the pieces go out as they are
+   * parsed, and what matters is that the call the caller assembles from them is whole and named once.
    */
   @Test
-  fun `arguments that arrive before the name are announced with it, once`() {
+  fun `a call whose arguments arrive before its name is streamed whole and named once`() {
     val parser = NativeAnswerParser(names = names)
     val pieces = listOf(
       """{"tool": "read_""",
@@ -230,12 +230,11 @@ class LocalNativeAnswerParserTest {
     val deltas = pieces.flatMap { parser.feed(it) } + parser.feed("", final = true)
 
     val announced = deltas.mapNotNull { it.toolCall }
-    assertTrue("no call goes out without a name: $announced", announced.none { it.name.isEmpty() })
-    assertEquals("one opening delta carries the whole call", 1, announced.size)
-    assertEquals("read_file", announced[0].name)
-    assertJson("""{"path": "a.txt"}""", announced[0].argumentsJson)
+    assertEquals("the name is carried by one delta", 1, announced.count { it.name.isNotEmpty() })
+    assertEquals("read_file", announced.first { it.name.isNotEmpty() }.name)
 
-    // And the reassembled answer the non-streaming caller reads agrees with the stream.
+    // And the reassembled answer the non-streaming caller reads agrees with the stream: every
+    // argument byte arrived, exactly once.
     val answer = Answer()
     deltas.forEach { answer.append(it) }
     assertEquals(1, answer.toolCalls.size)

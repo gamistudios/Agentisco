@@ -223,13 +223,13 @@ class NativeLlamaEngine(
       val rendered = NativeChatTurn(api, turn)
       val stops = rendered.stopSequences + request.inputs.stop
       val reader = AnswerReader(
-        rendered,
-        StopSequenceFilter(stops),
+        parse = rendered::parse,
+        filter = StopSequenceFilter(stops),
         // A turn with no tools offered has no call to miss, so nothing reads over the engine's
         // shoulder: the engine's parser is the only thing that knows where a model's thinking was.
-        if (request.inputs.tools.isEmpty()) null
+        fallback = if (request.inputs.tools.isEmpty()) null
         else NativeAnswerParser(stops, request.inputs.tools.map { it.name }),
-        onDelta,
+        onDelta = onDelta,
       )
       val generated = StringBuilder()
       var piecesSinceParse = 0
@@ -350,8 +350,12 @@ class NativeLlamaEngine(
  * Once the engine reports a call, or the fallback agrees that the answer began as prose, the engine
  * reads the rest of the turn alone and the fallback is not fed again.
  */
-private class AnswerReader(
-  private val turn: NativeChatTurn,
+internal class AnswerReader(
+  /**
+   * The engine's reader of the turn: the text as far as it has arrived, and whether it is still
+   * arriving. [AnswerReader] is the only place that knows both words for that flag.
+   */
+  private val parse: (String, Boolean) -> List<LocalAnswerDelta>,
   private val filter: StopSequenceFilter,
   private val fallback: NativeAnswerParser?,
   private val onDelta: (LocalAnswerDelta) -> Boolean,
@@ -359,25 +363,32 @@ private class AnswerReader(
 
   /** What the fallback has been given already, since it reads pieces rather than whole answers. */
   private val fed = StringBuilder()
+
+  /** Every byte of the turn the engine decoded, which is what [showWordsIfNothing] falls back on. */
+  private var raw = ""
   private var deciding = fallback != null
   private var usingFallback = false
   private var held: List<LocalAnswerDelta> = emptyList()
+
+  /** True once anything at all reached the caller. */
+  private var published = false
 
   /** True when the answer reached one of the sequences that ends a turn. */
   val stopTriggered: Boolean get() = filter.triggered != null
 
   /** Hands the caller everything new in [text]. False means the decode should stop. */
   fun read(text: String, final: Boolean): Boolean {
+    if (text.length > raw.length) raw = text
     if (!deciding) {
-      return publish(if (usingFallback) fallback!!.feed(newText(text), final) else turn.parse(text, final), final)
+      return publish(if (usingFallback) fallback!!.feed(newText(text), final) else parse(text, !final), final)
     }
-    val engineDeltas = turn.parse(text, final)
+    val engineDeltas = parse(text, !final)
     val fallbackDeltas = fallback!!.feed(newText(text), final)
     return when {
-      // The engine recognised a call: it knows this model's dialect, so it keeps reading it. A
-      // call whose name has not arrived yet is still a call — the wire layer holds its fragments
-      // until something names them (see Answer.publish), and holding the whole turn here instead
-      // would keep both readers re-reading an answer that never settles.
+      // The engine recognised a call: it knows this model's dialect, so it keeps reading it. Whether
+      // that call has a name yet is the caller's business — the wire forwards what was parsed and the
+      // agent runs the named ones — and holding the turn here to wait for one keeps both readers
+      // re-reading an answer that never settles, which stops the stream and shows the model's markup.
       engineDeltas.any { it.toolCall != null } -> engineWins(held + engineDeltas, final)
       fallback.askedForTool -> {
         usingFallback = true
@@ -412,15 +423,37 @@ private class AnswerReader(
         // template's parser: a stop sequence cannot appear inside one.
         delta
       }
-      if (!piece.isEmpty && !onDelta(piece)) return false
+      if (!piece.isEmpty) {
+        published = true
+        if (!onDelta(piece)) return false
+      }
       if (filter.triggered != null) return false
     }
     if (final) {
       // The tail that was only ambiguous about a stop sequence is real text once the answer ends.
       val tail = filter.flush()
       if (tail.isNotEmpty()) return onDelta(LocalAnswerDelta(content = tail))
+      return showWordsIfNothing()
     }
     return true
+  }
+
+  /**
+   * The turn's own text, published if the readers made nothing of it.
+   *
+   * Both readers can report a turn as finished with nothing in it, and each time the user sees an
+   * empty message instead of an answer. The template's parser discards a call whose function name
+   * it never matched (common_chat_parse throws away the markup around it), and this engine reports
+   * no call at all when the answer's shape is one the template does not allow. Neither is the
+   * model having said nothing: the bytes are the words it chose, so they go out as content once, at
+   * the end, rather than as fragments of markup flashing on screen mid-turn.
+   */
+  private fun showWordsIfNothing(): Boolean {
+    if (published || filter.triggered != null) return true
+    val words = raw.trim()
+    if (words.isEmpty()) return true
+    published = true
+    return onDelta(LocalAnswerDelta(content = words))
   }
 
   private fun newText(text: String): String {

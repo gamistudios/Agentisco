@@ -378,8 +378,8 @@ class LocalAiApiTest {
     /**
      * The same call, read from a parser that only names it in its last piece: a growing JSON object
      * has its arguments written before its name is readable, so the first fragments say nothing
-     * about which tool is meant. Forwarding those as they arrive is what puts a tool named `""` in
-     * front of a caller that then tries to run it.
+     * about which tool is meant. The stream forwards them as they arrive — a client assembles the
+     * call the way it assembles any other — and a caller that asked for one body gets it reassembled.
      */
     private fun lateNamedCall(session: com.awaki.local.FakeSession) {
         session.reply = listOf("""{"path":"a""", """","file":"b"}""")
@@ -414,8 +414,8 @@ class LocalAiApiTest {
             (0 until calls.length()).map { calls.getJSONObject(it) }
         }
         assertEquals(2, streamed.size)
-        // Nothing is announced while the call could still turn out to be markup, and what was held
-        // back goes out with the name that identifies it — in the order the model wrote it.
+        // Each piece goes out when it is parsed, in the order the model wrote it, and the name joins
+        // the stream on the fragment that carries it.
         assertFalse(streamed[0].getJSONObject("function").has("name"))
         assertEquals("""{"path":"a""", streamed[0].getJSONObject("function").getString("arguments"))
         assertEquals("read_file", streamed[1].getJSONObject("function").getString("name"))
@@ -430,23 +430,22 @@ class LocalAiApiTest {
         val assembled = bodyOf(complete(api, oneTurn)).getJSONArray("choices").getJSONObject(0)
             .getJSONObject("message").getJSONArray("tool_calls").getJSONObject(0)
 
-        // The held pieces are the call's own bytes, so the body cannot get arguments with the front
-        // of them missing just because the stream was not reading them yet.
+        // A client that asked for one piece gets the arguments as one body, however the stream was
+        // cut up: the fragments are joined by the call's index.
         assertEquals("call_1", assembled.getString("id"))
         assertEquals("read_file", assembled.getJSONObject("function").getString("name"))
         assertEquals("""{"path":"a","file":"b"}""", assembled.getJSONObject("function").getString("arguments"))
     }
 
     /**
-     * A model that ends its turn on a stray marker produces markup no reader can attribute to a tool.
-     * It is not work the caller can run, so it never goes out as `tool_calls` — and it is not an
-     * answer either, so it never goes out as `content` either. Putting those bytes in front of the
-     * user as text is what made an agent answer a row of `{}`, one chunk per argument fragment of a
-     * call that was never named. The turn reads as finished with nothing offered, which is what
-     * actually happened.
+     * A model that ends its turn on a stray marker leaves the engine's parser with markup it cannot
+     * attribute to any tool. Its fragments still go on the stream, because that is what was parsed
+     * and a stream cannot take a piece back; what this layer refuses to do is offer the caller a
+     * call it cannot run — the reassembled answer carries none, so the agent says what happened
+     * instead of trying to run a tool named "".
      */
     @Test
-    fun `a call that never names itself reaches the client as neither a tool nor as text`() = runTest {
+    fun `a call nobody ever named is not offered as one the client can run`() = runTest {
         val (api, fake) = apiFor("alpha")
         fake.sessionScript = { session ->
             session.reply = listOf("<|call|>")
@@ -461,14 +460,13 @@ class LocalAiApiTest {
             """{"model":"alpha","stream":true,"messages":[{"role":"user","content":"hi"}]}""", chunks
         )
 
-        assertTrue(chunks.none { it.contains("\"tool_calls\"") })
-        // The stream still opens the way every answer does — role first, then the reason it ended —
-        // with the unattributable bytes carried by neither.
-        assertEquals(
-            listOf("assistant", null, "[DONE]"),
-            chunks.map { if (it == "[DONE]") it else JSONObject(it).chunkText() }
-        )
-        assertEquals("stop", JSONObject(chunks[1]).getJSONArray("choices").getJSONObject(0).getString("finish_reason"))
+        val streamed = chunks.filter { it != "[DONE]" }.flatMap { chunk ->
+            val calls = JSONObject(chunk).getJSONArray("choices").getJSONObject(0)
+                .getJSONObject("delta").optJSONArray("tool_calls") ?: return@flatMap emptyList()
+            (0 until calls.length()).map { calls.getJSONObject(it) }
+        }
+        assertEquals(listOf("<|call|>"), streamed.map { it.getJSONObject("function").getString("arguments") })
+        assertTrue(streamed.all { !it.getJSONObject("function").has("name") })
 
         val choice = bodyOf(complete(api, oneTurn)).getJSONArray("choices").getJSONObject(0)
         // A name-less call is not a call: a client that reads `tool_calls` here would run nothing.
