@@ -151,6 +151,13 @@ class AgentRuntime(
     const val MAX_ANSWER_CONTINUATIONS = 3
 
     /**
+     * Consecutive rounds in which every tool call failed with the previous round's exact failures.
+     * A model that repeats a failing step has run out of ways to proceed, and on a phone each
+     * repeat costs the prefill the whole turn already paid.
+     */
+    const val MAX_STUCK_ROUNDS = 1
+
+    /**
      * Asks for the rest of a cut-off answer and nothing else. The wording matters:
      * left to itself a model restates what it already wrote, which would duplicate
      * the first half of the report inside the joined text.
@@ -574,6 +581,11 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
 
     try {
       var finalText = ""
+      // A round whose every call failed the same way as the round before it is the model stuck, not
+      // the model working: on a phone each attempt is a full prefill, so a stuck model is minutes
+      // of the same sentence until the user stops it by hand.
+      var lastFailedRound = ""
+      var stuckRounds = 0
       taskLoop@ for (iteration in 1..maxIterations) {
         // The boundary between one step and the next: everything the run has done
         // is already in its transcript, and no tool is half-finished.
@@ -652,8 +664,17 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
 
           val message = completedMessage ?: LlmMessage(LlmRole.ASSISTANT, assistantText.toString())
 
-          if (message.toolCalls.isEmpty() || !useTools) {
+          // The wire format says a tool call names the function to run. A fragment that names
+          // nothing is not a request for work: it is markup a small model wrote while ending its
+          // turn, or a provider that streamed arguments it never attributed. Executing it is
+          // impossible and refusing it in a tool result is a round the model repeats, so an
+          // unnamed call ends the turn as text instead of entering the loop.
+          val requestedCalls = message.toolCalls.filter { it.name.trim().let { name -> name.isNotEmpty() && name != "null" } }
+          if (requestedCalls.isEmpty() || !useTools) {
             var answer = message.content.ifBlank { assistantText.toString() }
+            if (answer.isBlank() && message.toolCalls.isNotEmpty()) {
+              answer = "The model asked for a tool without naming one, so nothing was run."
+            }
             var cut = message.finishReason == LlmFinishReason.LENGTH
             var continuations = 0
             // The provider filled its output budget instead of finishing: the text
@@ -719,7 +740,7 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
           // back to the model. The assistant message echoed into history carries
           // normalized canonical calls (real ids, names, and arguments as valid
           // JSON object strings) so the next request is always well-formed.
-          val canonicalCalls = message.toolCalls.map {
+          val canonicalCalls = requestedCalls.map {
             it.copy(
               id = it.id.ifBlank { "call_${it.hashCode()}" },
               name = it.name.trim(),
@@ -767,6 +788,27 @@ Plan mode is ON for this turn: the user wants a plan, not changes.
               )
             )
             rowIds.add(0L)
+          }
+          // A round in which every call failed with exactly what the round before it failed with is
+          // a model out of ways to proceed. Each attempt is a full prefill on a phone, so the same
+          // failure asked a third time is minutes of the same sentence the user has to stop by
+          // hand; ending it here says so instead.
+          val stalled = if (results.isNotEmpty() && results.all { !it.second.success }) {
+            results.joinToString("|") { (call, result) -> "${call.name}(${call.argumentsJson})=${result.error.orEmpty()}" }
+          } else {
+            ""
+          }
+          stuckRounds = if (stalled.isNotEmpty() && stalled == lastFailedRound) stuckRounds + 1 else 0
+          lastFailedRound = stalled
+          if (stuckRounds >= MAX_STUCK_ROUNDS) {
+            val reason = results.firstNotNullOfOrNull { (_, result) -> result.error?.substringBefore('\n') }
+              ?: "the same request failed again"
+            val said = message.content.ifBlank { assistantText.toString() }.trim()
+            finalText = listOfNotNull(
+              said.takeIf { it.isNotEmpty() },
+              "Stopped: the model repeated the same failing step ($reason). It needs a different instruction, not another try."
+            ).joinToString("\n\n")
+            break@taskLoop
           }
           if (iteration == maxIterations) {
             // What it said beside the last request is part of the answer, so the
