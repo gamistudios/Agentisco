@@ -54,11 +54,16 @@ android {
 
     externalNativeBuild {
       cmake {
-        // Builds the PTY JNI helper (libtermux.so) vendored from termux-app, which is
-        // all the app asks the NDK for now: a model runs from the Python environment
-        // inside PRoot, so no inference library is compiled into the APK.
+        // Two things come out of the NDK: the PTY JNI helper (libtermux.so, vendored
+        // from termux-app) and libawaki-llm.so, the pinned llama.cpp engine. See
+        // src/main/cpp/CMakeLists.txt for why the engine's CPU backends are separate
+        // .so files and why only arm64 gets them.
+        //
+        // c++_shared because those libraries are shared: NDK's static STL gives every
+        // .so its own libc++ copy, and two of them passing a std::string across the
+        // boundary is undefined behaviour with a crash in a different library.
         cppFlags += ""
-        arguments += listOf("-DANDROID_STL=c++_static")
+        arguments += listOf("-DANDROID_STL=c++_shared")
       }
     }
 

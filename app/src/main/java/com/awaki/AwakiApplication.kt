@@ -79,9 +79,21 @@ class AwakiApplication : Application() {
     val repository = com.awaki.data.repository.LocalModelRepository(this)
     com.awaki.local.LocalAiRuntime(
       repository,
-      com.awaki.local.runtime.LocalInferenceEngine(repository, pythonModelRuntime())
+      com.awaki.local.runtime.LocalInferenceEngine(repository, modelEngine())
     )
   }
+
+  /**
+   * The engine that decodes the tokens.
+   *
+   * The native llama.cpp library runs in this process, and that is the whole point: the Python
+   * environment unpacks to 177 MB and spends its startup budget before it arrives at the same
+   * decoder. It stays reachable behind a flag a release build compiles away, so a debug build can
+   * answer one turn on both engines and compare them.
+   */
+  private fun modelEngine(): com.awaki.local.runtime.LocalModelEngine =
+    if (BuildConfig.DEBUG && PREFER_PYTHON_RUNTIME_IN_DEBUG) pythonModelRuntime()
+    else com.awaki.local.jni.NativeLlamaEngine { applicationInfo.nativeLibraryDir }
 
   /**
    * The runtime bundle this build ships for this device, or null when it has none.
@@ -221,5 +233,14 @@ class AwakiApplication : Application() {
 
   companion object {
     const val CRASH_FILE = "awaki-last-crash.txt"
+
+    /**
+     * Set in a local debug build to run models through the Python environment instead of the
+     * native library, while both paths exist and one turn on each can be compared by hand.
+     *
+     * Nothing sets it from the UI, and [modelEngine] reads it behind `BuildConfig.DEBUG`, so a
+     * release build cannot be pointed at the Python runtime however this is left.
+     */
+    private const val PREFER_PYTHON_RUNTIME_IN_DEBUG = false
   }
 }
