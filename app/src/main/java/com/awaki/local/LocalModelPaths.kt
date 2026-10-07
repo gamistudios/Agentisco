@@ -29,8 +29,10 @@ object LocalModelPaths {
   const val RUNTIME_PYTHON = "$RUNTIME_GUEST_DIR/bin/python"
 
   /**
-   * Shared libraries the runtime carries with it — the interpreter's own, plus the ones the
-   * guest's Ubuntu base does not ship (llama.cpp needs `libgomp.so.1`, which is not in it).
+   * Shared libraries the runtime carries with it: the interpreter's own. Everything else it asks
+   * for comes from the guest — libc, the loader, `libstdc++`, OpenSSL — and OpenMP arrives as the
+   * hashed copy the wheels vendor beside their modules, so this directory shadows nothing the
+   * rootfs already provides.
    */
   const val RUNTIME_GUEST_LIB = "$RUNTIME_GUEST_DIR/lib"
 

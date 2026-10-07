@@ -174,8 +174,18 @@ class LocalModelCatalogTest {
             File(candidates, "assets"),
             File(candidates, "res/raw")
         )
+        // The Python runtime is the one large file the APK is meant to carry: it is the engine the
+        // device unpacks, not weights it downloads, and it is a `.pack` beside the catalog that
+        // names it. Only that file is exempt — a model dropped in the same directory is still a
+        // model, and anything else over the size limit is still a surprise on every device.
+        val runtimeDir = File(candidates, "assets/$RUNTIME_ASSET_DIR")
+        fun isRuntimeBundle(file: File) =
+            file.parentFile?.absolutePath == runtimeDir.absolutePath &&
+                file.name.startsWith("awaki-runtime-") && file.extension == "pack"
+
         val packaged = candidates.walk()
             .filter { it.isFile }
+            .filterNot { isRuntimeBundle(it) }
             .filter { file ->
                 file.extension.lowercase() in MODEL_EXTENSIONS ||
                   (shippedVerbatim.any { it.isDirectory && file.path.startsWith(it.path) } &&
@@ -197,5 +207,8 @@ class LocalModelCatalogTest {
 
         /** Nothing that legitimately lives in `src/main` is this big. */
         const val MAX_PACKAGED_BYTES = 20_000_000L
+
+        /** Where the prebuilt Python runtime and its catalog sit inside the app's assets. */
+        const val RUNTIME_ASSET_DIR = "local-runtime"
     }
 }
