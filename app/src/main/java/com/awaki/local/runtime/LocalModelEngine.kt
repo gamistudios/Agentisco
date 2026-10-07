@@ -9,9 +9,9 @@ import com.awaki.local.model.LocalRuntimeSettings
  * One method, `chat`, because that is what a model turn actually is: a transcript goes in, an
  * answer comes out in pieces. Rendering the transcript with the model's own chat template,
  * decoding it and splitting the answer into prose, reasoning and tool calls all happen on the
- * other side of this line, in the Python environment the model runs from, next door to the
- * GGUF file whose template says how the model must be spoken to. Nothing here knows jinja,
- * llama.cpp or sampling order, and nothing here has to keep up with a new model's markup.
+ * other side of this line, in the llama.cpp build the app compiles, next door to the GGUF file
+ * whose template says how the model must be spoken to. Nothing here knows jinja, sampling order
+ * or which of the engine's CPU kernels the device picked.
  *
  * That is also what keeps this testable on the JVM: a fake engine satisfies the interface, so
  * the routing, the tool normalizer and the OpenAI-compatible server all run their real code in

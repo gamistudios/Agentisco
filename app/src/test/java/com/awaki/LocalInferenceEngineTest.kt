@@ -345,7 +345,7 @@ class LocalInferenceEngineTest {
             fake.sessions.map { it.runtime.contextSize }
         )
         // What the user saved is what the runtime is handed; turning "use every core" into a
-        // number is the Python runtime's decision, not this layer's.
+        // number of threads is the engine's decision, not this layer's.
         assertEquals(listOf(0, 2), fake.sessions.map { it.runtime.threadCount })
     }
 

@@ -84,10 +84,10 @@ class LocalModelRepository(
   private val appContext = context.applicationContext
 
   /**
-   * Every model file sits in one private directory, and the Linux guest mounts that same
-   * directory at [com.awaki.local.LocalModelPaths.GUEST_DIR] — a download or an import
-   * becomes servable without a copy, and the Python environment set up beside it outlives a
-   * rootfs reinstall because it is not inside the rootfs.
+   * Every model file sits in one private directory. The engine opens these host paths directly;
+   * the Linux guest additionally mounts the same directory at
+   * [com.awaki.local.LocalModelPaths.GUEST_DIR], so a download or an import becomes readable from
+   * a terminal without a copy and nothing has to be kept in sync between the two worlds.
    */
   val modelsDir: File = LocalModelPaths.hostDir(appContext.filesDir).apply { mkdirs() }
 

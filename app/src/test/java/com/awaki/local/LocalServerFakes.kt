@@ -27,7 +27,7 @@ import java.security.MessageDigest
  * The repository and the transfer are real — a model installs through the same verified
  * path a device uses — while the engine answers from a script. That is what lets the
  * routing and the SSE framing run their actual code on the JVM, leaving the chat template
- * and the answer read-back to the Python runtime those are tested in.
+ * and the answer read-back to the native engine, which is tested against them.
  */
 
 private val CAPABLE = LocalTemplateCapabilities(

@@ -86,83 +86,18 @@ class AwakiApplication : Application() {
   /**
    * The engine that decodes the tokens.
    *
-   * The native llama.cpp library runs in this process, and that is the whole point: the Python
-   * environment unpacks to 177 MB and spends its startup budget before it arrives at the same
-   * decoder. It stays reachable behind a flag a release build compiles away, so a debug build can
-   * answer one turn on both engines and compare them.
+   * llama.cpp runs in this process, compiled by the app's own CMake build against the pin in
+   * `.llama_cpp_version`. What it replaces was the same decoder reached through PRoot, ptrace,
+   * CPython and an HTTP hop - a 60 MB archive that unpacked to 177 MB before it loaded a single
+   * weight, and which could only ever run baseline CPU kernels.
    */
   private fun modelEngine(): com.awaki.local.runtime.LocalModelEngine =
-    if (BuildConfig.DEBUG && PREFER_PYTHON_RUNTIME_IN_DEBUG) pythonModelRuntime()
-    else com.awaki.local.jni.NativeLlamaEngine { applicationInfo.nativeLibraryDir }
-
-  /**
-   * The runtime bundle this build ships for this device, or null when it has none.
-   *
-   * Read once and kept: the catalog is a small JSON asset beside a 50 MB archive, and every
-   * "can a model run" question the engine asks is answered against the same answer the
-   * installer is working towards.
-   */
-  val localRuntimeBundle: com.awaki.local.py.RuntimeBundle? by lazy {
-    (localRuntimeResolution() as? com.awaki.local.py.BundleResolution.Found)?.bundle
-  }
-
-  private fun localRuntimeResolution(): com.awaki.local.py.BundleResolution =
-    com.awaki.local.py.RuntimeBundleCatalog.resolve(
-      openCatalog = { runCatching { assets.open(com.awaki.local.py.RuntimeBundleCatalog.ASSET_PATH) }.getOrNull() },
-      abis = Build.SUPPORTED_ABIS.toList()
-    )
-
-  /**
-   * The Python environment the models run in, as the engine contract the runtime layer knows.
-   *
-   * Built here rather than in [com.awaki.data.repository.WorkspaceRepository] because a
-   * model answers whoever asks, including a conversation started before any workspace is open.
-   * The two pieces it needs from the Linux environment are the proot command line and the model
-   * directory's guest twin, and both are cheap to name from the app's own files.
-   */
-  private fun pythonModelRuntime(): com.awaki.local.py.PythonEngine {
-    val binaries = com.awaki.workspace.terminal.NativeBinaries(this)
-    val bootstrap = com.awaki.workspace.terminal.DebianBootstrap(this, binaries)
-    val modelsDir = com.awaki.local.LocalModelPaths.hostDir(filesDir).apply { mkdirs() }
-    val modelBind = listOf(modelsDir.absolutePath to com.awaki.local.LocalModelPaths.GUEST_DIR)
-    val server = com.awaki.local.py.PythonModelServer(
-      filesDir = filesDir,
-      readScript = { assets.open(com.awaki.local.py.ServerScript.ASSET_PATH).use { it.readBytes() } },
-      commandFor = { port, token ->
-        if (!binaries.isComplete() || !bootstrap.isBootstrapped()) null
-        else {
-          val args = com.awaki.workspace.terminal.ProotArgsBuilder(binaries, bootstrap.rootfsDir, modelBind)
-          args.buildCommand(
-            com.awaki.local.py.PythonModelServer.guestCommand(
-              port,
-              token,
-              args.guestEnv(extra = mapOf("LD_LIBRARY_PATH" to com.awaki.local.LocalModelPaths.RUNTIME_GUEST_LIB))
-            )
-          )
-        }
-      },
-      // The pipe this process keeps open is what the server watches: if the app dies, the
-      // pipe closes and the guest interpreter exits with the model's memory.
-      start = { argv, environment ->
-        ProcessBuilder(argv)
-          .redirectErrorStream(true)
-          .apply { this.environment().putAll(environment) }
-          .start()
-      }
-    )
-    return com.awaki.local.py.PythonEngine(
-      filesDir = filesDir,
-      server = server,
-      environmentReady = {
-        com.awaki.local.py.PythonRuntime.isCurrent(filesDir, localRuntimeBundle)
-      }
-    )
-  }
+    com.awaki.local.jni.NativeLlamaEngine { applicationInfo.nativeLibraryDir }
 
   /**
    * The models installed on this device, behind the loopback OpenAI endpoint they are
    * served through. Created lazily: a phone with no installed model never opens a port,
-   * and a device whose Python environment is missing never looks like it can answer.
+   * and a device whose engine cannot load never looks like it can answer.
    */
   val localAi: com.awaki.local.LocalAiRuntime by localAiDelegate
 
@@ -179,6 +114,15 @@ class AwakiApplication : Application() {
     TerminalPalette.apply(uiTheme.value)
     installCrashCapture()
     backgroundExecution.start()
+    // The Python model runtime older builds unpacked into the model directory is not something
+    // this build reads, and nothing on the device deletes it: handing ~177 MB back is the one
+    // thing an upgrade has to do for itself. Off the main thread, and before anything asks the
+    // engine for a model, so a phone that never opens the Models screen still gets the space.
+    memoryScope.launch {
+      val freed = runCatching { com.awaki.local.LocalModelUpgrade.reclaimLegacyRuntime(filesDir) }
+        .getOrDefault(0L)
+      if (freed > 0) android.util.Log.i("AwakiLlm", "legacy Python runtime removed: ${freed / 1_048_576} MB reclaimed")
+    }
   }
 
   /**
@@ -233,14 +177,5 @@ class AwakiApplication : Application() {
 
   companion object {
     const val CRASH_FILE = "awaki-last-crash.txt"
-
-    /**
-     * Set in a local debug build to run models through the Python environment instead of the
-     * native library, while both paths exist and one turn on each can be compared by hand.
-     *
-     * Nothing sets it from the UI, and [modelEngine] reads it behind `BuildConfig.DEBUG`, so a
-     * release build cannot be pointed at the Python runtime however this is left.
-     */
-    private const val PREFER_PYTHON_RUNTIME_IN_DEBUG = false
   }
 }

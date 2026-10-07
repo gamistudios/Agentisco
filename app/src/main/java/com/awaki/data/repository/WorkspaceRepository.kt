@@ -530,9 +530,12 @@ class WorkspaceRepository(
 
   /**
    * The model directory, offered to every guest command at the path the guest calls home.
-   * The app writes bytes into it from a download and the Python server reads the same bytes
-   * from inside the rootfs, so neither side copies and neither keeps a list the other could
-   * disagree with. proot refuses a bind whose host directory is missing, hence `mkdirs`.
+   * The app writes bytes into it from a download and a terminal session reads the same bytes from
+   * inside the rootfs, so neither side copies and neither keeps a list the other could disagree
+   * with. proot refuses a bind whose host directory is missing, hence `mkdirs`.
+   *
+   * Decoding a model no longer needs this — the engine opens the host file itself — but a user
+   * who wants to see what is installed, or an agent asked to inspect it, reaches it by name.
    */
   private val guestModelBinds: List<Pair<String, String>> = context?.let { ctx ->
     val dir = com.awaki.local.LocalModelPaths.hostDir(ctx.filesDir).apply { mkdirs() }
@@ -553,36 +556,6 @@ class WorkspaceRepository(
     // server - is a child of this process, so the moment one is live the app owes
     // itself a foreground service to keep the whole tree running.
     manager.onRunningChanged = { commands -> syncRunningCommands(commands) }
-  }
-
-  /**
-   * The Python environment the on-device models run in, driven through the same scripted
-   * PRoot path git uses. It lives here rather than beside the model records because the guest
-   * command channel and the foreground service both answer to this repository, while the
-   * runtime itself is the application's to name: a model answers a turn started before any
-   * workspace is open, and both halves have to agree about what is installed.
-   */
-  val pythonRuntime: com.awaki.local.py.PythonRuntime? = context?.let { ctx ->
-    com.awaki.local.py.PythonRuntime(
-      filesDir = ctx.filesDir,
-      resolve = {
-        com.awaki.local.py.RuntimeBundleCatalog.resolve(
-          openCatalog = {
-            runCatching { ctx.assets.open(com.awaki.local.py.RuntimeBundleCatalog.ASSET_PATH) }.getOrNull()
-          },
-          abis = android.os.Build.SUPPORTED_ABIS.toList()
-        )
-      },
-      openArchive = { bundle -> runCatching { ctx.assets.open(bundle.asset) }.getOrNull() },
-      execute = { command, onLine ->
-        terminalManager.executeCommand(
-          TerminalSession(id = PYTHON_RUNTIME_SESSION_ID, name = "model runtime", currentDir = "/"),
-          command,
-          { line -> onLine(line.text) }
-        )
-      },
-      interrupt = { terminalManager.interrupt(PYTHON_RUNTIME_SESSION_ID) }
-    )
   }
 
   /** Real execution + state behind the Run & Build Center. */
@@ -2943,72 +2916,6 @@ class WorkspaceRepository(
     }
   }
 
-  /**
-   * Brings the model runtime up, whatever state the device is in.
-   *
-   * This is the whole of the setup a user used to have to press a button for: the Linux guest
-   * is unpacked from the APK if it is not there, the Python runtime is unpacked beside the
-   * models it has to read, and the guest is asked to prove it can import them. Nothing in that
-   * sequence touches the network or a compiler, so opening the screen the first time is enough.
-   *
-   * A no-op while an install is running, and a no-op when the runtime on disk is the one this
-   * build ships — which is what lets every open of the screen call it, including after the
-   * user deleted the directory from a terminal without telling anyone.
-   */
-  fun ensurePythonRuntime(reinstall: Boolean = false) {
-    val runtime = pythonRuntime ?: return
-    val ctx = appContext ?: return
-    val bootstrap = debianBootstrap ?: return
-    if (runtime.state.value is com.awaki.local.py.PythonRuntime.State.Installing) return
-    if (!reinstall && com.awaki.local.py.PythonRuntime.isCurrent(ctx.filesDir, runtime.bundle())) {
-      runtime.refresh()
-      return
-    }
-    if (nativeBinaries?.isComplete() != true) {
-      runtime.markUnavailable(
-        "The Linux environment cannot be unpacked: this device is missing the binaries it runs " +
-          "proot with."
-      )
-      return
-    }
-    if (reinstall) localAi?.shutdown()
-    repositoryScope.launch {
-      // Unpacking 50 MB and importing an interpreter is a minute of work the user did not ask
-      // for by name, so it belongs to the foreground service rather than to a screen.
-      workRegistry?.begin(
-        id = PYTHON_RUNTIME_WORK_ID,
-        kind = com.awaki.background.WorkKind.BOOTSTRAP,
-        label = "Setting up the model runtime",
-        detail = "Preparing the Linux environment",
-        canceller = { runtime.cancel() }
-      )
-      try {
-        if (!bootstrap.isBootstrapped()) {
-          if (!bootstrap.bootstrap()) {
-            val failed = bootstrap.state.value as? com.awaki.workspace.terminal.LinuxEnvironmentState.Failed
-            runtime.markUnavailable(failed?.reason ?: "The Linux environment could not be prepared.")
-            return@launch
-          }
-        }
-        val step: (String) -> Unit = { name ->
-          workRegistry?.setProgress(
-            PYTHON_RUNTIME_WORK_ID,
-            label = "Setting up the model runtime",
-            detail = name
-          )
-        }
-        if (reinstall) runtime.reinstall(step) else runtime.ensure(step)
-      } finally {
-        workRegistry?.end(PYTHON_RUNTIME_WORK_ID)
-      }
-    }
-  }
-
-  /** Stops the running install: the flag ends the sequence, the interrupt ends the command in it. */
-  fun cancelPythonRuntimeSetup() {
-    pythonRuntime?.cancel()
-  }
-
   fun selectTerminalSession(id: String) {
     _activeTerminalSessionId.value = id
   }
@@ -3541,12 +3448,6 @@ class WorkspaceRepository(
 
     /** Registry record for the one-shot Debian rootfs bootstrap. */
     private const val LINUX_BOOTSTRAP_WORK_ID = "linux-bootstrap"
-
-    /** Registry record for unpacking the model runtime the local models run in. */
-    private const val PYTHON_RUNTIME_WORK_ID = "local-model-runtime"
-
-    /** The scripted session those commands run in, named so a cancel can kill the right one. */
-    private const val PYTHON_RUNTIME_SESSION_ID = "local-model-runtime"
 
     /** System prompt for the Run & Build AI auto-configuration pass. */
     private const val AI_BUILD_CONFIG_SYSTEM_PROMPT =

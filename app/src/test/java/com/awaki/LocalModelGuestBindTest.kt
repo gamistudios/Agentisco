@@ -14,11 +14,13 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * The claim the whole Python design rests on: a model the app downloaded is readable from
- * inside the Linux environment at the path the runtime is installed in.
+ * The directory the app downloads models into is the directory the Linux guest reads, at the
+ * path a user would call home.
  *
- * Without that bind, the guest would be serving a directory the app never writes to, and the
- * failure would surface as a model that "is not installed" on a phone holding its bytes.
+ * Decoding does not depend on that any more — the engine opens the host file itself. What the
+ * bind is for is the terminal and the agent's shell tools, and proot refuses a bind whose host
+ * directory is missing, so an install with no models has to create it rather than pass a name
+ * that resolves to nothing inside the rootfs.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])

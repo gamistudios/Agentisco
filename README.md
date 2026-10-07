@@ -84,10 +84,11 @@ Providers and models are configured in-app and stored in `providers.json`; **API
 
 GGUF models run with no API key and no network beyond the phone, behind the same OpenAI-compatible surface the cloud providers use (`LocalAiServer` on loopback).
 
-- **The Python runtime ships inside the APK**, as `assets/local-runtime/` (`bundles.json` + one `tar.gz` per ABI, built by `tools/local-runtime/build-awaki-runtime.sh`). It is a relocatable CPython plus `llama-cpp-python` and everything `serve.py` imports, assembled on a native ARM64 Linux box.
-- `PythonRuntime` installs it: one pass hashes and unpacks the archive into `filesDir/local-models/runtime`, the tree is staged and renamed, and the `.awaki-runtime-ready` marker — holding the archive's SHA-256 — is written **only after the guest proves it can `import llama_cpp`**. Nothing compiles on the phone.
-- **There is no setup button.** Opening the on-device models screen calls `ensurePythonRuntime()`, which unpacks a missing, stale or half-written runtime and costs one file read when the disk already holds this build's copy. The screen shows the step and percent, with Cancel and a Retry after a failure.
-- `serve.py` owns the model's own Jinja chat template — rendering, and reading content/reasoning/tool calls back out of the markers the template used — so a model with an unpredictable dialect needs no new app build.
+- **llama.cpp is compiled into the app.** `third_party/llama.cpp` is pinned to the commit recorded in `.llama_cpp_version` and built by the app's own CMake file into `libawaki-llm.so` next to llama, ggml and seven CPU backend libraries — **6.2 MB compressed, 15 MB installed**. `NativeLlama` is fifteen `external` functions and no logic; `NativeLlamaEngine` is the `LocalModelEngine` everything above it talks to. What this replaced was a 60 MB CPython tree that unpacked to 177 MB and reached the same decoder through PRoot, ptrace and an HTTP hop.
+- **A phone decodes with the kernels its own SoC has.** `GGML_CPU_ALL_VARIANTS` + `GGML_BACKEND_DL` ship armv8.0 through armv9.2, and `nativeInit` hands ggml the directory to score them against, so the fastest set the device actually supports is chosen at load. The baseline stays in the set: a compile-time `-march` pick was either slow on a modern core or an illegal instruction on an older one.
+- **A prefix that repeats is decoded once.** The system-and-tools head of an agent prompt is snapshotted (`llama_state_seq_*`, not a memory rollback, which a hybrid model cannot roll past) and restored when the next turn opens with the same tokens — measured on the host harness at 2,526 of 2,527 tokens reused, the prompt re-evaluated in 376 ms after 17.2 s cold, for 29.7 MB of snapshot.
+- **Chat templates and tool calls stay llama.cpp's job.** `common`'s Jinja renderer applies each GGUF's own template, so a model with an unpredictable dialect needs no new app build. `NativeAnswerParser` is the fallback for calls the pinned parser does not recognise — LFM2.5 writes a bare `[search_files(query="...")]` and asks for no envelope — and `AnswerReader` decides which one owns a turn before the first byte reaches the user.
+- **There is no setup, and no Linux dependency.** A device with no Debian rootfs still runs a model, because nothing in the path enters the guest. The first launch of this build hands back the ~177 MB an older one unpacked into the model directory (`LocalModelUpgrade`).
 
 ### Agent tools (21)
 
@@ -130,7 +131,8 @@ The engine (`editor/`) is headless and unit-tested; the UI (`ui/editor/`) wires 
 | Async | kotlinx-coroutines 1.10.2, StateFlow-driven UI |
 | Terminal | Termux terminal-emulator/view vendored under `com/termux/` + JNI PTY (`app/src/main/cpp/termux.c` → `libtermux.so`) |
 | Linux | proot + Debian/Ubuntu rootfs shipped in jniLibs; commons-compress 1.26.2 + xz for extraction |
-| Native | CMake 3.22.1, NDK 27.2.12479018 |
+| Native | CMake 3.22.1, NDK 27.2.12479018 — `libtermux.so` plus the pinned `third_party/llama.cpp` build (`libawaki-llm.so`, ggml and its CPU variants) |
+| Local models | llama.cpp over JNI in the app's own process, served to the agent as a loopback OpenAI endpoint; GGUF only, arm64 only |
 | Testing | JUnit, Robolectric 4.16.1, Roborazzi 1.59.0 (screenshot tests) |
 
 ## Notable technical decisions

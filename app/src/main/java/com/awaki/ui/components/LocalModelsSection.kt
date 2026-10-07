@@ -105,11 +105,6 @@ fun LocalModelsSection(
 
   val installedCount = models.count { it.installed }
   val bytesOnDisk = models.filter { it.installed }.sumOf { it.sizeBytes }
-  val runtimeState by viewModel.pythonRuntimeState.collectAsState()
-
-  // This screen is the only place a phone would ever need the runtime, so opening it is the
-  // trigger: the copy the app ships gets unpacked if it is missing, stale or half-written.
-  LaunchedEffect(Unit) { viewModel.ensurePythonRuntime() }
 
   Column(modifier = modifier.fillMaxWidth()) {
     Row(
@@ -172,13 +167,6 @@ fun LocalModelsSection(
         }
       }
     }
-
-    Spacer(modifier = Modifier.height(8.dp))
-    LocalModelEnvironmentRow(
-      state = runtimeState,
-      onRetry = { viewModel.reinstallPythonRuntime() },
-      onCancel = { viewModel.cancelPythonRuntimeSetup() }
-    )
 
     importError?.let {
       Spacer(modifier = Modifier.height(6.dp))
@@ -295,62 +283,6 @@ fun LocalModelsSection(
         TextButton(onClick = { confirmDelete = null }) { Text("Cancel", color = AwakiTheme.extra.textMuted, fontSize = 12.sp) }
       }
     )
-  }
-}
-
-/**
- * The Python runtime the models run in, and what it is doing about it.
- *
- * It sits above the list rather than beside a model because it is not a per-model choice: one
- * runtime serves every file in the directory. There is no setup button because there is nothing
- * to opt into — the runtime ships inside the app, this screen unpacks it on open, and a missing
- * or stale copy is repaired the same way. What is left for the user is the two decisions the
- * automatic path cannot make: stop an unpack in progress, or try again after it failed. The
- * guest's own output is shown as it arrives so a long step reads as work rather than a hang.
- */
-@Composable
-internal fun LocalModelEnvironmentRow(
-  state: com.awaki.local.py.PythonRuntime.State,
-  onRetry: () -> Unit,
-  onCancel: () -> Unit,
-  modifier: Modifier = Modifier
-) {
-  val installing = state as? com.awaki.local.py.PythonRuntime.State.Installing
-  val failed = state as? com.awaki.local.py.PythonRuntime.State.Failed
-  val installed = state as? com.awaki.local.py.PythonRuntime.State.Installed
-
-  Row(
-    modifier = modifier.fillMaxWidth(),
-    horizontalArrangement = Arrangement.spacedBy(8.dp),
-    verticalAlignment = Alignment.CenterVertically
-  ) {
-    Column(modifier = Modifier.weight(1f)) {
-      Text(
-        when {
-          installing != null -> "${installing.step} ${installing.percent}%"
-          failed != null -> failed.reason
-          installed != null -> "Model runtime ready"
-          else -> "Preparing the model runtime"
-        },
-        color = when {
-          failed != null -> MaterialTheme.colorScheme.error
-          installed != null -> AwakiTheme.extra.success
-          else -> MaterialTheme.colorScheme.onSurfaceVariant
-        },
-        fontSize = 11.sp,
-        fontWeight = FontWeight.Medium,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis
-      )
-      (state.log.lastOrNull() ?: installed?.detail)?.let {
-        Text(it, color = AwakiTheme.extra.textMuted, fontSize = 9.sp, fontFamily = FontFamily.Monospace, maxLines = 1, overflow = TextOverflow.Ellipsis)
-      }
-    }
-    if (installing != null) {
-      MiniAction("Cancel", modifier = Modifier.testTag("btn_cancel_local_runtime")) { onCancel() }
-    } else if (failed != null) {
-      MiniAction("Retry", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.testTag("btn_retry_local_runtime")) { onRetry() }
-    }
   }
 }
 

@@ -203,7 +203,7 @@ class LocalAiRuntimeTest {
     assertEquals("The answer is 42.", completed?.content)
     assertEquals(LlmFinishReason.STOP, completed?.finishReason)
     // The transcript reaches the runtime as messages: rendering them into the shape this model
-    // was trained on is the Python side's job, next door to the file that says what that is.
+    // was trained on is the engine's job, next door to the file that says what that is.
     val inputs = engine.sessions.single().requests.single().inputs
     assertEquals(listOf("user: what is six times seven?"), inputs.messages.map { "${it.role}: ${it.content}" })
   }

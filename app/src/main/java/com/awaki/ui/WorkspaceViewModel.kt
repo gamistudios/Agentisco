@@ -1396,33 +1396,6 @@ class WorkspaceViewModel(
   /** Why the on-device models cannot answer, or null when the agent can use them. */
   val localAiNote: String? get() = repository.localAiNote
 
-  /**
-   * The Python runtime the models run in. Reading it costs nothing when the build has no Linux
-   * side at all, which is why this is a flow and not a nullable lookup.
-   */
-  val pythonRuntimeState: StateFlow<com.awaki.local.py.PythonRuntime.State> =
-    repository.pythonRuntime?.state
-      ?: MutableStateFlow(com.awaki.local.py.PythonRuntime.State.Missing)
-
-  /**
-   * Installs the runtime unless the device already has this build's copy of it.
-   *
-   * Opening the on-device models screen calls this: the archive is in the app, so the work is an
-   * unpack rather than the compile-and-hope a user used to have to opt into.
-   */
-  fun ensurePythonRuntime() {
-    repository.ensurePythonRuntime()
-  }
-
-  /** Throws the runtime away and unpacks it again — the recovery for a failed install. */
-  fun reinstallPythonRuntime() {
-    repository.ensurePythonRuntime(reinstall = true)
-  }
-
-  fun cancelPythonRuntimeSetup() {
-    repository.cancelPythonRuntimeSetup()
-  }
-
   private val localStore: com.awaki.data.repository.LocalModelRepository?
     get() = repository.localModelStore
 
