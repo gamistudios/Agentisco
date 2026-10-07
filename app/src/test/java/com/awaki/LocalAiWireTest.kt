@@ -11,6 +11,7 @@ import com.awaki.agent.llm.LlmRole
 import com.awaki.agent.llm.LlmService
 import com.awaki.agent.llm.LlmStreamEvent
 import com.awaki.agent.llm.LlmToolSpec
+import com.awaki.agent.llm.isLoopbackUrl
 import com.awaki.local.FakeEngine
 import com.awaki.local.ggufBytes
 import com.awaki.local.repositoryWithInstalled
@@ -32,6 +33,7 @@ import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -83,7 +85,7 @@ class LocalAiWireTest {
     val engine: FakeEngine
   )
 
-  private fun serve(script: FakeEngine.() -> Unit = {}): Trio {
+  private fun serve(streaming: Boolean = true, script: FakeEngine.() -> Unit = {}): Trio {
     val repository = runBlocking { repositoryWithInstalled(context, payload, "alpha") }
     val fake = FakeEngine().apply(script)
     val engine = LocalInferenceEngine(repository, fake, Dispatchers.Unconfined)
@@ -100,7 +102,7 @@ class LocalAiWireTest {
       providerId = "local-ai",
       modelId = "alpha",
       displayName = "Alpha",
-      capabilities = ModelCapabilities(tools = true, streaming = true)
+      capabilities = ModelCapabilities(tools = true, streaming = streaming)
     )
     return Trio(provider, model, endpoint.apiKey, fake)
   }
@@ -255,5 +257,52 @@ class LocalAiWireTest {
     assertEquals(LlmErrorKind.INVALID_RESPONSE, error?.kind)
     assertTrue(error!!.message!!.contains("2900"))
     assertTrue(error.message!!.contains("2048"))
+  }
+
+  /**
+   * The failure the phone reported: "Connection timed out talking to On-device" on a turn that was
+   * still working. A local request's silence is the model being read into memory and an agent
+   * prompt being prefilled, and a read cap written for a network cannot tell that from a broken
+   * connection. So the loopback route is uncapped, and the Stop button is the only bound a local
+   * turn gets.
+   *
+   * Asked unstreamed on purpose: a stream would be kept warm by the server and could pass without
+   * the client's own timeout being lifted at all.
+   */
+  @Test
+  fun `a local turn slower than the client's read timeout is still a live turn`() {
+    val trio = serve(streaming = false) {
+      sessionScript = { session ->
+        session.deltas = { piece ->
+          Thread.sleep(900)
+          listOf(LocalAnswerDelta(content = piece))
+        }
+      }
+    }
+    val impatient = LlmService(
+      OkHttpClient.Builder().connectTimeout(2, TimeUnit.SECONDS).readTimeout(200, TimeUnit.MILLISECONDS)
+        .callTimeout(30, TimeUnit.SECONDS).build()
+    )
+
+    val events = mutableListOf<LlmStreamEvent>()
+    val error = runCatching {
+      runBlocking {
+        impatient.streamChat(trio.provider, trio.model, trio.apiKey, userTurn("Hello")) { events += it }
+      }
+    }.exceptionOrNull()
+
+    assertTrue("a patient loopback read is the whole fix: $error", error == null)
+    assertEquals("hello", events.filterIsInstance<LlmStreamEvent.Completed>().single().message.content)
+  }
+
+  /** The same clock aimed at a real network still has to be a network guard. */
+  @Test
+  fun `only a loopback address is read without a timeout`() {
+    assertTrue(isLoopbackUrl("http://127.0.0.1:43128/v1"))
+    assertTrue(isLoopbackUrl("http://localhost:43128/v1"))
+    assertTrue(isLoopbackUrl("http://[::1]:43128/v1"))
+    assertFalse(isLoopbackUrl("https://api.openai.com/v1"))
+    assertFalse(isLoopbackUrl("http://192.168.1.20:8080/v1"))
+    assertFalse(isLoopbackUrl("not a url"))
   }
 }

@@ -15,6 +15,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
+import java.net.URI
 import java.util.concurrent.TimeUnit
 
 /**
@@ -143,9 +144,20 @@ open class LlmService(
   }
 }
 
+/**
+ * Whether a base URL points at this device rather than at a network.
+ *
+ * The models on this phone are reached through a loopback socket, and a user who types that address
+ * into a provider record by hand means the same thing. What it changes is only how long the app is
+ * willing to wait for an answer: see [clientFor].
+ */
+internal fun isLoopbackUrl(baseUrl: String): Boolean {
+  val host = runCatching { URI(baseUrl).host }.getOrNull()?.lowercase()?.trim('[', ']') ?: return false
+  return host == "localhost" || host == "::1" || host == "0:0:0:0:0:0:0:1" || host.startsWith("127.")
+}
+
 /** Shared HTTP/SSE plumbing for both protocol clients. */
 internal abstract class BaseLlmClient(protected val http: OkHttpClient) {
-
   internal abstract fun buildRequest(provider: AIProvider, model: AIModel, apiKey: String, request: LlmRequest, stream: Boolean): Request
 
   /** Parses one SSE data payload; returns true when the stream is complete. */
@@ -185,6 +197,20 @@ internal abstract class BaseLlmClient(protected val http: OkHttpClient) {
     return runCatching { JSONObject(text).toString() }.getOrDefault(text)
   }
 
+  /**
+   * The client to send one provider's requests with.
+   *
+   * A loopback address is this app talking to its own process: no network can be slow on it, no
+   * connection is idle for anyone to reclaim, and the only honest bound on how long a turn takes is
+   * the Stop button the user can press at any moment. The shared read cap is a network guard, and
+   * aimed at a model reading itself into memory and prefilling an agent prompt on a phone that is
+   * doing other things too, it answers "Connection timed out" about a request that was still
+   * working. `newBuilder` shares the pool, so this costs one small object per request.
+   */
+  private fun clientFor(baseUrl: String): OkHttpClient =
+    if (!isLoopbackUrl(baseUrl)) http
+    else http.newBuilder().readTimeout(0, TimeUnit.MILLISECONDS).build()
+
   open suspend fun streamChat(
     provider: AIProvider,
     model: AIModel,
@@ -198,7 +224,7 @@ internal abstract class BaseLlmClient(protected val http: OkHttpClient) {
     val stream = model.capabilities.streaming
     val state = newState()
     var interrupted = false
-    val call = http.newCall(buildRequest(provider, model, apiKey, request, stream))
+    val call = clientFor(provider.baseUrl).newCall(buildRequest(provider, model, apiKey, request, stream))
     LlmStreamRegistry.activeCall = call
 
     try {
