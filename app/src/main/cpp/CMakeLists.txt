@@ -115,6 +115,7 @@ add_subdirectory("${LLAMA_DIR}" llama_build)
 add_library(awaki-llm SHARED
   llm/llama_jni.cpp
   llm/chat_jni.cpp
+  llm/crash_jni.cpp
 )
 target_compile_features(awaki-llm PRIVATE cxx_std_17)
 # Nothing but the exported JNI functions is part of this library's interface, and a

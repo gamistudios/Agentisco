@@ -34,7 +34,9 @@ import java.nio.charset.StandardCharsets
  */
 class NativeLlamaEngine(
   /** The directory Android extracted this app's native libraries into. */
-  private val nativeLibDir: () -> String
+  private val nativeLibDir: () -> String,
+  /** The file the Crash Log screen reads, which is where a fault in the engine's own code records itself. */
+  private val crashLogPath: () -> String
 ) : LocalModelEngine {
 
   private val native: NativeLlama? get() = NativeLlama.get()
@@ -89,6 +91,9 @@ class NativeLlamaEngine(
     val api = native ?: throw LocalEngineException(NativeLlama.unavailableReasonText ?: NO_ENGINE)
 
     if (!backendReady) {
+      // Before anything that can fault: a segfault in a kernel is not an exception, and the only
+      // record of it is the file the engine writes from its own signal handler.
+      api.nativeInstallCrashCapture(crashLogPath())
       // The CPU kernels are separate libraries, so they have to be found and registered before
       // anything can decode, and which of them runs is decided by the CPU this device actually
       // has rather than by the machine that compiled them.

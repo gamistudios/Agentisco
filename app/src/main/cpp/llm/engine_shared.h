@@ -98,6 +98,22 @@ inline Session *session_of(jlong handle) {
   return reinterpret_cast<Session *>(static_cast<intptr_t>(handle));
 }
 
+/**
+ * Starts the engine's own crash record, appended to [log_path] next to the JVM's.
+ *
+ * A fault in native code never reaches Thread.setDefaultUncaughtExceptionHandler, so without this
+ * the app vanishes mid-turn and the Crash Log screen has nothing to show.
+ */
+void install_crash_capture(const char *log_path);
+
+/**
+ * Records the step the engine is about to take, for the crash record.
+ *
+ * Pass null to leave one of the two unchanged. The strings are copied into fixed buffers, so a
+ * caller that is about to fault has already said what it was doing.
+ */
+void set_engine_phase(const char *phase, const char *model);
+
 inline std::vector<char> copy_bytes(JNIEnv *env, jbyteArray array) {
   std::vector<char> out;
   if (array == nullptr) return out;

@@ -92,7 +92,10 @@ class AwakiApplication : Application() {
    * weight, and which could only ever run baseline CPU kernels.
    */
   private fun modelEngine(): com.awaki.local.runtime.LocalModelEngine =
-    com.awaki.local.jni.NativeLlamaEngine { applicationInfo.nativeLibraryDir }
+    com.awaki.local.jni.NativeLlamaEngine(
+      nativeLibDir = { applicationInfo.nativeLibraryDir },
+      crashLogPath = { crashLogFile.absolutePath }
+    )
 
   /**
    * The models installed on this device, behind the loopback OpenAI endpoint they are
@@ -142,14 +145,20 @@ class AwakiApplication : Application() {
 
   /** Returns the previous run's captured crash log, or null if there was none. */
   fun readLastCrashLog(): String? = runCatching {
-    val file = File(filesDir, CRASH_FILE)
+    val file = crashLogFile
     if (!file.exists() || file.length() == 0L) null else file.readText()
   }.getOrNull()
 
   /** Deletes the captured crash log so it stops surfacing on every launch. */
-  fun clearLastCrashLog(): Boolean = runCatching {
-    File(filesDir, CRASH_FILE).delete()
-  }.getOrDefault(false)
+  fun clearLastCrashLog(): Boolean = runCatching { crashLogFile.delete() }.getOrDefault(false)
+
+  /**
+   * The one file both ways this process can die write their record to.
+   *
+   * The engine's own handler appends to it from a signal handler, where the paths below are the
+   * only ones that reach a screen; a crash log split across two files is a crash log nobody reads.
+   */
+  val crashLogFile: File get() = File(filesDir, CRASH_FILE)
 
   /**
    * Writes every uncaught exception to files/awaki-last-crash.txt before the
@@ -161,7 +170,15 @@ class AwakiApplication : Application() {
     Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
       runCatching {
         val stack = StringWriter().also { throwable.printStackTrace(PrintWriter(it)) }.toString()
-        File(filesDir, CRASH_FILE).writeText(
+        // Appended, not written over: the engine records a fault in its own code into this same
+        // file as it happens, and a Java thread that dies afterwards is a second event, not a
+        // replacement for the first. The screen shows both, oldest first, and clearing is explicit.
+        //
+        // Which needs a ceiling: a device stuck crash-looping a bad model would otherwise fill
+        // internal storage with nothing but stack traces. The newest crash is the useful one, so
+        // the log starts over rather than growing.
+        if (crashLogFile.length() > MAX_CRASH_LOG_BYTES) crashLogFile.delete()
+        crashLogFile.appendText(
           buildString {
             appendLine("Crash at ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).format(java.util.Date())}")
             appendLine("Thread: ${thread.name}")
@@ -177,5 +194,8 @@ class AwakiApplication : Application() {
 
   companion object {
     const val CRASH_FILE = "awaki-last-crash.txt"
+
+    /** When the log passes this, it starts over: a crash loop is not a reason to fill storage. */
+    private const val MAX_CRASH_LOG_BYTES = 512L * 1024L
   }
 }

@@ -26,6 +26,14 @@ class NativeLlama private constructor() {
    */
   external fun nativeInit(nativeLibDir: String)
 
+  /**
+   * Records a fault in the engine's own code into [logPath] before the process dies.
+   *
+   * A segmentation fault never reaches the JVM's uncaught-exception handler, so without this the app
+   * disappears and the Crash Log screen has nothing to show. The path is the file that screen reads.
+   */
+  external fun nativeInstallCrashCapture(logPath: String)
+
   external fun nativeBackendFree()
 
   /** Engine handle, or 0 when the model or its context could not be created. */

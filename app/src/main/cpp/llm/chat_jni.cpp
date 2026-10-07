@@ -233,6 +233,10 @@ Java_com_awaki_local_jni_NativeLlama_nativeChatOpenTurn(JNIEnv *env, jobject, jl
   }
 
   try {
+    // The Jinja renderer this call runs is compiled from whatever template the GGUF file shipped,
+    // and it walks the whole transcript: the one step between tapping Send and the first token that
+    // is neither decoding nor Kotlin.
+    set_engine_phase("applying the chat template", nullptr);
     common_chat_templates_inputs in;
     in.messages = common_chat_msgs_parse_oaicompat(array_field(body, "messages"));
     in.tools = common_chat_tools_parse_oaicompat(array_field(body, "tools"));
@@ -301,6 +305,7 @@ Java_com_awaki_local_jni_NativeLlama_nativeChatParse(JNIEnv *env,
   const std::vector<char> raw = copy_bytes(env, text);
   const std::string generated(raw.begin(), raw.end());
 
+  set_engine_phase("parsing the answer", nullptr);
   try {
     const common_chat_msg msg = common_chat_parse(generated, partial == JNI_TRUE, turn->parser_params);
     std::string json = "{\"message\":" + message_json(msg);

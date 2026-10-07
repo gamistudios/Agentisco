@@ -385,7 +385,7 @@ Java_com_awaki_local_jni_NativeLlama_nativeInit(JNIEnv *env, jobject, jstring na
   // screen to read back.
   const ThreadPlan plan = thread_plan();
   const size_t devices = ggml_backend_dev_count();
-  LOGI("engine %s, %d cores, %d threads to decode and %zu to prefill, %zu backends from %s",
+  LOGI("engine %s, %d cores, %d threads to decode and %d to prefill, %zu backends from %s",
        optimization_state(), plan.cores, plan.decode, plan.batch, devices, library_dir.c_str());
   for (size_t i = 0; i < devices; ++i) {
     const ggml_backend_dev_t dev = ggml_backend_dev_get(i);
@@ -401,6 +401,8 @@ Java_com_awaki_local_jni_NativeLlama_nativeLoadModel(JNIEnv *env,
                                                         jint threads,
                                                         jint n_batch) {
   const char *cpath = env->GetStringUTFChars(path, nullptr);
+  // If this step is the one that faults, the crash record has to say which file was being read.
+  set_engine_phase("loading model", cpath);
 
   const auto load_started = std::chrono::steady_clock::now();
 
@@ -571,6 +573,11 @@ Java_com_awaki_local_jni_NativeLlama_nativeComplete(JNIEnv *env,
   const uint32_t n_ctx = llama_n_ctx(s->ctx);
   const int32_t limit = max_tokens > 0 ? max_tokens : 512;
 
+  // From here to the end of the loop is where this library spends both its time and its risk: the
+  // kernels that fault are reached from llama_decode. The token count is refreshed as decoding
+  // goes, so a crash record says how far the turn got rather than only what kind of step it was.
+  set_engine_phase("tokenizing the prompt", nullptr);
+
   // A prompt that cannot fit is a caller error, not an engine fault. Letting decode
   // try anyway costs tens of seconds of prefill and leaves the KV cache in a state
   // the next request inherits, all to report "Failed to evaluate prompt" with no way
@@ -647,6 +654,7 @@ Java_com_awaki_local_jni_NativeLlama_nativeComplete(JNIEnv *env,
 
   // The shared head goes in first, because the copy has to be taken before the answer's own
   // tokens are written over the positions the next request would share.
+  set_engine_phase(("prefilling " + std::to_string(tokens.size() - reuse) + " tokens").c_str(), nullptr);
   bool prefill_ok = !tokens.empty();
   if (prefill_ok) prefill_ok = evaluate(reuse, head);
   if (prefill_ok && head > reuse) save_prefix_snapshot(s, tokens, head);
@@ -698,6 +706,11 @@ Java_com_awaki_local_jni_NativeLlama_nativeComplete(JNIEnv *env,
     }
     llama_sampler_accept(smpl, tok);
     generated++;
+    // Refreshed every so often rather than every token: the string costs an allocation, and a
+    // crash record that names the last 32nd token is specific enough to point at a kernel.
+    if (generated % 32 == 0) {
+      set_engine_phase(("decoding token " + std::to_string(generated)).c_str(), nullptr);
+    }
 
     if (llama_vocab_is_eog(s->vocab, tok)) {
       finish = 0;
@@ -752,6 +765,10 @@ Java_com_awaki_local_jni_NativeLlama_nativeComplete(JNIEnv *env,
 
   if (!pending.empty() && finish != 2) emit(pending);
 
+  // Nothing of this library is running between turns, so a later fault - in the terminal, in the
+  // UI - must not be filed against the last decode this handle performed.
+  set_engine_phase("between requests", nullptr);
+
   LOGI("turn %d: %d tokens in %ld ms (sample %ld, decode %ld, detok %ld, emit %ld), first text at %ld ms",
        finish, generated, elapsed_ms(decode_started), sample_ms, decode_ms, detok_ms, emit_ms, first_text_ms);
 
@@ -776,6 +793,9 @@ JNIEXPORT void JNICALL
 Java_com_awaki_local_jni_NativeLlama_nativeUnload(JNIEnv *, jobject, jlong handle) {
   Session *s = session_of(handle);
   if (s == nullptr) return;
+  // Freeing gigabytes of weights is a fault candidate of its own on a device under memory
+  // pressure, and it is the one step a user asks for by tapping Unload.
+  set_engine_phase("unloading the model", nullptr);
   s->abort.store(true);
   if (s->ctx) {
     // The context only holds a pointer to the pool, so the pool outlives it and has to be released

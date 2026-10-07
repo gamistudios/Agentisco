@@ -56,11 +56,13 @@ import java.io.File
 /**
  * Debug-only crash inspector.
  *
- * The app's [AwakiApplication] uncaught-exception handler persists every
- * hard crash to `files/awaki-last-crash.txt` before the process dies. This
- * dialog reads that file back on the next launch and hands the user the full
- * stack trace — copy it, or export it as a `.txt` through the system share
- * sheet — so a crash seen out in the field can be diagnosed without logcat.
+ * Both ways this process can end write to `files/awaki-last-crash.txt` before they die: the
+ * [AwakiApplication] uncaught-exception handler records a Kotlin crash, and the model engine's own
+ * signal handler records a fault in its native code — a segfault never reaches a Java frame, so
+ * without that record the app would just disappear and this dialog would have nothing to say.
+ * The dialog reads the file back on the next launch and hands the user the whole trace — copy it,
+ * or export it as a `.txt` through the system share sheet — so a crash seen out in the field can
+ * be diagnosed without logcat.
  *
  * It dismisses itself when there is nothing to show, so debug callers can
  * hoist a plain boolean and leave it mounted.
@@ -100,7 +102,8 @@ fun CrashLogDialog(
     text = {
       Column {
         Text(
-          "The app captured an uncaught exception from its last run. " +
+          "The last run left a crash record — an uncaught exception, or a fault inside the model " +
+            "engine's own code, which never reaches Java. " +
             "Copy or export the trace below to inspect why it crashed.",
           color = MaterialTheme.colorScheme.onSurfaceVariant,
           fontSize = 12.sp
