@@ -47,6 +47,17 @@ class LocalAiApi(
     data class Streamed(override val status: Int) : Reply
   }
 
+  /**
+   * Ends the decode in flight.
+   *
+   * The transport calls this when writing to a stream fails, which is the first moment it can know
+   * the client went away: a phone decoding a two-thousand-token prompt has nothing to write for
+   * seconds, and the model is not going to notice on its own that nobody is listening. Without
+   * this the orphan turn runs to its end while holding the one model slot, and the request the
+   * user actually made next waits on it.
+   */
+  fun stopGeneration() = engine.stop()
+
   /** Handles one request. [emit] writes one SSE `data:` payload and returns false when the client is gone. */
   suspend fun handle(method: String, path: String, body: String, emit: (String) -> Boolean): Reply {
     val route = path.trimEnd('/').removePrefix("/v1").trimStart('/')
@@ -371,6 +382,17 @@ private fun completionJson(
 /** The body OpenAI's clients read failures from, so a local error behaves like a remote one. */
 internal fun errorJson(message: String, type: String): String =
   JSONObject().put("error", JSONObject().put("message", message).put("type", type)).toString()
+
+/**
+ * Whether this body asks for a streamed answer, read by the transport before the request gets here.
+ *
+ * It decides how long the server may stay silent before committing to `text/event-stream`: headers
+ * written for a request that wanted one JSON body are a response its client cannot parse. A body
+ * that is not readable JSON is not a streaming request either — the API answers that with a 400 a
+ * moment later, which is exactly what the transport is waiting to find out.
+ */
+internal fun requestsEventStream(body: String): Boolean =
+  runCatching { JSONObject(body).optBoolean("stream", false) }.getOrDefault(false)
 
 /**
  * A chat request read into what the engine needs, with the model's saved generation

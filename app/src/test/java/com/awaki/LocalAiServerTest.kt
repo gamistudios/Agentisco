@@ -8,11 +8,13 @@ import com.awaki.local.repositoryWithInstalled
 import com.awaki.local.server.LocalAiApi
 import com.awaki.local.server.LocalAiEndpoint
 import com.awaki.local.server.LocalAiServer
+import com.awaki.local.runtime.LocalAnswerDelta
 import com.awaki.local.runtime.LocalInferenceEngine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -56,10 +58,34 @@ class LocalAiServerTest {
 
     // ---- harness ----
 
-    private suspend fun start(vararg ids: String): LocalAiEndpoint {
-        val repository = repositoryWithInstalled(context, payload, *ids)
-        val api = LocalAiApi(LocalInferenceEngine(repository, FakeEngine(), Dispatchers.Unconfined), repository)
-        return LocalAiServer(api).also { server = it }.start()
+    private suspend fun start(vararg ids: String): LocalAiEndpoint = start(ids.toList())
+
+    /**
+     * Starts the transport over [engine], with the stream's clock shortened.
+     *
+     * The shipped waits are long enough to be invisible on a phone and far too long for a test to
+     * sit through, so the tests hand the server its own numbers and the behaviour they gate — a
+     * stream that says it is alive while the model works — is the one being checked.
+     */
+    private suspend fun start(
+        ids: List<String>,
+        engine: FakeEngine = FakeEngine(),
+        streamOpenAfterMs: Long = 120,
+        keepAliveMs: Long = 60
+    ): LocalAiEndpoint {
+        val repository = repositoryWithInstalled(context, payload, *ids.toTypedArray())
+        val api = LocalAiApi(LocalInferenceEngine(repository, engine, Dispatchers.Unconfined), repository)
+        return LocalAiServer(api, streamOpenAfterMs, keepAliveMs).also { server = it }.start()
+    }
+
+    /** An engine that says nothing for [millis] before its first piece, the way a loading model does. */
+    private fun slowEngine(millis: Long): FakeEngine = FakeEngine().apply {
+        sessionScript = { session ->
+            session.deltas = { piece ->
+                Thread.sleep(millis)
+                listOf(LocalAnswerDelta(content = piece))
+            }
+        }
     }
 
     /** Sends raw request bytes and reads the whole reply, which ends when the server closes. */
@@ -133,6 +159,56 @@ class LocalAiServerTest {
                 .optJSONObject("delta")?.optString("content")?.takeIf { it.isNotEmpty() }
         }
         assertEquals(listOf("hello"), contents)
+    }
+
+    /**
+     * A stream waiting on a model has to look like a stream while it waits. OkHttp no longer caps
+     * the read, but a third-party client on the same port, or anything between the two that drops
+     * an idle connection, still reads silence as failure — and a comment frame is what SSE has for
+     * saying "still here" without putting anything in anyone's answer.
+     */
+    @Test
+    fun `a stream that has nothing to say yet says it is alive`() = runTest {
+        val endpoint = start(listOf("alpha"), slowEngine(600))
+
+        val response = chat(endpoint, """{"model":"alpha","stream":true,"messages":[{"role":"user","content":"hi"}]}""")
+
+        assertEquals(200, statusOf(response))
+        assertTrue(response.contains("Content-Type: text/event-stream"))
+        val frames = bodyOf(response).split("\r\n\r\n").filter { it.isNotBlank() }
+        val keepAlives = frames.filter { it.startsWith(": ") }
+        assertTrue("a silent stream must produce keep-alive frames, saw: $frames", keepAlives.isNotEmpty())
+        // The point of the frame is that no client reads it as an answer.
+        assertTrue(keepAlives.none { it.contains("data:") })
+        assertEquals("data: [DONE]", frames.last { !it.startsWith(": ") })
+        // The first frame is the head, which carries a role and no text; the answer is the
+        // content a client assembles out of the deltas that follow it.
+        assertEquals(
+            listOf("hello"),
+            frames.filter { it.startsWith("data: {") }.mapNotNull { frame ->
+                JSONObject(frame.removePrefix("data: ")).getJSONArray("choices").getJSONObject(0)
+                    .optJSONObject("delta")?.optString("content")?.takeIf { it.isNotEmpty() }
+            }
+        )
+    }
+
+    /**
+     * The clock belongs to streams alone. A caller that asked for one counted body must still get a
+     * plain 400 for a prompt too long for the context however long the model took to be read, which
+     * is why the server writes no headers before it has run every check that could answer as a body.
+     */
+    @Test
+    fun `a request that did not ask for a stream is never opened as one`() = runTest {
+        val endpoint = start(listOf("alpha"), slowEngine(600))
+
+        val response = chat(endpoint, """{"model":"alpha","messages":[{"role":"user","content":"hi"}]}""")
+
+        assertEquals(200, statusOf(response))
+        assertTrue(response.contains("Content-Type: application/json"))
+        assertTrue(response.contains("Content-Length: "))
+        assertFalse(response.contains("text/event-stream"))
+        assertEquals("hello", JSONObject(bodyOf(response)).getJSONArray("choices").getJSONObject(0)
+            .getJSONObject("message").getString("content"))
     }
 
     @Test

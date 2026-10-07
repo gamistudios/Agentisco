@@ -14,7 +14,9 @@ import com.awaki.local.runtime.LocalPromptTooLongException
 import com.awaki.local.runtime.LocalTemplateCapabilities
 import com.awaki.local.runtime.LocalToolCall
 import com.awaki.local.server.LocalAiApi
+import com.awaki.local.server.requestsEventStream
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.runTest
 import org.json.JSONArray
 import org.json.JSONObject
@@ -588,6 +590,67 @@ class LocalAiApiTest {
         val message = fake.sessions.single().requests.single().inputs.messages.single()
         assertEquals("user", message.role)
         assertEquals("one two", message.content)
+    }
+
+    /**
+     * What decides whether the transport may send headers before it has an answer. Get it wrong in
+     * one direction and a client waiting for one counted body gets an event stream it did not ask
+     * for; get it wrong in the other and a stream that says nothing while the model loads looks
+     * like a dead socket. Only a request that asked for `stream: true` may be opened early.
+     */
+    @Test
+    fun `only a request that asked for a stream is read as one`() {
+        assertTrue(requestsEventStream("""{"model":"alpha","stream":true,"messages":[]}"""))
+        assertFalse(requestsEventStream("""{"model":"alpha","stream":false,"messages":[]}"""))
+        assertFalse(requestsEventStream("""{"model":"alpha","messages":[]}"""))
+        // A body that is not JSON is refused as a request further up; here it simply is not a stream.
+        assertFalse(requestsEventStream(""))
+        assertFalse(requestsEventStream("not json at all"))
+        assertFalse(requestsEventStream("""{"messages":[{"role":"user","content":"hi"}]}"""))
+    }
+
+    /**
+     * What the transport reaches for when a stream's write fails. A decode that cannot be told the
+     * client left keeps holding the one model slot until it finishes an answer nobody is reading,
+     * and the next request — the one the user actually made — waits behind it.
+     *
+     * Run on a real thread rather than a test dispatcher, because the point is that one thread is
+     * decoding while another ends the decode.
+     */
+    @Test
+    fun `the transport can stop a decode it cannot otherwise reach`() {
+        val (api, fake) = runBlocking { apiFor("alpha") }
+        fake.sessionScript = { session ->
+            session.deltas = { piece ->
+                // Stay inside the turn until something ends it, the way a long answer does.
+                val deadline = System.currentTimeMillis() + 5_000
+                while (session.aborts == 0 && System.currentTimeMillis() < deadline) Thread.sleep(20)
+                listOf(LocalAnswerDelta(content = piece))
+            }
+        }
+
+        val decoding = Thread {
+            runBlocking {
+                api.handle(
+                    "POST",
+                    "/v1/chat/completions",
+                    """{"model":"alpha","stream":true,"messages":[{"role":"user","content":"hi"}]}"""
+                ) { true }
+            }
+        }.apply { isDaemon = true }
+        decoding.start()
+
+        val waited = System.currentTimeMillis()
+        while (fake.sessions.isEmpty() || fake.sessions.single().consumed == 0) {
+            assertTrue("the decode never started", System.currentTimeMillis() - waited < 5_000)
+            Thread.sleep(10)
+        }
+
+        api.stopGeneration()
+        decoding.join(5_000)
+
+        assertEquals(1, fake.sessions.single().aborts)
+        assertFalse("the stopped turn must not run on", decoding.isAlive)
     }
 }
 
