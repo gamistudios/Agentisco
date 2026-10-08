@@ -153,35 +153,6 @@ std::string string_array_json(const std::vector<std::string> &values) {
   return out;
 }
 
-std::string tool_calls_json(const std::vector<common_chat_tool_call> &calls) {
-  std::string out = "[";
-  for (size_t i = 0; i < calls.size(); i++) {
-    if (i > 0) out += ",";
-    out += "{\"id\":" + common_json::make(calls[i].id).dump_safe();
-    out += ",\"name\":" + common_json::make(calls[i].name).dump_safe();
-    // Arguments stay a string here, exactly as the OpenAI wire format wants them:
-    // during a partial parse they are a half-written object, and re-parsing them as
-    // JSON would throw away the only thing the caller could still stream.
-    out += ",\"arguments\":" + common_json::make(calls[i].arguments).dump_safe() + "}";
-  }
-  out += "]";
-  return out;
-}
-
-/// The fields of one parsed assistant message. Written by hand rather than through
-/// common_chat_msg::to_json_oaicompat, which parses tool arguments as JSON and so
-/// throws on the partial messages a stream is made of.
-std::string message_json(const common_chat_msg &msg) {
-  std::string out = "{\"role\":\"" + json_escape(msg.role) + "\"";
-  out += ",\"content\":" + common_json::make(msg.content).dump_safe();
-  if (!msg.reasoning_content.empty()) {
-    out += ",\"reasoning\":" + common_json::make(msg.reasoning_content).dump_safe();
-  }
-  out += ",\"toolCalls\":" + tool_calls_json(msg.tool_calls);
-  out += "}";
-  return out;
-}
-
 }  // namespace
 
 extern "C" {
@@ -292,9 +263,11 @@ Java_com_awaki_local_jni_NativeLlama_nativeChatTurnInfo(JNIEnv *env, jobject, jl
 }
 
 /**
- * Reads generated text with the parser this turn's template produced. Returns the whole
- * assistant message plus the delta since the previous call, which is what lets a stream
- * carry tool arguments without ever showing the model's markup to the user.
+ * Reads generated text with the parser this turn's template produced, and returns only what is new
+ * since the previous read. That is what lets a stream carry tool arguments without ever showing the
+ * model's markup to the user - and the reason the whole message is not sent alongside it: the
+ * caller holds the text already, so the copy would be re-quoted, re-allocated as a Java array and
+ * re-decoded every few tokens of a growing answer for bytes nobody reads.
  *
  * With partial=false the text is final; a model that answers in a shape its own template
  * does not allow then fails here rather than silently becoming prose.
@@ -317,32 +290,30 @@ Java_com_awaki_local_jni_NativeLlama_nativeChatParse(JNIEnv *env,
   set_engine_phase("parsing the answer", nullptr);
   try {
     const common_chat_msg msg = common_chat_parse(generated, partial == JNI_TRUE, turn->parser_params);
-    std::string json = "{\"message\":" + message_json(msg);
+    std::string deltas;
     try {
       const std::vector<common_chat_msg_diff> diffs = common_chat_msg_diff::compute_diffs(turn->previous, msg);
-      json += ",\"deltas\":[";
       for (size_t i = 0; i < diffs.size(); i++) {
         const common_chat_msg_diff &d = diffs[i];
-        if (i > 0) json += ",";
-        json += "{\"content\":" + common_json::make(d.content_delta).dump_safe();
-        json += ",\"reasoning\":" + common_json::make(d.reasoning_content_delta).dump_safe();
-        json += ",\"toolCallIndex\":" + std::to_string(d.tool_call_index == std::string::npos ? -1 : (long) d.tool_call_index);
-        json += ",\"toolCall\":{\"id\":" + common_json::make(d.tool_call_delta.id).dump_safe();
-        json += ",\"name\":" + common_json::make(d.tool_call_delta.name).dump_safe();
-        json += ",\"arguments\":" + common_json::make(d.tool_call_delta.arguments).dump_safe() + "}}";
+        if (i > 0) deltas += ",";
+        deltas += "{\"content\":" + common_json::make(d.content_delta).dump_safe();
+        deltas += ",\"reasoning\":" + common_json::make(d.reasoning_content_delta).dump_safe();
+        deltas += ",\"toolCallIndex\":" + std::to_string(d.tool_call_index == std::string::npos ? -1 : (long) d.tool_call_index);
+        deltas += ",\"toolCall\":{\"id\":" + common_json::make(d.tool_call_delta.id).dump_safe();
+        deltas += ",\"name\":" + common_json::make(d.tool_call_delta.name).dump_safe();
+        deltas += ",\"arguments\":" + common_json::make(d.tool_call_delta.arguments).dump_safe() + "}}";
       }
-      json += "]";
       turn->previous = msg;
     } catch (const std::exception &e) {
       // A diff that cannot be computed means the parser changed its mind about the
-      // shape of the answer. The full message is still correct, so the caller gets it
-      // and streams nothing for this piece instead of losing the turn.
+      // shape of the answer. Nothing is streamed for this piece instead of the turn being
+      // lost, and the next read re-parses the whole answer from where the last delivered
+      // delta left off.
+      deltas.clear();
       set_error(std::string("Streaming diff unavailable: ") + e.what());
-      json += ",\"deltas\":[]";
       turn->previous = msg;
     }
-    json += "}";
-    return to_bytes(env, json, "the parsed answer");
+    return to_bytes(env, "{\"deltas\":[" + deltas + "]}", "the parsed answer");
   } catch (const std::exception &e) {
     set_error(std::string("The model produced output its own format does not allow: ") + e.what());
     // A partial parse failing is normal: the answer is not finished, so there is
