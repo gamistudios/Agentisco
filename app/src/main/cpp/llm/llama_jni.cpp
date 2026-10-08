@@ -371,8 +371,14 @@ Java_com_awaki_local_jni_NativeLlama_nativeInit(JNIEnv *env, jobject, jstring na
       },
       nullptr);
 
+  // A refused copy of the folder is a start-up that cannot find its kernels, which is worth a
+  // message rather than a backend list that is quietly empty.
   const char *dir = env->GetStringUTFChars(native_lib_dir, nullptr);
-  const std::string library_dir(dir ? dir : "");
+  if (dir == nullptr) {
+    take_pending_exception(env, "the folder the engine's own libraries are in");
+    return;
+  }
+  const std::string library_dir(dir);
   env->ReleaseStringUTFChars(native_lib_dir, dir);
   ggml_backend_load_all_from_path(library_dir.c_str());
 
@@ -401,6 +407,10 @@ Java_com_awaki_local_jni_NativeLlama_nativeLoadModel(JNIEnv *env,
                                                         jint threads,
                                                         jint n_batch) {
   const char *cpath = env->GetStringUTFChars(path, nullptr);
+  if (cpath == nullptr) {
+    take_pending_exception(env, "the file name of the model to load");
+    return 0;
+  }
   // If this step is the one that faults, the crash record has to say which file was being read.
   set_engine_phase("loading model", cpath);
 
@@ -496,7 +506,7 @@ Java_com_awaki_local_jni_NativeLlama_nativeLoadModel(JNIEnv *env,
 JNIEXPORT jbyteArray JNICALL
 Java_com_awaki_local_jni_NativeLlama_nativeModelInfo(JNIEnv *env, jobject, jlong handle) {
   Session *s = session_of(handle);
-  if (s == nullptr) return to_bytes(env, "{}");
+  if (s == nullptr) return to_bytes(env, "{}", "the model's metadata");
 
   char arch[256] = {0};
   llama_model_meta_val_str(s->model, "general.architecture", arch, sizeof(arch));
@@ -513,7 +523,7 @@ Java_com_awaki_local_jni_NativeLlama_nativeModelInfo(JNIEnv *env, jobject, jlong
   json += ",\"eosTokenId\":" + std::to_string(llama_vocab_eos(s->vocab));
   json += ",\"addBos\":" + std::string(llama_vocab_get_add_bos(s->vocab) ? "true" : "false");
   json += "}";
-  return to_bytes(env, json);
+  return to_bytes(env, json, "the model's metadata");
 }
 
 JNIEXPORT jint JNICALL
@@ -532,17 +542,40 @@ Java_com_awaki_local_jni_NativeLlama_nativeComplete(JNIEnv *env,
   Session *s = session_of(handle);
   if (s == nullptr) return -1;
 
-  jclass cb_class = env->GetObjectClass(callback);
+  // Nothing in this function may call into Java on a thread that is already failing, so the check
+  // comes before the first lookup rather than being left to the helpers below.
+  if (take_pending_exception(env, "the start of a decode")) return -5;
+
+  // The method lookup is a JNI call like any other, and a failing one leaves its exception on the
+  // thread rather than only returning null. Taking it here is what keeps a bad callback from
+  // turning the next call this function makes into the fault that kills the process.
+  jclass cb_class = callback == nullptr ? nullptr : env->GetObjectClass(callback);
+  if (cb_class == nullptr) {
+    take_pending_exception(env, "the token callback this app passed");
+    if (cb_class != nullptr) env->DeleteLocalRef(cb_class);
+    set_error("The engine was asked to decode without anywhere to send the tokens");
+    return -2;
+  }
   jmethodID on_token = env->GetMethodID(cb_class, "onToken", "([B)Z");
-  if (on_token == nullptr) return -2;
+  env->DeleteLocalRef(cb_class);
+  if (on_token == nullptr) {
+    take_pending_exception(env, "the token callback this app passed");
+    return -2;
+  }
 
-  std::vector<char> prompt_bytes = copy_bytes(env, prompt);
-  const std::string grammar_text = [&] {
-    const std::vector<char> raw = copy_bytes(env, grammar);
-    return std::string(raw.begin(), raw.end());
+  const std::optional<std::vector<char>> prompt_bytes = copy_bytes(env, prompt);
+  if (!prompt_bytes.has_value()) return -5;
+  const std::optional<std::string> grammar_text = [&] {
+    // A missing grammar is a request that wants none; an unreadable one is a broken handover, and
+    // sampling under a grammar that never arrived would be the model answering in prose when the
+    // caller asked for calls.
+    const std::optional<std::vector<char>> raw = copy_bytes(env, grammar);
+    if (!raw.has_value()) return std::optional<std::string>();
+    return std::optional<std::string>(std::string(raw->begin(), raw->end()));
   }();
+  if (!grammar_text.has_value()) return -5;
 
-  llama_sampler *smpl = build_sampler(s, temperature, top_k, top_p, repeat_penalty, seed, grammar_text.c_str());
+  llama_sampler *smpl = build_sampler(s, temperature, top_k, top_p, repeat_penalty, seed, grammar_text->c_str());
   if (smpl == nullptr) {
     set_error("Failed to build sampler");
     return -3;
@@ -555,8 +588,8 @@ Java_com_awaki_local_jni_NativeLlama_nativeComplete(JNIEnv *env,
   // that need one and never gives a second to the ones that do not.
   std::vector<llama_token> tokens;
   {
-    const char *text = prompt_bytes.empty() ? "" : prompt_bytes.data();
-    const int32_t text_len = (int32_t) prompt_bytes.size();
+    const char *text = prompt_bytes->empty() ? "" : prompt_bytes->data();
+    const int32_t text_len = (int32_t) prompt_bytes->size();
     int32_t need = llama_tokenize(s->vocab, text, text_len, nullptr, 0, true, true);
     if (need < 0) need = -need;
     tokens.resize((size_t) need + 8);
@@ -597,11 +630,21 @@ Java_com_awaki_local_jni_NativeLlama_nativeComplete(JNIEnv *env,
 
   auto emit = [&](const std::string &bytes) -> bool {
     if (bytes.empty()) return true;
-    jbyteArray arr = env->NewByteArray((jsize) bytes.size());
-    env->SetByteArrayRegion(arr, 0, (jsize) bytes.size(), (const jbyte *) bytes.data());
+    // Handing a piece over is the one place this loop calls into Java, so it is the one place a
+    // Java failure can be left pending. A callback that throws used to be noticed and then
+    // abandoned, and ART keeps such an exception on the thread for the *next* JNI call - anywhere
+    // in the engine - to abort the process over. That is the app vanishing mid-tool-call with no
+    // message anywhere. to_bytes refuses a thread that is already failing, and the sink's own
+    // throw is described and taken here, so a broken handover ends the turn with a reason.
+    jbyteArray arr = to_bytes(env, bytes, "a piece of the answer");
+    if (arr == nullptr) return false;
     const jboolean keep = env->CallBooleanMethod(callback, on_token, arr);
     env->DeleteLocalRef(arr);
-    return env->ExceptionCheck() ? false : (keep == JNI_TRUE);
+    if (env->ExceptionCheck()) {
+      take_pending_exception(env, "the sink reading a piece of the answer");
+      return false;
+    }
+    return keep == JNI_TRUE;
   };
 
   // Each completion is a sequence of its own, but the *head* of this prompt is usually the
@@ -819,7 +862,9 @@ Java_com_awaki_local_jni_NativeLlama_nativeBackendFree(JNIEnv *, jobject) {
 
 JNIEXPORT jbyteArray JNICALL
 Java_com_awaki_local_jni_NativeLlama_nativeLastError(JNIEnv *env, jobject) {
-  return to_bytes(env, g_last_error);
+  // The one report that has to survive everything else failing: it is what each failure below
+  // reads back, so a refused allocation here leaves Kotlin with nothing but its own fallback.
+  return to_bytes(env, g_last_error, "the reason a step failed");
 }
 
 /**
@@ -857,7 +902,7 @@ Java_com_awaki_local_jni_NativeLlama_nativeEngineDiagnostics(JNIEnv *env, jobjec
     json += ",\"description\":" + common_json::make(ggml_backend_dev_description(dev)).dump_safe() + "}";
   }
   json += "]}";
-  return to_bytes(env, json);
+  return to_bytes(env, json, "the engine's diagnostics");
 }
 
 /**

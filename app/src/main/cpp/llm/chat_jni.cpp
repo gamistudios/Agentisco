@@ -194,17 +194,20 @@ extern "C" {
 JNIEXPORT jbyteArray JNICALL
 Java_com_awaki_local_jni_NativeLlama_nativeChatTemplatesInfo(JNIEnv *env, jobject, jlong handle) {
   Session *s = session_of(handle);
-  if (s == nullptr) return to_bytes(env, "{\"available\":false}");
+  if (s == nullptr) return to_bytes(env, "{\"available\":false}", "the template's capabilities");
   if (s->templates == nullptr) {
     const std::string reason = g_last_error.empty() ? "The model ships no usable chat template" : g_last_error;
-    return to_bytes(env, "{\"available\":false,\"reason\":" + common_json::make(reason).dump_safe() + "}");
+    return to_bytes(
+        env,
+        "{\"available\":false,\"reason\":" + common_json::make(reason).dump_safe() + "}",
+        "the template's capabilities");
   }
   const common_chat_templates *tmpls = s->templates.get();
   std::string json = "{\"available\":true";
   json += ",\"explicit\":" + std::string(common_chat_templates_was_explicit(tmpls) ? "true" : "false");
   json += ",\"caps\":" + caps_json(tmpls);
   json += "}";
-  return to_bytes(env, json);
+  return to_bytes(env, json, "the template's capabilities");
 }
 
 /**
@@ -225,8 +228,11 @@ Java_com_awaki_local_jni_NativeLlama_nativeChatOpenTurn(JNIEnv *env, jobject, jl
     return 0;
   }
 
-  const std::vector<char> raw = copy_bytes(env, inputs);
-  const common_json body = common_json::parse_no_throw(std::string(raw.begin(), raw.end()));
+  // An unreadable request is not the same as an empty one: the thread is already failing, the
+  // reason is recorded, and a turn opened over text that was never read would be somebody else's.
+  const std::optional<std::vector<char>> raw = copy_bytes(env, inputs);
+  if (!raw.has_value()) return 0;
+  const common_json body = common_json::parse_no_throw(std::string(raw->begin(), raw->end()));
   if (body.is_discarded() || !body.is_object()) {
     set_error("Chat request is not a JSON object");
     return 0;
@@ -271,7 +277,7 @@ Java_com_awaki_local_jni_NativeLlama_nativeChatOpenTurn(JNIEnv *env, jobject, jl
 JNIEXPORT jbyteArray JNICALL
 Java_com_awaki_local_jni_NativeLlama_nativeChatTurnInfo(JNIEnv *env, jobject, jlong turn_handle) {
   ChatTurn *turn = turn_of(turn_handle);
-  if (turn == nullptr) return to_bytes(env, "{}");
+  if (turn == nullptr) return to_bytes(env, "{}", "the rendered prompt");
   const common_chat_params &p = turn->params;
 
   std::string json = "{";
@@ -282,7 +288,7 @@ Java_com_awaki_local_jni_NativeLlama_nativeChatTurnInfo(JNIEnv *env, jobject, jl
   json += ",\"supportsThinking\":" + std::string(p.supports_thinking ? "true" : "false");
   json += ",\"hasTools\":" + std::string(p.format != COMMON_CHAT_FORMAT_CONTENT_ONLY ? "true" : "false");
   json += "}";
-  return to_bytes(env, json);
+  return to_bytes(env, json, "the rendered prompt");
 }
 
 /**
@@ -300,10 +306,13 @@ Java_com_awaki_local_jni_NativeLlama_nativeChatParse(JNIEnv *env,
                                                         jbyteArray text,
                                                         jboolean partial) {
   ChatTurn *turn = turn_of(turn_handle);
-  if (turn == nullptr) return to_bytes(env, "{}");
+  if (turn == nullptr) return to_bytes(env, "{}", "the parsed answer");
 
-  const std::vector<char> raw = copy_bytes(env, text);
-  const std::string generated(raw.begin(), raw.end());
+  // Text the app could not hand over is not text that said nothing: the thread is already failing
+  // and the reason is recorded, so there is no answer to read here.
+  const std::optional<std::vector<char>> raw = copy_bytes(env, text);
+  if (!raw.has_value()) return to_bytes(env, "{}", "the parsed answer");
+  const std::string generated(raw->begin(), raw->end());
 
   set_engine_phase("parsing the answer", nullptr);
   try {
@@ -333,14 +342,14 @@ Java_com_awaki_local_jni_NativeLlama_nativeChatParse(JNIEnv *env,
       turn->previous = msg;
     }
     json += "}";
-    return to_bytes(env, json);
+    return to_bytes(env, json, "the parsed answer");
   } catch (const std::exception &e) {
     set_error(std::string("The model produced output its own format does not allow: ") + e.what());
     // A partial parse failing is normal: the answer is not finished, so there is
     // simply nothing to report yet. Only a final failure is the model's fault, and
     // the caller needs to tell those apart before it shows anything to the user.
     std::string json = "{\"error\":true,\"partial\":" + std::string(partial == JNI_TRUE ? "true" : "false") + "}";
-    return to_bytes(env, json);
+    return to_bytes(env, json, "the parsed answer");
   }
 }
 

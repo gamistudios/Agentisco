@@ -287,7 +287,9 @@ void install_crash_capture(const char *log_path) {
 extern "C" JNIEXPORT void JNICALL
 Java_com_awaki_local_jni_NativeLlama_nativeInstallCrashCapture(JNIEnv *env, jobject, jstring log_path) {
   if (g_log_path_length > 0) return;  // one install per process, so a second cannot hide the first
+  if (take_pending_exception(env, "installing the crash record")) return;
   const char *path = env->GetStringUTFChars(log_path, nullptr);
   install_crash_capture(path);
   if (path != nullptr) env->ReleaseStringUTFChars(log_path, path);
+  if (env->ExceptionCheck()) take_pending_exception(env, "installing the crash record");
 }

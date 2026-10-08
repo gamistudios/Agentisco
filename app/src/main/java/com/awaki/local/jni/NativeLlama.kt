@@ -14,6 +14,13 @@ package com.awaki.local.jni
  * The library is optional by construction: a JVM test, or a build whose `.so` is
  * missing for some ABI, reports [isAvailable] false instead of crashing the app on
  * class load. A 32-bit device is the case that is missing by design.
+ *
+ * Every method that answers with bytes answers with `ByteArray?`, and the null is not decoration.
+ * The engine builds those arrays with `NewByteArray`, which on a phone out of heap returns nothing
+ * and leaves the `OutOfMemoryError` *pending on the thread* — the JNI mistake that turns into an
+ * abort of the whole process, mid-turn, with no message anywhere. So the native side describes the
+ * failure, clears it, and records it as its own error; the null is what reaches this side, where a
+ * non-null type would have been a lie the compiler cannot catch for a native method.
  */
 class NativeLlama private constructor() {
 
@@ -39,12 +46,14 @@ class NativeLlama private constructor() {
   /** Engine handle, or 0 when the model or its context could not be created. */
   external fun nativeLoadModel(path: String, contextSize: Int, threads: Int, batchSize: Int): Long
 
-  external fun nativeModelInfo(handle: Long): ByteArray
+  /** The engine handle's own facts, as JSON. */
+  external fun nativeModelInfo(handle: Long): ByteArray?
 
   /**
    * Runs one completion. Returns the engine's finish code — 0 end of sequence,
    * 1 max tokens, 2 stopped by the sink, 3 aborted, 4 context full, negative for an
-   * engine error whose text [nativeLastError] holds.
+   * engine error whose text [nativeLastError] holds. -5 means the request itself never
+   * reached the engine, and -2 that there was nowhere to send the tokens.
    */
   external fun nativeComplete(
     handle: Long,
@@ -65,7 +74,8 @@ class NativeLlama private constructor() {
 
   external fun nativeUnload(handle: Long)
 
-  external fun nativeLastError(): ByteArray
+  /** Why the last step failed — or null when even *this* could not be handed over. */
+  external fun nativeLastError(): ByteArray?
 
   /** CPU threads this device's thread plan decodes with, which is not its core count. */
   external fun nativeSystemThreads(): Int
@@ -77,7 +87,7 @@ class NativeLlama private constructor() {
    * is a property of one of these numbers, and a phone that is not plugged into a computer cannot
    * show logcat to whoever has to fix it.
    */
-  external fun nativeEngineDiagnostics(handle: Long): ByteArray
+  external fun nativeEngineDiagnostics(handle: Long): ByteArray?
 
   // ---- chat templates, in the engine's own code ----
 
@@ -86,7 +96,7 @@ class NativeLlama private constructor() {
    * template out of the GGUF file and reports what it can express, which is the only
    * honest answer to "can this model do tool calls".
    */
-  external fun nativeChatTemplatesInfo(handle: Long): ByteArray
+  external fun nativeChatTemplatesInfo(handle: Long): ByteArray?
 
   /**
    * Applies that template to one OpenAI-shaped request, given as UTF-8 JSON bytes.
@@ -95,10 +105,10 @@ class NativeLlama private constructor() {
    */
   external fun nativeChatOpenTurn(handle: Long, inputs: ByteArray): Long
 
-  external fun nativeChatTurnInfo(turn: Long): ByteArray
+  external fun nativeChatTurnInfo(turn: Long): ByteArray?
 
   /** Reads generated text back with the parser the template produced. */
-  external fun nativeChatParse(turn: Long, text: ByteArray, partial: Boolean): ByteArray
+  external fun nativeChatParse(turn: Long, text: ByteArray, partial: Boolean): ByteArray?
 
   external fun nativeChatCloseTurn(turn: Long)
 

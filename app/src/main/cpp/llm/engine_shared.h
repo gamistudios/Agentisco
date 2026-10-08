@@ -23,6 +23,7 @@
 #include <chat.h>
 
 #include <atomic>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -114,17 +115,112 @@ void install_crash_capture(const char *log_path);
  */
 void set_engine_phase(const char *phase, const char *model);
 
-inline std::vector<char> copy_bytes(JNIEnv *env, jbyteArray array) {
+/**
+ * The exception this thread is failing with, named and then taken away.
+ *
+ * JNI's failure model is the trap: a call that fails does not throw into C++, it leaves an
+ * exception *pending on the thread* and returns null. Nothing in C++ can read that, and the next
+ * JNI call on the thread is undefined behaviour - which ART turns into an abort of the whole
+ * process. That is the app vanishing mid-turn with no message for the person holding the phone,
+ * so every place this library crosses to Kotlin asks first whether the thread is already failing
+ * and takes the failure away instead of building on it.
+ *
+ * The Throwable's own name and message are read here rather than guessed at, because the two
+ * ways this happens need different words: an allocation the Java heap refused is a phone out of
+ * memory, while a token sink that threw is this app's own bug. Every call in that lookup can
+ * itself fail, so each one leaves the thread clean and the fallback string stands.
+ */
+inline std::string describe_exception(JNIEnv *env) {
+  // The object is taken before the trace is printed, because the two runtimes disagree about the
+  // printing: ExceptionDescribe is specified to leave the exception pending and HotSpot clears it,
+  // so an ExceptionOccurred afterwards reports nothing at all. The local reference holds either
+  // way, which is what makes this order the one that always has a name to show.
+  jobject thrown = env->ExceptionOccurred();
+  env->ExceptionDescribe();  // the full trace, once, for whoever can read logcat
+  env->ExceptionClear();     // ... wherever the runtime still kept it
+  if (thrown == nullptr) return "a Java failure";
+
+  std::string text;
+  jclass clazz = env->GetObjectClass(thrown);
+  if (clazz != nullptr && !env->ExceptionCheck()) {
+    // Throwable::toString is the class name and the message in one call, which is exactly the
+    // half-sentence a user needs: `java.lang.OutOfMemoryError: Failed to allocate ...`. It answers
+    // for any exception this library has never heard of, because the lookup is on the throwable's
+    // own class and every throwable inherits it.
+    const jmethodID to_string = env->GetMethodID(clazz, "toString", "()Ljava/lang/String;");
+    if (to_string != nullptr && !env->ExceptionCheck()) {
+      auto value = (jstring) env->CallObjectMethod(thrown, to_string);
+      if (value != nullptr && !env->ExceptionCheck()) {
+        const char *chars = env->GetStringUTFChars(value, nullptr);
+        if (chars != nullptr) {
+          text = chars;
+          env->ReleaseStringUTFChars(value, chars);
+        }
+        env->DeleteLocalRef(value);
+      }
+    }
+    env->DeleteLocalRef(clazz);
+  }
+  env->DeleteLocalRef(thrown);
+  // Whatever the reading of the message itself left behind - a toString that threw is rare, but a
+  // thread this far out of memory is not choosing its own failures.
+  if (env->ExceptionCheck()) env->ExceptionClear();
+
+  return text.empty() ? "a Java failure" : text;
+}
+
+/**
+ * Records that the thread was already failing, in terms the turn's caller can show.
+ *
+ * True means the caller must not touch Java again and must not pretend the step succeeded; the
+ * engine's own error now says which handover broke and what Java made of it.
+ */
+inline bool take_pending_exception(JNIEnv *env, const char *where) {
+  if (!env->ExceptionCheck()) return false;
+  set_error("The model's turn could not be delivered (" + std::string(where) + "): " + describe_exception(env));
+  return true;
+}
+
+/**
+ * The array's bytes, or no value at all when the thread was already failing.
+ *
+ * The failure has to be distinguishable from an empty array: a prompt that read as empty would
+ * otherwise be tokenized and decoded as a request that said nothing, and an empty input to the
+ * parser would be reported as a model that answered with nothing.
+ */
+inline std::optional<std::vector<char>> copy_bytes(JNIEnv *env, jbyteArray array) {
+  if (take_pending_exception(env, "reading text the app handed in")) return std::nullopt;
   std::vector<char> out;
   if (array == nullptr) return out;
   const jsize len = env->GetArrayLength(array);
   out.resize(static_cast<size_t>(len > 0 ? len : 0));
   if (!out.empty()) env->GetByteArrayRegion(array, 0, len, reinterpret_cast<jbyte *>(out.data()));
+  if (env->ExceptionCheck()) {
+    take_pending_exception(env, "reading text the app handed in");
+    return std::nullopt;
+  }
   return out;
 }
 
-inline jbyteArray to_bytes(JNIEnv *env, const std::string &text) {
+/**
+ * The text as a Java byte array, or null when the Java heap refused it.
+ *
+ * Every caller must expect the null: handing it to another JNI call is the undefined behaviour
+ * that aborts the process, which is the failure this whole boundary exists to prevent.
+ */
+inline jbyteArray to_bytes(JNIEnv *env, const std::string &text, const char *where = "a report to the app") {
+  if (take_pending_exception(env, where)) return nullptr;
   jbyteArray out = env->NewByteArray(static_cast<jsize>(text.size()));
+  if (out == nullptr) {
+    // A refused allocation leaves its OutOfMemoryError pending; describing it and clearing it is
+    // the only way the turn ends with a message instead of the thread carrying it into the next
+    // call, where ART would kill the process for it.
+    if (!take_pending_exception(env, where)) {
+      set_error("The model's turn could not be delivered (" + std::string(where) +
+                "): the Java heap refused the bytes");
+    }
+    return nullptr;
+  }
   if (!text.empty()) {
     env->SetByteArrayRegion(out, 0, static_cast<jsize>(text.size()), reinterpret_cast<const jbyte *>(text.data()));
   }

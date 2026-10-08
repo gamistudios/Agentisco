@@ -67,7 +67,11 @@ class NativeLlamaEngine(
    */
   override fun diagnostics(): LocalEngineDiagnostics {
     val api = native ?: return LocalEngineDiagnostics.noEngine.copy(reason = unavailableReason)
-    val json = runCatching { JSONObject(api.nativeEngineDiagnostics(0L).toStringUtf8()) }.getOrNull()
+    val bytes = api.nativeEngineDiagnostics(0L)
+      ?: return LocalEngineDiagnostics.noEngine.copy(
+        reason = describeFailure(api, "The engine could not report its own build")
+      )
+    val json = runCatching { JSONObject(bytes.toStringUtf8()) }.getOrNull()
       ?: return LocalEngineDiagnostics.noEngine.copy(reason = "The engine reported unreadable diagnostics")
     val backends = json.optJSONArray("backends").jsonObjectList().map { node ->
       val description = node.optString("description")
@@ -133,7 +137,8 @@ class NativeLlamaEngine(
   }
 
   private fun readInfo(api: NativeLlama, handle: Long): LoadedModelInfo {
-    val raw = api.nativeModelInfo(handle).toStringUtf8()
+    val raw = api.nativeModelInfo(handle)?.toStringUtf8()
+      ?: throw LocalEngineException(describeFailure(api, "Could not read the model's metadata"))
     val json = runCatching { JSONObject(raw) }.getOrNull()
       ?: throw LocalEngineException(describeFailure(api, "The model reported unreadable metadata"))
     return LoadedModelInfo(
@@ -165,7 +170,11 @@ class NativeLlamaEngine(
     private var released = false
 
     override fun capabilities(): LocalTemplateCapabilities {
-      val json = runCatching { JSONObject(api.nativeChatTemplatesInfo(handle).toStringUtf8()) }.getOrNull()
+      val bytes = api.nativeChatTemplatesInfo(handle)
+        ?: return LocalTemplateCapabilities.unavailable.copy(
+          reason = describeFailure(api, "The engine could not report what this template can do")
+        )
+      val json = runCatching { JSONObject(bytes.toStringUtf8()) }.getOrNull()
         ?: return LocalTemplateCapabilities.unavailable.copy(
           reason = "The engine reported unreadable template info"
         )
@@ -237,12 +246,19 @@ class NativeLlamaEngine(
       // The abort flag outlives a run, so each request starts with it cleared or a cancelled
       // turn would stop the next one too.
       api.nativeResetAbort(handle)
+      // Whether this side ended the run. The engine can stop a decode on its own when a piece of
+      // the answer cannot be handed over at all, and both endings arrive as the same finish code
+      // while only one of them is a cancel: a refused handover is a turn that has to say so rather
+      // than a stream that quietly stopped early.
+      var sinkRefused = false
       val sink = object : NativeLlama.TokenSink {
         override fun onToken(piece: ByteArray): Boolean {
           generated.append(String(piece, StandardCharsets.UTF_8))
           if (++piecesSinceParse < PARSE_EVERY_PIECES) return true
           piecesSinceParse = 0
-          return reader.read(generated.toString(), final = false)
+          val keep = reader.read(generated.toString(), final = false)
+          if (!keep) sinkRefused = true
+          return keep
         }
       }
 
@@ -264,6 +280,14 @@ class NativeLlamaEngine(
       // nothing is wrong with the resident model, and burning it would make the user's next
       // turn pay for a reload that changes nothing.
       if (code == -8) throw LocalPromptTooLongException(lastError())
+
+      // Code 2 means the sink said no, and the sink only ever said no from here — unless the engine
+      // stopped itself because the answer could not be crossed over at all, which a phone out of
+      // memory does mid-turn. That case used to look exactly like a cancel: a stream that ended
+      // early with nothing said about why.
+      if (code == 2 && !sinkRefused && !reader.stopTriggered) {
+        throw LocalEngineException(describeFailure(api, "The model's answer could not be delivered"))
+      }
 
       // Only a run that reached the end of an answer can be read one last time: re-parsing a
       // turn the user cut short would offer a tool call the model never finished writing.
@@ -320,7 +344,8 @@ class NativeLlamaEngine(
       api.nativeUnload(handle)
     }
 
-    private fun lastError(): String = api.nativeLastError().toStringUtf8().trim().ifEmpty { "unknown error" }
+    private fun lastError(): String =
+      api.nativeLastError()?.toStringUtf8()?.trim()?.ifEmpty { null } ?: "unknown error"
   }
 
   companion object {
@@ -476,8 +501,11 @@ internal class AnswerReader(
  */
 internal class NativeChatTurn(private val api: NativeLlama, private val handle: Long) {
 
-  private val info: JSONObject = runCatching { JSONObject(api.nativeChatTurnInfo(handle).toStringUtf8()) }
-    .getOrElse { throw LocalEngineException("The engine returned an unreadable prompt") }
+  private val info: JSONObject = runCatching {
+    JSONObject(api.nativeChatTurnInfo(handle)?.toStringUtf8().orEmpty())
+  }.getOrElse {
+    throw LocalEngineException(describeFailure(api, "The engine could not hand over the rendered prompt"))
+  }
 
   val prompt: String = info.optString("prompt")
 
@@ -495,8 +523,12 @@ internal class NativeChatTurn(private val api: NativeLlama, private val handle: 
   val supportsThinking: Boolean = info.optBoolean("supportsThinking", false)
 
   fun parse(text: String, partial: Boolean): List<LocalAnswerDelta> {
+    // A handover the Java heap refused reports no deltas rather than wrong ones: the text stays
+    // where it is, and the next read re-parses the whole answer from the engine's own buffer.
     val json = runCatching {
-      JSONObject(api.nativeChatParse(handle, text.toByteArray(StandardCharsets.UTF_8), partial).toStringUtf8())
+      JSONObject(
+        api.nativeChatParse(handle, text.toByteArray(StandardCharsets.UTF_8), partial)?.toStringUtf8().orEmpty()
+      )
     }.getOrNull() ?: return emptyList()
     if (json.optBoolean("error", false)) {
       if (partial || json.optBoolean("partial", false)) return emptyList()
@@ -605,6 +637,8 @@ internal fun nativeFinishReason(code: Int, stopTriggered: Boolean): LocalFinishR
 }
 
 private fun describeFailure(api: NativeLlama, action: String): String {
-  val detail = String(api.nativeLastError(), StandardCharsets.UTF_8).trim()
+  // The reason is itself a handover, so it can fail too — and a failure here must not become a
+  // second one standing where the user was about to be told about the first.
+  val detail = api.nativeLastError()?.toStringUtf8()?.trim().orEmpty()
   return if (detail.isEmpty()) action else "$action: $detail"
 }
