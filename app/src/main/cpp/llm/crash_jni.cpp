@@ -24,11 +24,22 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <ctime>
+#include <exception>
+#include <typeinfo>
+
+#if defined(__has_include)
+#if __has_include(<cxxabi.h>)
+#include <cxxabi.h>
+#define AWAKI_HAS_CXXABI 1
+#endif
+#endif
 
 #include <android/log.h>
 
 #include "engine_shared.h"
+#include "crash_frames.h"
 
 namespace {
 
@@ -39,6 +50,9 @@ size_t g_log_path_length = 0;
 /** What the engine was doing, so a fault is tied to a step rather than to a process. */
 char g_phase[192] = "engine not started";
 char g_model[512] = "(none loaded)";
+
+/** Set on the way out by an exception, so the abort that follows names what it is the end of. */
+bool g_dying_by_exception = false;
 
 constexpr int kSignals[] = {SIGSEGV, SIGABRT, SIGBUS, SIGILL, SIGFPE};
 constexpr size_t kSignalCount = sizeof(kSignals) / sizeof(kSignals[0]);
@@ -67,6 +81,11 @@ class Sink {
  public:
   void text(const char *value) {
     for (; value != nullptr && *value != '\0' && length_ + 1 < capacity_; ++value) data_[length_++] = *value;
+  }
+
+  /** A piece that is not NUL-terminated, which is every name read out of `/proc/self/maps`. */
+  void text(const char *value, size_t length) {
+    for (size_t i = 0; i < length && length_ + 1 < capacity_; ++i) data_[length_++] = value[i];
   }
 
   void hex(std::uintptr_t value) {
@@ -112,6 +131,57 @@ struct Walk {
   std::uintptr_t frames[24];
   int depth = 0;
 };
+
+/**
+ * The files this process is mapped from, read once per record.
+ *
+ * `dladdr` is the obvious call and the one not allowed here: it takes the loader's lock, and a
+ * thread that faulted while resolving a symbol may be the thread holding it. `/proc/self/maps`
+ * answers the same question with open/read/close, all of which are async-signal-safe.
+ *
+ * The buffer is a global rather than a local because the walk can need it after the stack that
+ * faulted is already unreliable, and 256 KB of it would be the largest thing on that stack.
+ */
+constexpr size_t kMapsCapacity = 256 * 1024;
+char g_maps[kMapsCapacity];
+size_t g_maps_length = 0;
+
+void read_maps() {
+  g_maps_length = 0;
+  const int fd = open("/proc/self/maps", O_RDONLY);
+  if (fd < 0) return;
+  size_t filled = 0;
+  while (filled < sizeof(g_maps)) {
+    const ssize_t got = read(fd, g_maps + filled, sizeof(g_maps) - filled);
+    if (got <= 0) break;
+    filled += static_cast<size_t>(got);
+  }
+  close(fd);
+  // A list cut off in the middle of a line has a last line that cannot be trusted, so the record
+  // stops at the final whole line instead of resolving a frame against a name it never read.
+  while (filled > 0 && g_maps[filled - 1] != '\n') --filled;
+  g_maps_length = filled;
+}
+
+/**
+ * One address, named if it could be: `libawaki-llm.so+0x1f0a6c (0x77d1c2f0ac)`.
+ *
+ * The resolution rule lives in crash_frames.h so it can be exercised without dying first; this is
+ * the part that knows about the buffer the map was read into.
+ */
+void append_address(Sink &sink, std::uintptr_t pc) {
+  char frame[256];
+  const size_t written = crash_frames::render(g_maps, g_maps_length, pc, frame, sizeof(frame));
+  sink.text(frame, written);
+}
+
+void append_frame(Sink &sink, int index, std::uintptr_t pc) {
+  sink.text("  #");
+  sink.number(index);
+  sink.text(" ");
+  append_address(sink, pc);
+  sink.text("\n");
+}
 
 _Unwind_Reason_Code collect(struct _Unwind_Context *context, void *token) {
   auto *walk = static_cast<Walk *>(token);
@@ -178,8 +248,23 @@ void append_utc_time(Sink &sink) {
   sink.text(" UTC\n");
 }
 
+/** Puts the record at the end of the file the Crash Log screen reads. */
+void append_to_log(Sink &sink) {
+  if (g_log_path_length == 0) return;
+  const int fd = open(g_log_path, O_WRONLY | O_CREAT | O_APPEND, 0600);
+  if (fd < 0) return;
+  // A device crash-looping a bad model must not fill storage with records, and the newest one is
+  // the useful one: past this size the log starts over. `lseek` and `ftruncate` are both safe to
+  // call here, and O_APPEND puts the write at the new end either way.
+  if (lseek(fd, 0, SEEK_END) > 512 * 1024) ftruncate(fd, 0);
+  const ssize_t written = write(fd, sink.bytes(), sink.length());
+  (void) written;
+  close(fd);
+}
+
 void record_crash(int number, siginfo_t *info, void *context) {
   if (g_log_path_length == 0) return;
+  read_maps();
 
   Sink sink;
   sink.text("\n--- native crash ---\n");
@@ -189,7 +274,15 @@ void record_crash(int number, siginfo_t *info, void *context) {
   sink.number(number);
   sink.text(")\n");
   sink.text("Fault address: ");
-  sink.hex(reinterpret_cast<std::uintptr_t>(info != nullptr ? info->si_addr : nullptr));
+  if (number == SIGABRT) {
+    // `abort()` raises this signal at the thread, so the address it carries is a thread id, not a
+    // bad pointer — and a report that prints it as if it were one sends whoever reads it looking
+    // for a memory bug in a fault that has nothing to do with memory.
+    sink.text("none - SIGABRT is raised, not caused by an access");
+    if (g_dying_by_exception) sink.text(" (the end of the uncaught exception recorded just above)");
+  } else {
+    sink.hex(reinterpret_cast<std::uintptr_t>(info != nullptr ? info->si_addr : nullptr));
+  }
   sink.text("\nPhase: ");
   sink.text(g_phase);
   sink.text("\nModel: ");
@@ -199,9 +292,9 @@ void record_crash(int number, siginfo_t *info, void *context) {
 #if defined(__aarch64__)
   const mcontext_t &machine = static_cast<ucontext_t *>(context)->uc_mcontext;
   sink.text("pc=");
-  sink.hex(static_cast<std::uintptr_t>(machine.pc));
-  sink.text(" lr=");
-  sink.hex(static_cast<std::uintptr_t>(machine.regs[30]));
+  append_address(sink, static_cast<std::uintptr_t>(machine.pc));
+  sink.text("\nlr=");
+  append_address(sink, static_cast<std::uintptr_t>(machine.regs[30]));
   sink.text("\n");
 #endif
 
@@ -210,26 +303,71 @@ void record_crash(int number, siginfo_t *info, void *context) {
   Walk walk;
   _Unwind_Backtrace(collect, &walk);
   sink.text("Backtrace:\n");
-  for (int i = 0; i < walk.depth; ++i) {
-    sink.text("  #");
-    sink.number(i);
-    sink.text(" ");
-    sink.hex(walk.frames[i]);
-    sink.text("\n");
-  }
+  for (int i = 0; i < walk.depth; ++i) append_frame(sink, i, walk.frames[i]);
   sink.text("--- end of native crash ---\n");
 
-  const int fd = open(g_log_path, O_WRONLY | O_CREAT | O_APPEND, 0600);
-  if (fd >= 0) {
-    // A device crash-looping a bad model must not fill storage with records, and the newest one is
-    // the useful one: past this size the log starts over. `lseek` and `ftruncate` are both safe to
-    // call here, and O_APPEND puts the write at the new end either way.
-    if (lseek(fd, 0, SEEK_END) > 512 * 1024) ftruncate(fd, 0);
-    const ssize_t written = write(fd, sink.bytes(), sink.length());
-    (void) written;
-    close(fd);
-  }
+  append_to_log(sink);
   __android_log_print(ANDROID_LOG_ERROR, "AwakiLlm", "native crash (%s) while: %s", signal_name(number), g_phase);
+}
+
+/** What this handler replaced, kept for the terminations that are not about an exception. */
+std::terminate_handler g_previous_terminate = nullptr;
+
+/**
+ * The exception that ended the process, named.
+ *
+ * An exception that escapes a `noexcept` boundary reaches `std::terminate`, which reaches `abort`,
+ * which reaches the signal handler above — and the record it writes can only say SIGABRT. The type
+ * is free to read here because the ABI keeps it on the exception's header; the message lives in the
+ * object, and the only way the ABI hands the object over is by throwing it back, which is what the
+ * rethrow below does. This is the same shape as libc++'s own verbose terminate handler.
+ *
+ * It ends by aborting itself rather than by calling the handler it replaced, because the rethrow
+ * consumes the exception: the default handler would then print that it could not find one.
+ */
+[[noreturn]] void on_uncaught_terminate() {
+  Sink sink;
+  sink.text("\n--- uncaught C++ exception ---\n");
+  append_utc_time(sink);
+#ifdef AWAKI_HAS_CXXABI
+  // `abi` is the namespace alias <cxxabi.h> provides for the C++ runtime's own names. The type it
+  // reports is mangled, which is what a record meant for ndk-stack wants; demangling mallocs.
+  const std::type_info *thrown = abi::__cxa_current_exception_type();
+#else
+  const std::type_info *thrown = nullptr;
+#endif
+  sink.text("Type: ");
+  sink.text(thrown != nullptr && thrown->name() != nullptr ? thrown->name() : "unknown (mangled name unavailable)");
+  sink.text("\n");
+
+  const std::exception_ptr active = std::current_exception();
+  if (active) {
+    try {
+      std::rethrow_exception(active);
+    } catch (const std::exception &object) {
+      sink.text("Message: ");
+      sink.text(object.what() != nullptr ? object.what() : "(what() returned nothing)");
+      sink.text("\n");
+    } catch (...) {
+      sink.text("Message: thrown value is not a std::exception\n");
+    }
+  } else {
+    sink.text("Message: no exception in flight (terminate from a noexcept violation or a deleted object)\n");
+  }
+
+  sink.text("Phase: ");
+  sink.text(g_phase);
+  sink.text("\nModel: ");
+  sink.text(g_model);
+  sink.text("\n--- end of uncaught exception ---\n");
+  append_to_log(sink);
+  __android_log_print(ANDROID_LOG_ERROR, "AwakiLlm", "uncaught C++ exception while: %s", g_phase);
+  g_dying_by_exception = static_cast<bool>(active);
+  // The rethrow above consumed the exception, so the handler this one replaced would now report
+  // that it could not find one. With no exception ever in flight there is nothing consumed, and
+  // whatever the platform prints is worth keeping.
+  if (!active && g_previous_terminate != nullptr) g_previous_terminate();
+  abort();
 }
 
 }  // namespace
@@ -253,6 +391,11 @@ void install_crash_capture(const char *log_path) {
   for (; log_path[i] != '\0' && i + 1 < sizeof(g_log_path); ++i) g_log_path[i] = log_path[i];
   g_log_path[i] = '\0';
   g_log_path_length = i;
+
+  // An exception that escapes a `noexcept` boundary is the engine's most likely way of dying and
+  // the one the signal handler alone cannot describe: by the time SIGABRT lands, the C++ runtime
+  // has already decided nobody knows what was thrown. Catching it here is what puts a name on it.
+  g_previous_terminate = std::set_terminate(on_uncaught_terminate);
 
   for (size_t index = 0; index < kSignalCount; ++index) {
     struct sigaction action = {};
