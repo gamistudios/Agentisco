@@ -23,6 +23,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <exception>
 #include <ctime>
 #include <string>
 #include <thread>
@@ -741,13 +742,28 @@ Java_com_awaki_local_jni_NativeLlama_nativeComplete(JNIEnv *env,
     }
 
     const auto sample_started = std::chrono::steady_clock::now();
-    const llama_token tok = llama_sampler_sample(smpl, s->ctx, -1);
+    // llama_sampler_sample() already calls llama_sampler_accept() on the token it returns, so the
+    // chain's state (grammar stacks, penalty history) has advanced by exactly one token when it
+    // comes back. Accepting it again here fed the grammar the same token twice: the second pass
+    // found no stack that could take it and llama.cpp threw "Unexpected empty grammar stack after
+    // accepting piece", which - uncaught across the JNI boundary - aborted the process the first
+    // time a tool-call grammar opened (its `{"` token). Do not add a second accept.
+    //
+    // The sampler can still throw on its own (a grammar that dead-ends on a real token), and a C++
+    // exception must never unwind into ART, so it is turned into an ordinary failed turn.
+    llama_token tok = LLAMA_TOKEN_NULL;
+    try {
+      tok = llama_sampler_sample(smpl, s->ctx, -1);
+    } catch (const std::exception &e) {
+      finish = -9;
+      set_error(std::string("Sampling failed: ") + e.what());
+      break;
+    }
     sample_ms += elapsed_ms(sample_started);
     if (s->abort.load()) {
       finish = 3;
       break;
     }
-    llama_sampler_accept(smpl, tok);
     generated++;
     // Refreshed every so often rather than every token: the string costs an allocation, and a
     // crash record that names the last 32nd token is specific enough to point at a kernel.
