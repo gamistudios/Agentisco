@@ -122,14 +122,11 @@ class LocalInferenceEngineTest {
         override val unavailableReason: String = NO_ENVIRONMENT
     ) : LocalModelEngine {
         val sessions = mutableListOf<FakeSession>()
-        var threadCount = 8
         var loadFailure: Throwable? = null
         /** What this fake's build and silicon are, as the engine would report them. */
         var reportedDiagnostics: LocalEngineDiagnostics = LocalEngineDiagnostics.noEngine
 
         override val isAvailable: Boolean get() = available
-
-        override fun systemThreads(): Int = threadCount
 
         override fun diagnostics(): LocalEngineDiagnostics = reportedDiagnostics
 
@@ -349,8 +346,8 @@ class LocalInferenceEngineTest {
             listOf(LocalRuntimeSettings.DEFAULT_CONTEXT, 4096),
             fake.sessions.map { it.runtime.contextSize }
         )
-        // What the user saved is what the runtime is handed; turning "use every core" into a
-        // number of threads is the engine's decision, not this layer's.
+        // What the user saved is what the runtime is handed: 0 means "this device decides", and
+        // deciding the counts is the native engine's job, not this layer's.
         assertEquals(listOf(0, 2), fake.sessions.map { it.runtime.threadCount })
     }
 

@@ -905,18 +905,4 @@ Java_com_awaki_local_jni_NativeLlama_nativeEngineDiagnostics(JNIEnv *env, jobjec
   return to_bytes(env, json, "the engine's diagnostics");
 }
 
-/**
- * A thread count this device can actually keep fed.
- *
- * This is the plan's decode number, not the core count: every llama_decode ends in a barrier the
- * whole pool waits at, so one thread parked on a little core holds up the big ones and the pool pays
- * for it on every token. Measured on this engine with the same prompt, a pool sized to every core
- * was ten to fifteen times slower than one sized to the fast cluster. Settings shows this as the
- * number "use all" means, and a caller that names its own count overrides it.
- */
-JNIEXPORT jint JNICALL
-Java_com_awaki_local_jni_NativeLlama_nativeSystemThreads(JNIEnv *, jobject) {
-  return (jint) thread_plan().decode;
-}
-
 }  // extern "C"

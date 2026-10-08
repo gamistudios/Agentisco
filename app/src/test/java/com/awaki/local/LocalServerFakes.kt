@@ -41,7 +41,6 @@ private val CAPABLE = LocalTemplateCapabilities(
 
 internal class FakeEngine(var available: Boolean = true) : LocalModelEngine {
   val sessions = mutableListOf<FakeSession>()
-  var threadCount = 8
   var capabilities = CAPABLE
   var loadFailure: Throwable? = null
   var unavailableText = "The model runtime is not installed yet."
@@ -52,8 +51,6 @@ internal class FakeEngine(var available: Boolean = true) : LocalModelEngine {
   override val isAvailable: Boolean get() = available
 
   override val unavailableReason: String get() = unavailableText
-
-  override fun systemThreads(): Int = threadCount
 
   override fun load(path: String, runtime: LocalRuntimeSettings): LoadedLocalModel {
     loadFailure?.let { throw it }

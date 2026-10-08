@@ -25,9 +25,6 @@ interface LocalModelEngine {
   /** Why a model cannot run right now, phrased for the user rather than for the log. */
   val unavailableReason: String
 
-  /** CPU threads the machine has, so a "use all" setting can show a real number. */
-  fun systemThreads(): Int
-
   /**
    * What this device and this build of the engine are.
    *

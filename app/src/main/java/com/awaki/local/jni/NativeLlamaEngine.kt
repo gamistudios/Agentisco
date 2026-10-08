@@ -49,16 +49,6 @@ class NativeLlamaEngine(
   override val unavailableReason: String get() = if (isAvailable) "" else NO_ENGINE
 
   /**
-   * The performance cores, not every core.
-   *
-   * A decode step ends in a barrier all its workers wait at, so a thread parked on a little
-   * core makes the big ones wait for it on every token. The native side reads each core's
-   * maximum clock, which is the only portable description of big.LITTLE on a phone.
-   */
-  override fun systemThreads(): Int =
-    native?.nativeSystemThreads()?.takeIf { it > 0 } ?: Runtime.getRuntime().availableProcessors()
-
-  /**
    * The device and build facts, read with no model loaded.
    *
    * Handle 0 asks the engine what a model *would* run on, which is the honest answer here: the
@@ -105,12 +95,13 @@ class NativeLlamaEngine(
       backendReady = true
     }
 
-    // "use every core" is resolved here rather than left to the library, whose default is a
-    // small fixed number: on a phone the difference between four threads and eight is a turn
-    // that finishes before the user gives up on it.
-    val threads = runtime.threadCount.takeIf { it > 0 } ?: systemThreads()
+    // Zero is handed to the engine as zero rather than turned into a number here, because the
+    // device plans two different counts: the cores a token can be decoded on, and all of them for
+    // prefilling the prompt, which is where a phone spends most of a turn. Resolving "auto" to a
+    // single number in Kotlin would make prefill wait at the decode number's barrier.
+    // Engine status shows what the plan chose.
     val handle = try {
-      api.nativeLoadModel(path, runtime.contextSize, threads, runtime.batchSize.coerceAtLeast(1))
+      api.nativeLoadModel(path, runtime.contextSize, runtime.threadCount, runtime.batchSize.coerceAtLeast(1))
     } catch (e: OutOfMemoryError) {
       throw LocalEngineException(
         "Not enough memory to load this model. Close other apps, or lower the model's context size.",

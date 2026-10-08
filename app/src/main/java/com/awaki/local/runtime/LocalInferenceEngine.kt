@@ -70,9 +70,6 @@ class LocalInferenceEngine(
   /** Why no model can run right now, phrased for the user rather than the log. */
   val unavailableReason: String get() = engine.unavailableReason
 
-  /** CPU threads the device has, so "use all" can show the number it means. */
-  fun systemThreads(): Int = engine.systemThreads()
-
   /**
    * What this device and this build of the engine are, straight from the engine.
    *

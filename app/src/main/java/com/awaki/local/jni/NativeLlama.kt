@@ -43,7 +43,12 @@ class NativeLlama private constructor() {
 
   external fun nativeBackendFree()
 
-  /** Engine handle, or 0 when the model or its context could not be created. */
+  /**
+   * Engine handle, or 0 when the model or its context could not be created.
+   *
+   * [threads] of 0 leaves the counts to this device's plan, which sizes decoding and prefill
+   * separately; a named count is used for both kinds of work.
+   */
   external fun nativeLoadModel(path: String, contextSize: Int, threads: Int, batchSize: Int): Long
 
   /** The engine handle's own facts, as JSON. */
@@ -76,9 +81,6 @@ class NativeLlama private constructor() {
 
   /** Why the last step failed — or null when even *this* could not be handed over. */
   external fun nativeLastError(): ByteArray?
-
-  /** CPU threads this device's thread plan decodes with, which is not its core count. */
-  external fun nativeSystemThreads(): Int
 
   /**
    * What this device and this build are: optimisation state, kernel sets, core plan, free memory.
