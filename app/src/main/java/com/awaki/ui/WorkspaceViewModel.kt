@@ -1565,6 +1565,15 @@ class WorkspaceViewModel(
   }
 
   /**
+   * Changes only the tools a model is offered. The picker holds a model record it was
+   * composed with, which can be older than anything written since, so this goes to the
+   * store's current record rather than back through that snapshot.
+   */
+  fun updateLocalAllowedTools(modelId: String, names: Set<String>?) {
+    localStore?.updateAllowedTools(modelId, names)
+  }
+
+  /**
    * The tools an on-device model can be offered, each with the share of the prompt it
    * carries — the number a user has to trade against the model's context.
    */

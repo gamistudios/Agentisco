@@ -689,4 +689,30 @@ class LocalModelsUiTest {
     compose.onNodeWithTag("btn_local_tools_save").performClick()
     assertNull(viewModel.localModels.value.first { it.id == "lfm2" }.configuration.allowedTools)
   }
+
+  /**
+   * The picker and the settings dialog write the same record from two different moments. A save
+   * has to land on the record as the store holds it now, not on the snapshot the screen was
+   * composed with — otherwise retuning the context and then ticking a tool silently puts the
+   * older context back.
+   */
+  @Test
+  fun `saving a tool choice leaves a settings change made meanwhile in place`() = runTest {
+    val viewModel = viewModelWith("lfm2")
+    compose.setContent {
+      AwakiTheme { LocalModelsScreen(viewModel, onNavigate = {}) }
+    }
+    compose.onNodeWithText("Load").performClick()
+
+    compose.onNodeWithTag("chip_local_tool_read_file").performClick()
+    viewModel.updateLocalConfiguration(
+      "lfm2",
+      LocalModelConfiguration(runtime = LocalRuntimeSettings(contextSize = 1024))
+    )
+    compose.onNodeWithTag("btn_local_tools_save").performClick()
+
+    val saved = viewModel.localModels.value.first { it.id == "lfm2" }.configuration
+    assertEquals(OnDeviceTools.DEFAULT - "read_file", saved.allowedTools)
+    assertEquals(1024, saved.runtime.contextSize)
+  }
 }

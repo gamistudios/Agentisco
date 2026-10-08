@@ -661,6 +661,39 @@ class LocalModelRepositoryTest {
         assertEquals(LocalModelConfiguration.Defaults, LocalModelStore(context).model(model.id)!!.configuration)
     }
 
+    /**
+     * The tool picker owns one field of a record it was handed at composition, which can be older
+     * than anything written since. Saving the choice must not rewrite the rest from that snapshot.
+     */
+    @Test
+    fun `choosing tools keeps settings saved after the picker opened`() = runTest {
+        val payload = ggufBytes(4096)
+        val repo = repository(ServingSource(payload))
+        val model = record(remoteSize = payload.size.toLong(), digest = sha256(payload))
+        assertTrue(repo.install(model))
+
+        repo.updateConfiguration(
+            model.id,
+            LocalModelConfiguration(
+                runtime = LocalRuntimeSettings(contextSize = 1024, threadCount = 3),
+                generation = LocalGenerationSettings(maxOutputTokens = 320)
+            )
+        )
+
+        repo.updateAllowedTools(model.id, setOf("read_file"))
+
+        val saved = LocalModelStore(context).model(model.id)!!.configuration
+        assertEquals(setOf("read_file"), saved.allowedTools)
+        assertEquals(1024, saved.runtime.contextSize)
+        assertEquals(3, saved.runtime.threadCount)
+        assertEquals(320, saved.generation.maxOutputTokens)
+
+        // Clearing the choice stores no list at all, so the product's default set reaches the model.
+        repo.updateAllowedTools(model.id, null)
+        assertNull(LocalModelStore(context).model(model.id)!!.configuration.allowedTools)
+        assertEquals(1024, LocalModelStore(context).model(model.id)!!.configuration.runtime.contextSize)
+    }
+
     @Test
     fun `a settings change does not make an installed model look uninstalled`() = runTest {
         val payload = ggufBytes(4096)

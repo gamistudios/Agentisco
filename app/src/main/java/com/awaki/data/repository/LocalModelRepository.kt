@@ -189,6 +189,21 @@ class LocalModelRepository(
     updateConfiguration(modelId, LocalModelConfiguration.Defaults)
   }
 
+  /**
+   * Changes only the tools [modelId] is offered, over the record as it is now.
+   *
+   * The picker edits one field of a configuration it was handed at composition, and that record
+   * can be older than the write — the context retuned from the settings dialog, an install that
+   * finished meanwhile, a checksum from a verification. Writing the whole configuration back from
+   * such a snapshot would undo whatever happened in between, silently, so this reads the stored
+   * record and replaces the one field the picker owns.
+   */
+  fun updateAllowedTools(modelId: String, names: Set<String>?) {
+    val existing = store.model(modelId) ?: return
+    store.upsert(existing.copy(configuration = existing.configuration.copy(allowedTools = names)))
+    publish(recomputeRecords())
+  }
+
   // ---- Custom models ----
 
   /**

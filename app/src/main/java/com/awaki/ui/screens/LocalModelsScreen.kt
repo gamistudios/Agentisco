@@ -109,7 +109,7 @@ fun LocalModelsScreen(
             choices = viewModel.localToolChoices(),
             modifier = Modifier.padding(14.dp),
             onSave = { names ->
-              viewModel.updateLocalConfiguration(model.id, model.configuration.copy(allowedTools = names))
+              viewModel.updateLocalAllowedTools(model.id, names)
             }
           )
         }
@@ -153,7 +153,10 @@ internal fun LocalToolPicker(
   onSave: (Set<String>?) -> Unit,
   modifier: Modifier = Modifier
 ) {
-  var selected by remember(model.id) { mutableStateOf(model.configuration.toolsOrDefault()) }
+  // Keyed on what is saved, not on the model's id: a record for the same model can arrive with
+  // different tools (a reset, an install that re-published it), and chips that remembered the old
+  // set would show a choice the model no longer has while claiming it was the saved one.
+  var selected by remember(model.configuration.toolsOrDefault()) { mutableStateOf(model.configuration.toolsOrDefault()) }
   val cost = choices.filter { selected.contains(it.name) }.sumOf { it.estimatedTokens }
   val window = model.configuration.runtime.contextSize
 
