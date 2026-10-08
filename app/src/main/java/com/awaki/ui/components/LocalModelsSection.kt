@@ -865,7 +865,7 @@ private fun LocalModelSettingsDialog(
         ) { Text("Save", fontSize = 12.sp) }
         if (!model.configuration.isDefault) {
           TextButton(
-            onClick = { input = LocalSettingsInput.of(LocalModelConfiguration.Defaults) },
+            onClick = { input = LocalSettingsInput.defaultsFor(contextLimit, model.configuration.allowedTools) },
             modifier = Modifier.testTag("btn_reset_local_settings")
           ) { Text("Reset to defaults", color = AwakiTheme.extra.textMuted, fontSize = 11.sp) }
         }
@@ -949,14 +949,19 @@ internal data class LocalSettingsInput(
     val topP = decimal(topP) ?: return wrong("Top-P", topP)
     val penalty = decimal(repeatPenalty) ?: return wrong("Repeat penalty", repeatPenalty)
 
-    val ceiling = contextLimit?.coerceAtLeast(MIN_CONTEXT) ?: MAX_CONTEXT
+    val ceiling = contextLimit?.coerceAtLeast(MIN_CONTEXT) ?: LocalRuntimeSettings.DEFAULT_CONTEXT
     if (context < MIN_CONTEXT) return Result.failure(IllegalArgumentException("Context must be at least $MIN_CONTEXT"))
     if (context > ceiling) {
       return Result.failure(
         if (contextLimit != null) {
           IllegalArgumentException("Context cannot exceed the $ceiling tokens this model was trained for")
         } else {
-          IllegalArgumentException("Context cannot exceed $MAX_CONTEXT")
+          // The default the app ships and measures, not the largest number the form will type:
+          // past what the weights hold a model gives confident nonsense rather than an error, and
+          // a file that declares no trained length has not been checked against anything.
+          IllegalArgumentException(
+            "Context cannot exceed ${LocalRuntimeSettings.DEFAULT_CONTEXT} — this file does not say what it was trained for"
+          )
         }
       )
     }
@@ -993,7 +998,21 @@ internal data class LocalSettingsInput(
 
   companion object {
     const val MIN_CONTEXT = 128
-    const val MAX_CONTEXT = 8192
+
+    /**
+     * The form as this model's defaults, with the context sized to its file.
+     *
+     * The shipped window is capped by what the weights say they were trained for, because a reset
+     * that filled the form with a context this model refuses would leave Save disabled — the
+     * button would do nothing at all. [allowedTools] is carried over from the model rather than
+     * reset: this form has no widget for it, and a button that quietly changes a choice made on
+     * another page is an edit the user cannot see, let alone undo.
+     */
+    fun defaultsFor(contextLimit: Int?, allowedTools: Set<String>?): LocalSettingsInput =
+      of(LocalModelConfiguration.Defaults).copy(
+        context = LocalRuntimeSettings.contextSizeFor(contextLimit?.toLong()).toString(),
+        allowedTools = allowedTools
+      )
 
     fun of(configuration: LocalModelConfiguration) = LocalSettingsInput(
       context = configuration.runtime.contextSize.toString(),

@@ -151,8 +151,29 @@ class LocalModelsUiTest {
       configuration,
       LocalSettingsInput.of(configuration).parse(null).getOrThrow()
     )
-    // Resetting the form to defaults is the one case where the choice goes back too.
-    assertNull(LocalSettingsInput.of(LocalModelConfiguration.Defaults).parse(null).getOrThrow().allowedTools)
+    // The one thing reset does not touch: this form has no widget for the tools, so a reset that
+    // cleared them would change a choice made on another page without saying so.
+    assertEquals(
+      setOf("read_file", "web_search"),
+      LocalSettingsInput.defaultsFor(null, configuration.allowedTools).parse(null).getOrThrow().allowedTools
+    )
+    assertNull(LocalSettingsInput.defaultsFor(null, null).parse(null).getOrThrow().allowedTools)
+  }
+
+  /** A reset has to leave a form that can be saved, not one its own ceiling refuses. */
+  @Test
+  fun `reset fills the context this model's file can hold`() {
+    // Trained for less than the shipped default: the smaller number is what the engine may be told.
+    val shrunk = LocalSettingsInput.defaultsFor(2048, null)
+    assertEquals("2048", shrunk.context)
+    assertNull(shrunk.parse(2048).exceptionOrNull())
+    // Declares nothing, or holds more than the default: the shipped window either way.
+    assertEquals("4096", LocalSettingsInput.defaultsFor(null, null).context)
+    assertEquals("4096", LocalSettingsInput.defaultsFor(8192, null).context)
+    // Everything else the defaults say, including the instruction the form does show.
+    val reset = LocalSettingsInput.defaultsFor(2048, null)
+    assertEquals("0", reset.threads)
+    assertEquals(null, reset.systemInstruction)
   }
 
   @Test
@@ -166,8 +187,12 @@ class LocalModelsUiTest {
 
   @Test
   fun `with nothing to read the limit from, the form still caps the window it offers`() {
-    assertEquals("Context cannot exceed 8192", input(context = "16384").parse(null).exceptionOrNull()?.message)
-    assertNull(input(context = "8192").parse(null).exceptionOrNull())
+    assertEquals(
+      "Context cannot exceed 4096 — this file does not say what it was trained for",
+      input(context = "16384").parse(null).exceptionOrNull()?.message
+    )
+    assertNull(input(context = "4096").parse(null).exceptionOrNull())
+    assertTrue(input(context = "4097").parse(null).isFailure)
   }
 
   @Test
