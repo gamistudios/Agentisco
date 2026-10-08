@@ -83,19 +83,28 @@ class LocalAiApi(
   private fun models(): Reply {
     val data = JSONArray()
     for (model in repository.installedModels()) {
-      val capabilities = engine.loadedCapabilities().takeIf { engine.loadedModelId == model.id }
+      val resident = engine.loadedModelId == model.id
+      val capabilities = engine.loadedCapabilities().takeIf { resident }
+      // While the engine holds the model, the window it allocated is the fact a client is
+      // planning against; the configured number is only what the next Load will ask for.
+      val window = engine.loadedInfo()?.contextSize
+        ?.takeIf { resident && it > 0 }
+        ?: model.configuration.runtime.contextSize
       data.put(
         JSONObject()
           .put("id", model.id)
           .put("object", "model")
           .put("created", model.createdAtEpochSeconds())
           .put("owned_by", OWNERSHIP)
-          .put("context_length", model.configuration.runtime.contextSize)
+          .put("context_length", window)
           .put("max_tokens", model.configuration.generation.maxOutputTokens)
           .put(
             "supported_parameters",
             JSONArray().apply {
-              put("temperature"); put("top_p"); put("max_tokens"); put("seed"); put("stop"); put("streaming")
+              // Every name here is one this server reads off the request body — including the two
+              // llama accepts and this listing used to keep silent about.
+              put("temperature"); put("top_k"); put("top_p"); put("repeat_penalty")
+              put("max_tokens"); put("seed"); put("stop"); put("streaming")
               if (capabilities == null || capabilities.supportsTools) put("tools")
             }
           )

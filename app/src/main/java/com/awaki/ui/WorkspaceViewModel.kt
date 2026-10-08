@@ -1455,6 +1455,12 @@ class WorkspaceViewModel(
   val localEngineDiagnostics: StateFlow<LocalEngineDiagnostics?> = _localEngineDiagnostics.asStateFlow()
 
   /**
+   * The context the engine holds for [modelId], or null while it is not in memory. Asked of the
+   * engine rather than read off the model's settings, so a resident row states an allocation.
+   */
+  fun localAllocatedContext(modelId: String): Int? = repository.localAllocatedContext(modelId)
+
+  /**
    * Reads the engine's own numbers, and only the first time anybody asks.
    *
    * Off the main thread because the first call into the native library maps it, and a settings row
@@ -1480,6 +1486,8 @@ class WorkspaceViewModel(
     _localModelLoadErrors.value = _localModelLoadErrors.value - modelId
     viewModelScope.launch {
       try {
+        // The loaded model's own numbers are not kept here: a row that asked the engine what it
+        // holds reports a model a turn loaded as well as one this button did.
         repository.loadLocalModel(modelId)
       } catch (e: Exception) {
         _localModelLoadErrors.value = _localModelLoadErrors.value +

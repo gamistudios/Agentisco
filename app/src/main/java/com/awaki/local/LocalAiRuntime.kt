@@ -167,6 +167,18 @@ class LocalAiRuntime(
   fun stopGeneration() = engine.stop()
 
   /**
+   * The context the engine actually holds for [modelId], or null while that model is not resident.
+   *
+   * Asked of the engine rather than read from the model's settings: the number a turn is bounded by
+   * is the one that was allocated, and while nothing is in memory there is no allocation to report,
+   * only the window the next Load will ask for.
+   */
+  fun allocatedContext(modelId: String): Int? {
+    val info = engine.loadedInfo() ?: return null
+    return info.contextSize.takeIf { it > 0 && engine.loadedModelId == modelId }
+  }
+
+  /**
    * The provider and key for [model] when it names an on-device model, and null for
    * anything else — including a local model whose server is not live, so the caller treats
    * it as an unusable selection instead of sending a request to a closed port.
@@ -210,7 +222,9 @@ class LocalAiRuntime(
 
   /**
    * A local model as the provider layer sees it. Its limits are the numbers the user
-   * configured, because those are what the engine will actually allocate.
+   * configured, because those are what the engine will actually allocate — except the context
+   * window, which is the engine's own number for as long as the model is resident, since that
+   * is what a turn in progress is really bounded by.
    *
    * What a template can do is only known once the model is resident, and loading one just
    * to fill in a capability flag costs seconds and memory. So an unloaded model is listed
@@ -224,7 +238,7 @@ class LocalAiRuntime(
       providerId = PROVIDER_ID,
       modelId = model.id,
       displayName = model.name + if (model.quantization.isBlank()) "" else " (${model.quantization})",
-      contextWindow = model.configuration.runtime.contextSize,
+      contextWindow = allocatedContext(model.id) ?: model.configuration.runtime.contextSize,
       maxOutputTokens = model.configuration.generation.maxOutputTokens,
       allowedToolNames = model.configuration.toolsOrDefault(),
       systemInstruction = model.configuration.systemInstruction?.takeIf { it.isNotBlank() },

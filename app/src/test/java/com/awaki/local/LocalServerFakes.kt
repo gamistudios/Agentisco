@@ -88,8 +88,13 @@ internal class FakeSession(
   /** How a newly-arrived piece of text is split: prose, reasoning, or a call fragment. */
   var deltas: (String) -> List<LocalAnswerDelta> = { piece -> listOf(LocalAnswerDelta(content = piece)) }
 
-  override val info: LoadedModelInfo =
-    LoadedModelInfo("fake", "lfm2", 65536, runtime.contextSize)
+  /** The context to report as allocated, when the engine's number differs from the setting. */
+  var allocatedContext: Int? = null
+
+  override val info: LoadedModelInfo
+    // A real engine reports what it allocated, which is not always what was asked for; a test
+    // that means to prove the difference says so here.
+    get() = LoadedModelInfo("fake", "lfm2", 65536, allocatedContext ?: runtime.contextSize)
 
   override fun capabilities(): LocalTemplateCapabilities = capabilities.also {
     // A file whose template will not render chat is known at load, before any turn is asked for.

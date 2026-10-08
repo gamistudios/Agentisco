@@ -257,6 +257,26 @@ class LocalAiRuntimeTest {
     assertTrue(local.models.value.single().capabilities.tools)
   }
 
+  /**
+   * The window the agent budgets a transcript against has to be the window that exists. While a
+   * model is resident the record carries the engine's own number; while it is not, the setting is
+   * the honest answer, because there is no allocation to state yet.
+   */
+  @Test
+  fun `a resident model's record carries the context the engine allocated`() = runTest {
+    val local = serving("lfm2", engine = FakeEngine().apply {
+      sessionScript = { it.allocatedContext = 2048 }
+    })
+
+    assertEquals(LocalRuntimeSettings.DEFAULT_CONTEXT, local.models.value.single().contextWindow)
+
+    local.loadModel("lfm2")
+    assertEquals(2048, local.models.value.single().contextWindow)
+
+    local.releaseModel()
+    assertEquals(LocalRuntimeSettings.DEFAULT_CONTEXT, local.models.value.single().contextWindow)
+  }
+
   // A client that hangs up is not tested over a real socket: the write that notices is
   // timing-dependent, and LocalAiApiTest and LocalAiServerTest already pin that behaviour
   // down where it can be driven deterministically.

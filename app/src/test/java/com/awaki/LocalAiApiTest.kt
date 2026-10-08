@@ -104,6 +104,25 @@ class LocalAiApiTest {
         assertTrue(entry.getJSONArray("supported_parameters").toString().contains("tools"))
     }
 
+    /**
+     * A listing is what a client sizes its request against, so while a model is resident the
+     * number it states is the one the engine holds — not the setting the next load will ask for.
+     */
+    @Test
+    fun `a resident model is listed with the context the engine allocated`() = runTest {
+        val (api, fake) = apiFor("alpha")
+        fake.sessionScript = { it.allocatedContext = 2048 }
+
+        assertEquals(200, complete(api, oneTurn).status)
+
+        val entry = bodyOf(call(api, "GET", "/v1/models")).getJSONArray("data").getJSONObject(0)
+        assertEquals(2048, entry.getInt("context_length"))
+        // Every parameter this server reads off the body is one the listing admits to.
+        val parameters = entry.getJSONArray("supported_parameters").toString()
+        assertTrue(parameters.contains("top_k"))
+        assertTrue(parameters.contains("repeat_penalty"))
+    }
+
     @Test
     fun `a model that is not installed is not listed and not runnable`() = runTest {
         val (api, _) = apiFor("alpha")

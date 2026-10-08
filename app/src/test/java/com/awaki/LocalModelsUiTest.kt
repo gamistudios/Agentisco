@@ -245,6 +245,7 @@ class LocalModelsUiTest {
     configuration: LocalModelConfiguration = LocalModelConfiguration.Defaults,
     selected: Boolean = false,
     resident: Boolean = false,
+    residentContext: Int? = null,
     loading: Boolean = false,
     unloading: Boolean = false,
     loadError: String? = null
@@ -257,6 +258,7 @@ class LocalModelsUiTest {
           state = state,
           selected = selected,
           resident = resident,
+          allocatedContext = residentContext,
           loading = loading,
           unloading = unloading,
           loadError = loadError,
@@ -328,6 +330,30 @@ class LocalModelsUiTest {
     compose.onNodeWithText("Settings").assertExists()
     compose.onNodeWithText("Info").assertExists()
     compose.onNodeWithText("Delete").assertExists()
+    compose.onNodeWithText("142 MB · ctx ${LocalRuntimeSettings.DEFAULT_CONTEXT} · max 200 · built in").assertExists()
+  }
+
+  /**
+   * A model in memory has an allocated window, which is a fact about the engine rather than about
+   * the settings form. The row states the allocation, and names the ask only where the two differ.
+   */
+  @Test
+  fun `a model in memory says so when the engine gave it a smaller window than the one asked for`() {
+    renderCard(null, installed = true, resident = true, residentContext = 2048)
+    compose.onNodeWithText("142 MB · ctx 2048 (asked ${LocalRuntimeSettings.DEFAULT_CONTEXT}) · max 200 · built in")
+      .assertExists()
+  }
+
+  /**
+   * The row quotes the engine's allocation, not the setting, and only names the ask where the two
+   * differ — a model that got what it asked for has nothing to explain. Not resident is the same
+   * quiet number, which is right: there is no allocation to report, so the setting is all the row
+   * can honestly claim (and an unloaded row is asserted by `an installed model offers its settings,
+   * its facts and a load`).
+   */
+  @Test
+  fun `a model in memory with the window it asked for has nothing to qualify`() {
+    renderCard(null, installed = true, resident = true, residentContext = LocalRuntimeSettings.DEFAULT_CONTEXT)
     compose.onNodeWithText("142 MB · ctx ${LocalRuntimeSettings.DEFAULT_CONTEXT} · max 200 · built in").assertExists()
   }
 

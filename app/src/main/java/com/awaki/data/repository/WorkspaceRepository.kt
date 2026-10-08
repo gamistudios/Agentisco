@@ -136,6 +136,14 @@ class WorkspaceRepository(
     localAi?.engineDiagnostics() ?: com.awaki.local.runtime.LocalEngineDiagnostics.noEngine
 
   /**
+   * The context the engine holds for [modelId], or null while that model is not in memory.
+   *
+   * A row that prints the model's configured window is printing a request; this is the allocation,
+   * which is the number the user is actually working within while the model sits resident.
+   */
+  fun localAllocatedContext(modelId: String): Int? = localAi?.allocatedContext(modelId)
+
+  /**
    * Puts [modelId] into memory now, so its first turn does not begin with a load. The failure
    * arrives as the sentence the user should read, which is why this reaches through the runtime
    * rather than asking the screen to guess what went wrong.

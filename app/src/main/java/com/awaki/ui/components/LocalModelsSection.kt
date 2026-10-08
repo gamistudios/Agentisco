@@ -185,6 +185,7 @@ fun LocalModelsSection(
         state = states[model.id],
         selected = selectedId?.id == LocalAiRuntime.recordId(model.id),
         resident = residentId == model.id,
+        allocatedContext = viewModel.localAllocatedContext(model.id),
         loading = model.id in loading,
         unloading = model.id in unloading,
         loadError = loadErrors[model.id],
@@ -287,6 +288,7 @@ fun LocalModelsSection(
       metadata = viewModel.localModelMetadata(model.id),
       state = states[model.id],
       resident = residentId == model.id,
+      allocatedContext = viewModel.localAllocatedContext(model.id),
       onDismiss = { infoFor = null }
     )
   }
@@ -331,6 +333,8 @@ internal fun LocalModelCard(
   state: LocalModelInstallState?,
   selected: Boolean,
   resident: Boolean = false,
+  /** What the engine holds for this model while it is resident; null while nothing is loaded. */
+  allocatedContext: Int? = null,
   loading: Boolean = false,
   unloading: Boolean = false,
   loadError: String? = null,
@@ -403,7 +407,7 @@ internal fun LocalModelCard(
 
     Spacer(modifier = Modifier.height(4.dp))
     Text(
-      localModelSummary(model, resumable),
+      localModelSummary(model, resumable, allocatedContext),
       color = AwakiTheme.extra.textMuted,
       fontSize = 10.sp,
       fontFamily = FontFamily.Monospace
@@ -590,13 +594,21 @@ private fun statusLabel(
 }
 
 /** One line of facts: what the file is, where it came from and how it will be loaded. */
-private fun localModelSummary(model: LocalModel, resumable: Boolean): String {
+private fun localModelSummary(model: LocalModel, resumable: Boolean, allocatedContext: Int? = null): String {
   val parts = mutableListOf<String>()
   if (model.sizeBytes > 0L) parts.add(formatModelBytes(model.sizeBytes))
   model.version.takeIf { it.isNotBlank() }?.let { parts.add(it) }
   if (resumable) parts.add("part downloaded")
   if (model.installed) {
-    parts.add("ctx ${model.configuration.runtime.contextSize}")
+    val asked = model.configuration.runtime.contextSize
+    // While the model is in memory the row states the allocation, and names the setting only when
+    // the two disagree — the requested window is a wish until the engine says otherwise.
+    parts.add(
+      when {
+        allocatedContext == null || allocatedContext == asked -> "ctx $asked"
+        else -> "ctx $allocatedContext (asked $asked)"
+      }
+    )
     parts.add("max ${model.configuration.generation.maxOutputTokens}")
   }
   parts.add(when {
@@ -719,6 +731,7 @@ private fun LocalModelInfoDialog(
   metadata: GgufMetadata?,
   state: LocalModelInstallState?,
   resident: Boolean,
+  allocatedContext: Int?,
   onDismiss: () -> Unit
 ) {
   AlertDialog(
@@ -757,6 +770,11 @@ private fun LocalModelInfoDialog(
             resident = resident
           )
         )
+        // The engine's own number, next to the file's: what was allocated, as opposed to what the
+        // weights were trained for and what the settings form asked for.
+        allocatedContext?.let {
+          InfoRow("Context in memory", "$it tokens (asked ${model.configuration.runtime.contextSize})")
+        }
       }
     },
     confirmButton = {
