@@ -100,6 +100,11 @@ class LocalAiRuntime(
         if (models.any { it.installed }) ensureServing() else stopServing()
       }
     }
+    // What a model's template can do is only read once it is in memory, and that reading is what
+    // the derived record carries. Residency changes without the install list changing — a turn
+    // loads a model, an Unload puts it back — so it gets its own republish, or a record goes on
+    // claiming a tool-capable template for a model that has since been swapped out.
+    scope.launch { engine.residentModelId.collect { publishRecords() } }
   }
 
   /**
@@ -131,7 +136,10 @@ class LocalAiRuntime(
   }
 
   /** Gives the resident model's memory back; the next request loads it again. */
-  suspend fun releaseModel() = engine.release()
+  suspend fun releaseModel() {
+    engine.release()
+    publishRecords()
+  }
 
   /**
    * What this device and this build of the engine are, for a screen that has to explain a model
@@ -144,12 +152,15 @@ class LocalAiRuntime(
    * Brings [modelId] into memory on purpose, rather than as the first thing a turn has to
    * wait for. Says what the file turned out to be so the caller can show a real number —
    * the context the engine allocated, not the one the catalog promised.
+   *
+   * The records are republished before this returns: what the template can do is now known,
+   * and a Load whose own screen still says the opposite is a call that did not happen.
    */
   suspend fun loadModel(modelId: String): LoadedModelInfo {
     val model = repository.model(modelId)
       ?: throw LocalEngineException("No model called $modelId is known to this device")
     if (!model.installed) throw LocalEngineException("${model.name} is not installed")
-    return engine.preload(model)
+    return engine.preload(model).also { publishRecords() }
   }
 
   /** Ends the decode in flight, which is what Stop has to reach on a local model. */

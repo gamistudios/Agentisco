@@ -20,6 +20,7 @@ import com.awaki.local.repositoryWithInstalled
 import com.awaki.local.sha256Hex
 import com.awaki.local.model.LocalRuntimeSettings
 import com.awaki.local.runtime.LocalInferenceEngine
+import com.awaki.local.runtime.LocalTemplateCapabilities
 import com.awaki.settings.model.AIModel
 import com.awaki.settings.model.LLMProtocol
 import kotlinx.coroutines.Dispatchers
@@ -223,6 +224,37 @@ class LocalAiRuntimeTest {
     // The name the record carries is the installed file's own: its quantization was read
     // off the bytes, not typed by anyone.
     assertEquals("Connected · Lfm2 (Q4_0)", message)
+  }
+
+  /**
+   * Whether a model's template can carry tools is only read from the file once it is in memory,
+   * and an unloaded model is listed as tool-capable rather than costing a load to find out. So
+   * the record has to change when residency does: a run decides whether to offer tools from
+   * [AIModel.capabilities], and a flag frozen at install time is a run that offers tools to a
+   * template that cannot render them.
+   */
+  @Test
+  fun `a loaded model tells the record what its template can really do`() = runTest {
+    val local = serving("lfm2", engine = FakeEngine().apply {
+      capabilities = LocalTemplateCapabilities(
+        available = true,
+        usesOwnTemplate = true,
+        supportsTools = false,
+        supportsParallelToolCalls = false,
+        supportsThinking = false,
+        supportsSystemMessage = true
+      )
+    })
+
+    assertTrue(local.models.value.single().capabilities.tools)
+
+    local.loadModel("lfm2")
+    assertFalse(local.models.value.single().capabilities.tools)
+
+    // Unloaded, the file is unknown again — and an unknown template is listed as capable, which
+    // is the honest answer until a turn or a Load reads it.
+    local.releaseModel()
+    assertTrue(local.models.value.single().capabilities.tools)
   }
 
   // A client that hangs up is not tested over a real socket: the write that notices is

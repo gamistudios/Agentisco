@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.awaki.agent.llm.LlmService
 import com.awaki.agent.llm.ModelListing
+import com.awaki.agent.tool.OnDeviceTools
 import com.awaki.data.local.ProviderConfigStore
 import com.awaki.data.repository.WorkspaceRepository
 import com.awaki.local.FakeEngine
@@ -201,6 +202,61 @@ class LocalProviderIntegrationTest {
 
     assertEquals("cloud-model", repo.selectedModel.value?.id)
     assertEquals("local:lfm2", store.getSelectedModelId())
+  }
+
+  /**
+   * The tools a model is offered are chosen on its own screen and read back per run, so the
+   * record the agent runs on has to be the record the screen just saved. A selected model used
+   * to be a snapshot: an edit kept the same id, the reconciliation saw that id still in the
+   * list and left the old object selected — so a run carried on being handed the set chosen
+   * before the edit, and said so.
+   */
+  @Test
+  fun `an edit to the selected model's tools reaches the model record the agent runs`() = runTest {
+    val local = localRuntime("lfm2")
+    val repo = held.hold(WorkspaceRepository(
+      context = null,
+      providerStore = storedStore(),
+      llmService = RecordingLlm(),
+      localAi = local
+    ))
+    repo.selectModel("local:lfm2")
+    assertEquals(OnDeviceTools.DEFAULT, repo.selectedModel.value?.allowedToolNames)
+
+    local.repository.updateConfiguration(
+      "lfm2",
+      local.repository.configuration("lfm2").copy(allowedTools = setOf("read_file", "git_status"))
+    )
+
+    assertEquals(setOf("read_file", "git_status"), repo.selectedModel.value?.allowedToolNames)
+    // Still the same selection — an edit to a model's tools is not a reason to change model.
+    assertEquals("local:lfm2", repo.selectedModel.value?.id)
+  }
+
+  /** The same rule for a record the user edits in the cloud forms: an id survives, a limit does not. */
+  @Test
+  fun `a stored model edited in place replaces the record the agent runs`() = runTest {
+    val repo = held.hold(WorkspaceRepository(
+      context = null,
+      providerStore = storedStore(),
+      llmService = RecordingLlm(),
+      localAi = localRuntime()
+    ))
+    assertEquals(128_000, repo.selectedModel.value?.contextWindow)
+
+    repo.saveModel(
+      providerId = "cloud",
+      modelId = "big-model",
+      displayName = "Big Model",
+      contextWindow = 64_000,
+      maxOutputTokens = 4096,
+      capabilities = ModelCapabilities(tools = true),
+      reasoning = null,
+      recordId = "cloud-model"
+    )
+
+    assertEquals(64_000, repo.selectedModel.value?.contextWindow)
+    assertEquals("cloud-model", repo.selectedModel.value?.id)
   }
 
   @Test

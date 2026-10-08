@@ -1295,7 +1295,18 @@ class WorkspaceRepository(
   private fun reconcileSelectedModel() {
     val current = _selectedModel.value
     val remembered = providerStore?.getSelectedModelId()
-    if (current != null && current.id == remembered && _aiModels.value.any { it.id == current.id }) return
+    if (current != null && current.id == remembered) {
+      val kept = _aiModels.value.firstOrNull { it.id == current.id }
+      if (kept != null) {
+        // What is selected is a record, not an id: a run reads its tools, its limits and its
+        // capabilities off this object. A model edited in place keeps its id, so keeping the
+        // old object was what made an update to a model's available tools never reach the
+        // agent — it carried on being handed the set chosen before the edit. Adopting the
+        // fresh record is what makes the next turn answer to what is listed now.
+        if (kept != current) _selectedModel.value = kept
+        return
+      }
+    }
     // The store holds what the user last chose — [selectModel] writes every choice
     // through — so it outranks whatever an earlier publish had to settle for. An
     // on-device model's record exists only while the local server is up, which is
