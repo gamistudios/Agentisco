@@ -245,8 +245,9 @@ class WorkspaceRepository(
 
   // ---- Web access (Settings → Web access) ----
   /**
-   * The agent's front door to the web: Jina.ai first, with whatever keys this device
-   * can spend, and the URL itself after. One instance for the whole repository, so the
+   * The agent's front door to the web: the providers chosen in Settings (DuckDuckGo to
+   * search and Jina.ai to read by default), with whatever Jina keys this device can
+   * spend, and the URL itself after. One instance for the whole repository, so the
    * request budget the tools are spending is the same one the settings screen reports.
    */
   val webAccessStore = com.awaki.data.local.WebAccessStore(context)
@@ -265,8 +266,16 @@ class WorkspaceRepository(
     userKeys = { webAccessStore.keys() }
   )
 
-  fun setPreferJina(enabled: Boolean) {
-    _webAccess.value = webAccessStore.update { it.copy(preferJina = enabled) }
+  fun setSearchProvider(provider: com.awaki.data.local.SearchProvider) {
+    _webAccess.value = webAccessStore.update { it.copy(searchProvider = provider) }
+  }
+
+  fun setFetchProvider(provider: com.awaki.data.local.FetchProvider) {
+    _webAccess.value = webAccessStore.update { it.copy(fetchProvider = provider) }
+  }
+
+  fun setWebFallback(enabled: Boolean) {
+    _webAccess.value = webAccessStore.update { it.copy(fallback = enabled) }
   }
 
   /**
@@ -296,7 +305,7 @@ class WorkspaceRepository(
   private val _webAccessChecking = MutableStateFlow(false)
   val webAccessChecking: StateFlow<Boolean> = _webAccessChecking.asStateFlow()
 
-  /** Costs one reader call, and one search call where a key exists. */
+  /** Costs one real call for each tool's chosen provider. */
   fun checkWebAccess() {
     if (_webAccessChecking.value) return
     _webAccessChecking.value = true

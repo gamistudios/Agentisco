@@ -1,10 +1,19 @@
 package com.awaki.agent.web
 
+import com.awaki.agent.tool.parseSearchResults
+import com.awaki.data.local.FetchProvider
+import com.awaki.data.local.SearchProvider
 import com.awaki.data.local.WebAccessSettings
 import com.awaki.data.local.WebAccessStore
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import java.util.UUID
 import java.util.concurrent.atomic.AtomicInteger
 
 /** The two Jina.ai endpoints the agent spends request budget against. */
@@ -51,6 +60,24 @@ sealed class JinaSearch {
   data class Unavailable(val message: String) : JinaSearch()
 }
 
+/** What one Parallel page read produced. */
+sealed class ParallelRead {
+  data class Served(val markdown: String, val title: String?, val finalUrl: String?) : ParallelRead()
+  data class Unavailable(val message: String) : ParallelRead()
+}
+
+/** What one Parallel search produced. */
+sealed class ParallelSearch {
+  data class Served(val hits: List<WebHit>) : ParallelSearch()
+  data class Unavailable(val message: String) : ParallelSearch()
+}
+
+/** What one DuckDuckGo search produced. */
+sealed class DuckSearch {
+  data class Served(val hits: List<WebHit>) : DuckSearch()
+  data class Unavailable(val message: String) : DuckSearch()
+}
+
 /** One search hit, reduced to what a model needs in order to pick a link. */
 data class WebHit(val title: String, val url: String, val snippet: String)
 
@@ -58,9 +85,14 @@ data class WebHit(val title: String, val url: String, val snippet: String)
 fun bundledAppKeyCount(): Int = bundledAppKeys().size
 
 /**
- * Jina.ai is the agent's front door to the web.
+ * The agent's front door to the web: three providers behind two tools.
  *
- * The policy is spend-nothing-first: an anonymous reader call costs the app nothing and
+ * `web_search` asks DuckDuckGo by default and `web_fetch` asks Jina.ai's reader by
+ * default; Settings can change either, and [searchChain] / [fetchChain] say in what
+ * order the providers are tried when the first one cannot answer. Parallel's free MCP is
+ * the keyless third option for both. The direct request is always the end of a fetch.
+ *
+ * Within Jina.ai the policy is spend-nothing-first: an anonymous reader call costs the app nothing and
  * answers 20 times a minute, so it is tried before any key. A key — the user's own, or
  * one bundled with the build — is what a refused call rotates to, and every identity
  * keeps its own minute window so an exhausted one is skipped instead of knocked on
@@ -81,14 +113,55 @@ class WebGateway(
   /** Rotates the key list so one key's minute is not the whole app's minute. */
   private val cursor = AtomicInteger()
 
-  /** Whether a reader call is worth making; false means the tools never leave the device. */
-  val readerPreferred: Boolean get() = settings().preferJina
+  /** Whether Jina's reader is somewhere in this fetch's chain. */
+  val readerPreferred: Boolean get() = FetchProvider.Jina in fetchChain()
 
   /**
    * Search has no anonymous tier — `s.jina.ai` refuses an unauthenticated call — so it
-   * is only worth offering when a key is in hand.
+   * is only in the chain when a key is in hand.
    */
-  val searchPreferred: Boolean get() = settings().preferJina && keys().isNotEmpty()
+  val searchPreferred: Boolean get() = SearchProvider.Jina in searchChain()
+
+  /**
+   * The providers a page read goes to, in order: the one chosen in Settings, then — when
+   * fallback is on — the others. Direct ends every chain, because it is the only route that
+   * reports the server's own status line and the only one that needs no third party; it
+   * leads the chain only when the user chose it.
+   */
+  fun fetchChain(): List<FetchProvider> {
+    val s = settings()
+    return buildList {
+      add(s.fetchProvider)
+      if (s.fallback) {
+        add(FetchProvider.Jina)
+        add(FetchProvider.Parallel)
+      }
+      add(FetchProvider.Direct)
+    }.distinct()
+  }
+
+  /**
+   * The providers a search goes to, in order. Jina is left out while no key exists,
+   * because its endpoint would only refuse. May be empty when Jina was chosen with no key
+   * and fallback is off; the tool says so rather than guessing a provider.
+   */
+  fun searchChain(): List<SearchProvider> {
+    val s = settings()
+    return buildList {
+      add(s.searchProvider)
+      if (s.fallback) {
+        add(SearchProvider.DuckDuckGo)
+        add(SearchProvider.Parallel)
+        add(SearchProvider.Jina)
+      }
+    }.distinct().filter { it != SearchProvider.Jina || keys().isNotEmpty() }
+  }
+
+  private fun jinaReaderAllowed(): Boolean =
+    settings().let { it.fetchProvider == FetchProvider.Jina || it.fallback }
+
+  private fun jinaSearchAllowed(): Boolean =
+    settings().let { it.searchProvider == SearchProvider.Jina || it.fallback }
 
   /**
    * The caller's own route: one GET through whichever transport this gateway was
@@ -98,8 +171,8 @@ class WebGateway(
   suspend fun fetch(request: Request, maxChars: Int): WebResponse? = webGet(client, request, maxChars)
 
   /** Read [target] as markdown. Never throws: a useless answer is [JinaRead.Unavailable]. */
-  suspend fun read(target: String, maxChars: Int): JinaRead {
-    if (!readerPreferred) return JinaRead.Unavailable("Jina.ai is turned off in Settings.")
+  suspend fun read(target: String, maxChars: Int, force: Boolean = false): JinaRead {
+    if (!force && !jinaReaderAllowed()) return JinaRead.Unavailable("Jina.ai is turned off in Settings.")
     val raw = if (target.startsWith("//")) "https:$target" else target
     val url = raw.toHttpUrlOrNull() ?: return JinaRead.Unavailable("\"${raw.take(120)}\" is not a complete http(s) URL.")
     val walk = walk(JinaEndpoint.Reader) { spendable ->
@@ -159,8 +232,8 @@ class WebGateway(
   }
 
   /** Find [query] on the web, as links. Unavailable whenever no key could answer. */
-  suspend fun search(query: String, maxResults: Int): JinaSearch {
-    if (!settings().preferJina) return JinaSearch.Unavailable("Jina.ai is turned off in Settings.")
+  suspend fun search(query: String, maxResults: Int, force: Boolean = false): JinaSearch {
+    if (!force && !jinaSearchAllowed()) return JinaSearch.Unavailable("Jina.ai is turned off in Settings.")
     if (keys().isEmpty()) {
       return JinaSearch.Unavailable(
         "no Jina.ai key is configured, and s.jina.ai answers only an authenticated call."
@@ -218,33 +291,179 @@ class WebGateway(
   }
 
   /**
-   * A sentence per tier, for the settings screen to show what actually answers right
-   * now rather than what the configuration claims. Costs a reader call, and a search
-   * call when a key exists.
+   * A sentence per provider, for the settings screen to show what actually answers right
+   * now rather than what the configuration claims. Makes one real call for the provider
+   * chosen for each tool, and says what the rest of the chain is.
    */
   suspend fun probe(): List<String> {
-    if (!settings().preferJina) {
-      return listOf("Jina.ai is off: pages are fetched directly and search is scraped from DuckDuckGo.")
-    }
+    val config = settings()
     val lines = ArrayList<String>()
-    lines += when (val read = read("https://example.com/", maxChars = 4_000)) {
-      is JinaRead.Served -> "Reader: served by ${read.servedBy} (${read.markdown.length} characters of markdown)."
-      is JinaRead.Refused -> "Reader: refused with ${read.status} — ${read.message}"
-      is JinaRead.Unavailable -> "Reader: ${read.message}; pages are fetched directly instead."
-    }
-    lines += if (!searchPreferred) {
-      "Search: no key configured, so DuckDuckGo is used (s.jina.ai refuses an anonymous call)."
-    } else {
-      when (val found = search("kotlin coroutines", maxResults = 3)) {
-        is JinaSearch.Served -> "Search: ${found.hits.size} results via ${found.servedBy}."
-        is JinaSearch.Unavailable -> "Search: ${found.message}; DuckDuckGo is used instead."
+    lines += when (config.fetchProvider) {
+      FetchProvider.Jina -> when (val read = read("https://example.com/", maxChars = 4_000, force = true)) {
+        is JinaRead.Served -> "Fetch · Jina.ai: served by ${read.servedBy} (${read.markdown.length} characters of markdown)."
+        is JinaRead.Refused -> "Fetch · Jina.ai: refused with ${read.status} — ${read.message}"
+        is JinaRead.Unavailable -> "Fetch · Jina.ai: ${read.message}."
+      }
+
+      FetchProvider.Parallel -> when (val read = parallelRead("https://example.com/", maxChars = 4_000)) {
+        is ParallelRead.Served -> "Fetch · Parallel: served (${read.markdown.length} characters of markdown)."
+        is ParallelRead.Unavailable -> "Fetch · Parallel: ${read.message}."
+      }
+
+      FetchProvider.Direct -> when (val got = fetch(Request.Builder().url("https://example.com/").get().build(), 4_000)) {
+        null -> "Fetch · Direct: the connection did not complete."
+        else -> "Fetch · Direct: HTTP ${got.status} (${got.text.length} characters, JavaScript is not run)."
       }
     }
+    lines += when (config.searchProvider) {
+      SearchProvider.DuckDuckGo -> when (val found = searchDuckDuckGo("kotlin coroutines", maxResults = 3)) {
+        is DuckSearch.Served -> "Search · DuckDuckGo: ${found.hits.size} results."
+        is DuckSearch.Unavailable -> "Search · DuckDuckGo: ${found.message}."
+      }
+
+      SearchProvider.Parallel -> when (val found = parallelSearch("kotlin coroutines", maxResults = 3)) {
+        is ParallelSearch.Served -> "Search · Parallel: ${found.hits.size} results."
+        is ParallelSearch.Unavailable -> "Search · Parallel: ${found.message}."
+      }
+
+      SearchProvider.Jina -> when (val found = search("kotlin coroutines", maxResults = 3, force = true)) {
+        is JinaSearch.Served -> "Search · Jina.ai: ${found.hits.size} results via ${found.servedBy}."
+        is JinaSearch.Unavailable -> "Search · Jina.ai: ${found.message}"
+      }
+    }
+    lines += if (config.fallback) {
+      "Fallback is on — fetch tries ${fetchChain().joinToString(" → ") { it.label }}; " +
+        "search tries ${searchChain().joinToString(" → ") { it.label }.ifEmpty { "nothing" }}."
+    } else {
+      "Fallback is off — only the chosen provider is asked (a fetch still ends with a direct request)."
+    }
     val keyed = keys()
-    lines += "Keys in rotation: ${keyed.count { it.origin == JinaKeyOrigin.User }} yours, " +
+    lines += "Jina keys in rotation: ${keyed.count { it.origin == JinaKeyOrigin.User }} yours, " +
       "${keyed.count { it.origin == JinaKeyOrigin.App }} bundled with the app."
     return lines
   }
+
+  // ---- DuckDuckGo ----
+
+  /**
+   * DuckDuckGo's keyless HTML results page, parsed into links. It is the live index, so
+   * a page published this week is findable, which is why it is the default. A challenge
+   * page or a changed layout parses to nothing and is reported as exactly that.
+   */
+  suspend fun searchDuckDuckGo(query: String, maxResults: Int): DuckSearch {
+    val request = Request.Builder()
+      .url(HttpUrl.Builder().scheme("https").host(DDG_HOST).addPathSegment("html").addQueryParameter("q", query).build())
+      .header("User-Agent", BROWSER_USER_AGENT)
+      .header("Accept-Language", "en")
+      .get()
+      .build()
+    val fetched = webGet(client, request, DDG_SNAPSHOT_CHARS)
+      ?: return DuckSearch.Unavailable("the connection to $DDG_HOST did not complete within ${WEB_TIMEOUT_SECONDS}s")
+    if (fetched.status !in 200..299) {
+      return DuckSearch.Unavailable("DuckDuckGo returned HTTP ${fetched.status} — the engine refused the request")
+    }
+    val hits = parseSearchResults(fetched.text, maxResults)
+    if (hits.isEmpty()) {
+      return DuckSearch.Unavailable(
+        "DuckDuckGo returned no readable results, so the engine's page could not be parsed " +
+          "(it may have served a challenge or changed markup)"
+      )
+    }
+    return DuckSearch.Served(hits)
+  }
+
+  // ---- Parallel (free MCP) ----
+
+  /** One id per gateway: Parallel's free tier rate-limits and correlates by it. */
+  private val parallelSessionId = UUID.randomUUID().toString().replace("-", "")
+  private val parallelLock = Mutex()
+  private var parallelSession: String? = null
+  private var parallelReady = false
+  private val rpcId = AtomicInteger(10)
+
+  /** Read [target] through Parallel's free extractor. Never throws. */
+  suspend fun parallelRead(target: String, maxChars: Int): ParallelRead {
+    val url = target.toHttpUrlOrNull()
+      ?: return ParallelRead.Unavailable("\"${target.take(120)}\" is not a complete http(s) URL")
+    return when (val reply = callParallel("web_fetch", parallelFetchArguments(url.toString(), parallelSessionId), maxChars)) {
+      is McpReply.Failed -> ParallelRead.Unavailable(reply.message)
+      is McpReply.Text -> {
+        val answer = parseParallelFetch(reply.text)
+        if (answer.isEmpty) {
+          ParallelRead.Unavailable("Parallel returned no text for $url")
+        } else {
+          ParallelRead.Served(answer.markdown, answer.title, answer.finalUrl ?: url.toString())
+        }
+      }
+    }
+  }
+
+  /** Find [query] through Parallel's free search. Never throws. */
+  suspend fun parallelSearch(query: String, maxResults: Int): ParallelSearch =
+    when (val reply = callParallel("web_search", parallelSearchArguments(query, parallelSessionId), PARALLEL_SEARCH_CHARS)) {
+      is McpReply.Failed -> ParallelSearch.Unavailable(reply.message)
+      is McpReply.Text -> {
+        val hits = parseParallelSearch(reply.text, maxResults)
+        if (hits.isEmpty()) ParallelSearch.Unavailable("Parallel returned an answer with no links in it")
+        else ParallelSearch.Served(hits)
+      }
+    }
+
+  /**
+   * One tool call, with the MCP handshake done first and remembered. A server that
+   * forgot the session (404) gets one fresh handshake before the call is given up on.
+   */
+  private suspend fun callParallel(tool: String, arguments: org.json.JSONObject, maxChars: Int): McpReply {
+    repeat(2) { attempt ->
+      if (!ensureParallelSession()) {
+        return McpReply.Failed("Parallel did not accept the connection within ${PARALLEL_TIMEOUT_SECONDS}s")
+      }
+      val id = rpcId.incrementAndGet()
+      val response = webGet(
+        client,
+        parallelRequest(mcpToolCallBody(id, tool, arguments)),
+        maxChars + 4_000,
+        PARALLEL_TIMEOUT_SECONDS
+      ) ?: return McpReply.Failed("Parallel did not answer within ${PARALLEL_TIMEOUT_SECONDS}s")
+      when {
+        response.status == 429 -> return McpReply.Failed("Parallel's free tier is rate limited for the moment")
+        response.status == 404 && attempt == 0 -> {
+          resetParallelSession()
+          return@repeat
+        }
+        response.status !in 200..299 -> return McpReply.Failed("Parallel returned HTTP ${response.status}")
+      }
+      return readToolReply(parseRpcMessage(response.text, id))
+    }
+    return McpReply.Failed("Parallel kept refusing the session")
+  }
+
+  private suspend fun ensureParallelSession(): Boolean = parallelLock.withLock {
+    if (parallelReady) return@withLock true
+    val init = webGet(client, parallelRequest(mcpInitializeBody()), 20_000, PARALLEL_TIMEOUT_SECONDS)
+      ?: return@withLock false
+    if (init.status !in 200..299) return@withLock false
+    parallelSession = init.header("Mcp-Session-Id")
+    // The notification is a courtesy the protocol asks for; a server that ignores it still answers.
+    webGet(client, parallelRequest(mcpInitializedBody()), 4_000, PARALLEL_TIMEOUT_SECONDS)
+    parallelReady = true
+    true
+  }
+
+  private suspend fun resetParallelSession() = parallelLock.withLock {
+    parallelReady = false
+    parallelSession = null
+  }
+
+  private fun parallelRequest(body: String): Request =
+    Request.Builder()
+      .url(PARALLEL_MCP_URL)
+      .header("Accept", "application/json, text/event-stream")
+      .header("MCP-Protocol-Version", MCP_PROTOCOL_VERSION)
+      .header("User-Agent", "Awaki")
+      .apply { parallelSession?.let { header("Mcp-Session-Id", it) } }
+      .post(body.toRequestBody("application/json".toMediaType()))
+      .build()
 
   // ---- Rotation ----
 
@@ -378,14 +597,29 @@ class WebGateway(
 
   companion object {
     /**
-     * A gateway whose tools never leave the device: the reader switch is off, so every
-     * call goes straight to the URL. This is what Settings shows when the user turns
-     * Jina.ai off, and what a test uses to exercise the fallback route alone.
+     * A gateway with no third-party reader and no fallback: pages are fetched straight
+     * from their URL and search is the DuckDuckGo scrape. This is what a test uses to
+     * exercise the direct route alone.
      */
     fun direct(client: OkHttpClient? = null): WebGateway =
-      WebGateway(client = client, settings = { WebAccessSettings(preferJina = false) })
+      WebGateway(
+        client = client,
+        settings = {
+          WebAccessSettings(
+            searchProvider = SearchProvider.DuckDuckGo,
+            fetchProvider = FetchProvider.Direct,
+            fallback = false
+          )
+        }
+      )
 
     private const val READER_BASE = "https://r.jina.ai/"
+    private const val DDG_HOST = "html.duckduckgo.com"
+    private const val DDG_SNAPSHOT_CHARS = 60_000
+    private const val PARALLEL_TIMEOUT_SECONDS = 30L
+    private const val PARALLEL_SEARCH_CHARS = 60_000
+    private const val BROWSER_USER_AGENT =
+      "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
     private const val MAX_IDENTITY_ATTEMPTS = 3
     private const val WINDOW_MILLIS = 60_000L
 

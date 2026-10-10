@@ -33,7 +33,7 @@ class AgentToolRegistry(
   /** Extra tools appended to the built-in set (used by tests). */
   private val extraTools: List<AgentTool> = emptyList(),
   /**
-   * The web layer the two web tools read through: Jina.ai first, the URL itself after.
+   * The web layer the two web tools read through: the providers chosen in Settings, the URL itself after.
    * Production passes the repository's instance so a Settings change lands on the same
    * request budget the agent is spending; a test that never calls a web tool may leave
    * the default, which is an unconfigured pool.

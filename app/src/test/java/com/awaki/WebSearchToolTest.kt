@@ -4,6 +4,7 @@ import com.awaki.agent.tool.ToolResult
 import com.awaki.agent.tool.WebSearchTool
 import com.awaki.agent.tool.parseSearchResults
 import com.awaki.agent.web.WebGateway
+import com.awaki.data.local.SearchProvider
 import com.awaki.data.local.WebAccessSettings
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
@@ -188,7 +189,7 @@ class WebSearchToolTest {
     capture: (okhttp3.Request) -> Unit = {}
   ): WebGateway = WebGateway(
     client = stubHttpScripted(*answers, capture = capture),
-    settings = { WebAccessSettings(preferJina = true) },
+    settings = { WebAccessSettings(searchProvider = SearchProvider.Jina) },
     userKeys = { userKeys },
     appKeys = { emptyList() }
   )
@@ -263,6 +264,89 @@ class WebSearchToolTest {
     assertFalse(result.success)
     assertTrue(result.error!!, result.error.contains("HTTP 403"))
     assertTrue(result.error!!.contains("Jina.ai search did not answer"))
+    assertTrue("the last resort is named too", result.error!!.contains("Parallel"))
     assertEquals("0", result.metadata["results"])
+  }
+
+  @Test
+  fun `DuckDuckGo is the engine when nothing is configured`() {
+    val sent = mutableListOf<okhttp3.Request>()
+    val result = runBlocking {
+      WebSearchTool(
+        WebGateway(
+          client = stubHttpScripted(StubAnswer(200, resultsPage, "text/html"), capture = { sent.add(it) }),
+          settings = { WebAccessSettings() },
+          appKeys = { emptyList() }
+        )
+      ).execute(args("""{"query": "room migration"}"""), contextFor(ws()))
+    }
+    assertTrue(result.output, result.success)
+    assertEquals(listOf("html.duckduckgo.com"), sent.map { it.url.host })
+    assertEquals("duckduckgo", result.metadata["via"])
+  }
+
+  @Test
+  fun `a throttled DuckDuckGo falls through to Parallel's free search`() {
+    val sent = mutableListOf<okhttp3.Request>()
+    val parallelResults = StubAnswer(
+      200,
+      """{"jsonrpc":"2.0","id":11,"result":{"content":[{"type":"text","text":"{\"results\":[{\"url\":\"https://developer.android.com/room/migrations\",\"title\":\"Room migrations\",\"excerpts\":[\"Change the schema across versions.\"]}]}"}]}}"""
+    )
+    val result = runBlocking {
+      WebSearchTool(
+        WebGateway(
+          client = stubHttpScripted(
+            StubAnswer(202, "<html>challenge</html>", "text/html"),
+            StubAnswer(200, """{"jsonrpc":"2.0","id":1,"result":{}}"""),
+            StubAnswer(202, ""),
+            parallelResults,
+            capture = { sent.add(it) }
+          ),
+          settings = { WebAccessSettings() },
+          appKeys = { emptyList() }
+        )
+      ).execute(args("""{"query": "room migration"}"""), contextFor(ws()))
+    }
+    assertTrue(result.output, result.success)
+    assertEquals(
+      listOf("html.duckduckgo.com", "search.parallel.ai", "search.parallel.ai", "search.parallel.ai"),
+      sent.map { it.url.host }
+    )
+    assertEquals("parallel", result.metadata["via"])
+    assertTrue(result.output.contains("https://developer.android.com/room/migrations"))
+    assertTrue(result.output.contains("Change the schema across versions."))
+  }
+
+  @Test
+  fun `with fallback off a failing engine is the only one asked`() {
+    val sent = mutableListOf<okhttp3.Request>()
+    val result = runBlocking {
+      WebSearchTool(
+        WebGateway(
+          client = stubHttpScripted(StubAnswer(403, "<html>blocked</html>", "text/html"), capture = { sent.add(it) }),
+          settings = { WebAccessSettings(fallback = false) },
+          appKeys = { emptyList() }
+        )
+      ).execute(args("""{"query": "room migration"}"""), contextFor(ws()))
+    }
+    assertFalse(result.success)
+    assertEquals(listOf("html.duckduckgo.com"), sent.map { it.url.host })
+  }
+
+  @Test
+  fun `Jina chosen without a key and no fallback says what to do instead of guessing`() {
+    val sent = mutableListOf<okhttp3.Request>()
+    val result = runBlocking {
+      WebSearchTool(
+        WebGateway(
+          client = stubHttpScripted(StubAnswer(200, resultsPage, "text/html"), capture = { sent.add(it) }),
+          settings = { WebAccessSettings(searchProvider = SearchProvider.Jina, fallback = false) },
+          appKeys = { emptyList() }
+        )
+      ).execute(args("""{"query": "room migration"}"""), contextFor(ws()))
+    }
+    assertFalse(result.success)
+    assertTrue(result.error!!.contains("no Jina key"))
+    assertEquals(0, sent.size)
   }
 }

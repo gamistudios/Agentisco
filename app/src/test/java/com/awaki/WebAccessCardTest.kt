@@ -8,6 +8,8 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import com.awaki.agent.web.WebGateway
+import com.awaki.data.local.FetchProvider
+import com.awaki.data.local.SearchProvider
 import com.awaki.data.local.WebAccessSettings
 import com.awaki.data.local.WebAccessStore
 import com.awaki.data.repository.WorkspaceRepository
@@ -35,8 +37,8 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /**
- * The Settings card that decides which tier answers a web tool. What has to hold on
- * screen: the tier order is stated plainly, a key joins the rotation as a handle and
+ * The Settings card that decides which provider answers a web tool. What has to hold on
+ * screen: the defaults are stated plainly, a key joins the rotation as a handle and
  * never as a secret, and Test reports what actually answered rather than what was
  * configured. The gateway is injected, so nothing here reaches the network.
  */
@@ -53,6 +55,14 @@ class WebAccessCardTest {
     200,
     """{"code":200,"data":{"title":"Example Domain","url":"https://example.com/","""" +
       """content":"This domain is for use in examples."}}"""
+  )
+
+  /** A minimal DuckDuckGo results page: one hit behind the engine's own redirect. */
+  private val searchPage = StubAnswer(
+    200,
+    """<a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.org%2Fdocs">Docs</a>""" +
+      """<a class="result__snippet">A snippet</a>""",
+    "text/html"
   )
 
   @Before
@@ -73,13 +83,12 @@ class WebAccessCardTest {
    * screen a user of this build sees is the anonymous tier plus whatever they pasted.
    */
   private fun viewModelWith(
-    vararg answers: StubAnswer,
-    preferJina: Boolean = true
+    vararg answers: StubAnswer
   ): Pair<WorkspaceViewModel, MutableList<Request>> {
     val sent = mutableListOf<Request>()
     val gateway = WebGateway(
       client = stubHttpScripted(*answers, capture = { sent.add(it) }),
-      settings = { WebAccessSettings(preferJina = preferJina) },
+      settings = { WebAccessSettings() },
       appKeys = { emptyList() }
     )
     val viewModel = held.hold(WorkspaceViewModel(WorkspaceRepository(context = null, web = gateway)))
@@ -87,33 +96,45 @@ class WebAccessCardTest {
   }
 
   @Test
-  fun `the card states the tier order the tools actually follow`() {
+  fun `the card states the defaults the tools actually follow`() {
     val (viewModel, _) = viewModelWith(readerAnswer)
     compose.setContent { AwakiTheme { WebAccessCard(viewModel) } }
 
-    compose.onNodeWithText("Web Access (Jina.ai)").assertIsDisplayed()
-    compose.onNodeWithText("Route web tools through Jina.ai").assertIsDisplayed()
+    compose.onNodeWithText("Web Access").assertIsDisplayed()
     compose
-      .onNodeWithText("Reader: Jina.ai first (20 pages a minute with no key)", substring = true)
+      .onNodeWithText("Search defaults to DuckDuckGo", substring = true)
       .assertIsDisplayed()
-    compose.onNodeWithTag("switch_prefer_jina").assertIsDisplayed()
+    compose.onNodeWithTag("chip_search_duckduckgo").assertIsDisplayed()
+    compose.onNodeWithTag("chip_search_parallel").assertIsDisplayed()
+    compose.onNodeWithTag("chip_fetch_jina").assertIsDisplayed()
+    compose.onNodeWithTag("chip_fetch_direct").assertIsDisplayed()
+    compose.onNodeWithTag("switch_web_fallback").assertIsDisplayed()
+    assertEquals(SearchProvider.DuckDuckGo, viewModel.webAccess.value.searchProvider)
+    assertEquals(FetchProvider.Jina, viewModel.webAccess.value.fetchProvider)
     // The count the card reports is the rotation the build actually carries, so a CI
     // build that bakes keys in cannot fail a test written for a build that does not.
     compose.onNodeWithText("rotation: ${viewModel.bundledJinaKeyCount}").assertIsDisplayed()
   }
 
   @Test
-  fun `the switch says what it keeps on the device and costs nothing to change`() {
+  fun `choosing providers and toggling fallback only changes settings`() {
     val (viewModel, sent) = viewModelWith(readerAnswer)
     compose.setContent { AwakiTheme { WebAccessCard(viewModel) } }
 
-    compose.onNodeWithTag("switch_prefer_jina").performClick()
-    assertFalse(viewModel.webAccess.value.preferJina)
-    compose.onNodeWithText("Off: the URL is never sent to a third party", substring = true).assertIsDisplayed()
+    compose.onNodeWithTag("chip_search_parallel").performClick()
+    assertEquals(SearchProvider.Parallel, viewModel.webAccess.value.searchProvider)
 
-    compose.onNodeWithTag("switch_prefer_jina").performClick()
-    assertTrue(viewModel.webAccess.value.preferJina)
-    assertEquals("the switch alone changes a setting; nothing was fetched to prove it", 0, sent.size)
+    compose.onNodeWithTag("chip_fetch_direct").performClick()
+    assertEquals(FetchProvider.Direct, viewModel.webAccess.value.fetchProvider)
+    compose.onNodeWithText("JavaScript pages come back empty", substring = true).assertIsDisplayed()
+
+    compose.onNodeWithTag("switch_web_fallback").performClick()
+    assertFalse(viewModel.webAccess.value.fallback)
+    compose.onNodeWithText("Off: only the chosen provider is asked", substring = true).assertIsDisplayed()
+
+    compose.onNodeWithTag("switch_web_fallback").performClick()
+    assertTrue(viewModel.webAccess.value.fallback)
+    assertEquals("choosing a provider alone changes a setting; nothing was fetched to prove it", 0, sent.size)
   }
 
   @Test
@@ -151,19 +172,20 @@ class WebAccessCardTest {
   }
 
   @Test
-  fun `Test reports which tier answered rather than what was configured`() {
-    val (viewModel, sent) = viewModelWith(readerAnswer)
+  fun `Test reports which provider answered rather than what was configured`() {
+    val (viewModel, sent) = viewModelWith(readerAnswer, searchPage)
     compose.setContent { AwakiTheme { WebAccessCard(viewModel) } }
 
     compose.onNodeWithTag("btn_test_web_access").performClick()
     compose.waitUntil(5_000) { viewModel.webAccessReport.value.isNotEmpty() }
 
     val report = viewModel.webAccessReport.value
-    assertEquals(listOf("r.jina.ai"), sent.map { it.url.host })
-    assertEquals(report.toString(), 3, report.size)
-    assertTrue(report[0], report[0].startsWith("Reader: served by anonymous"))
-    assertTrue(report[1], report[1].contains("no key configured"))
-    assertTrue(report[2], report[2].contains("0 yours, 0 bundled"))
+    assertEquals(listOf("r.jina.ai", "html.duckduckgo.com"), sent.map { it.url.host })
+    assertEquals(report.toString(), 4, report.size)
+    assertTrue(report[0], report[0].startsWith("Fetch · Jina.ai: served by anonymous"))
+    assertTrue(report[1], report[1].startsWith("Search · DuckDuckGo: 1 results"))
+    assertTrue(report[2], report[2].startsWith("Fallback is on"))
+    assertTrue(report[3], report[3].contains("0 yours"))
     compose.onNodeWithText(report[0], substring = true).assertIsDisplayed()
   }
 

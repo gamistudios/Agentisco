@@ -30,6 +30,8 @@ import androidx.compose.material.icons.outlined.Language
 import androidx.compose.material.icons.outlined.MailOutline
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -60,6 +62,8 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.awaki.BuildConfig
+import com.awaki.data.local.FetchProvider
+import com.awaki.data.local.SearchProvider
 import com.awaki.ui.WorkspaceViewModel
 import com.awaki.ui.theme.AwakiTheme
 
@@ -73,12 +77,13 @@ import com.awaki.ui.theme.AwakiTheme
 // ---- Web access ----
 
 /**
- * Which tier answers the agent's web tools.
+ * Which provider answers the agent's web tools.
  *
- * `web_fetch` asks Jina.ai's reader first — 20 pages a minute with no key at all —
- * then rotates through the keys below, then fetches the page itself. `web_search`
- * needs a key for Jina and otherwise scrapes DuckDuckGo. Turning this off means no
- * third party ever sees the URL a fetch is asked for.
+ * `web_search` asks DuckDuckGo first by default — keyless, and the live index, so recent
+ * pages turn up. `web_fetch` asks Jina.ai's reader first by default — it runs a page's
+ * JavaScript, which a plain request cannot. Parallel's free MCP is a keyless option for
+ * both. With fallback on, whatever the chosen provider cannot answer falls through to the
+ * next; a fetch always ends with the device's own direct request.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -94,34 +99,65 @@ internal fun WebAccessCard(viewModel: WorkspaceViewModel, modifier: Modifier = M
 
   Column(modifier = modifier.fillMaxWidth()) {
     Text(
-      "Web Access (Jina.ai)",
+      "Web Access",
       color = MaterialTheme.colorScheme.onSurface,
       fontSize = 16.sp,
       fontWeight = FontWeight.Bold,
       modifier = Modifier.padding(bottom = 4.dp)
     )
     Text(
-      "Reader: Jina.ai first (20 pages a minute with no key), then a key, then the page itself. " +
-        "Search: Jina.ai only with a key, otherwise DuckDuckGo.",
+      "Search defaults to DuckDuckGo (live results, no key). Fetch defaults to Jina.ai (reads JavaScript pages, " +
+        "20 a minute with no key). Parallel is a free, keyless option for both.",
       color = AwakiTheme.extra.textMuted,
       fontSize = 11.sp,
       lineHeight = 15.sp,
       modifier = Modifier.padding(bottom = 12.dp)
     )
 
+    ProviderPicker(
+      title = "Search with",
+      tagPrefix = "search",
+      options = SearchProvider.values().toList(),
+      selected = settings.searchProvider,
+      label = { it.label },
+      tagOf = { it.name.lowercase() },
+      detail = when (settings.searchProvider) {
+        SearchProvider.DuckDuckGo -> "Scrapes DuckDuckGo's results page: fresh, no key, no account."
+        SearchProvider.Parallel -> "Parallel's free hosted search: keyless and rate limited, with ready-made excerpts."
+        SearchProvider.Jina -> "Jina.ai search needs a key (below); without one it is skipped."
+      },
+      onSelect = viewModel::setSearchProvider
+    )
+    Spacer(modifier = Modifier.height(10.dp))
+    ProviderPicker(
+      title = "Fetch pages with",
+      tagPrefix = "fetch",
+      options = FetchProvider.values().toList(),
+      selected = settings.fetchProvider,
+      label = { it.label },
+      tagOf = { it.name.lowercase() },
+      detail = when (settings.fetchProvider) {
+        FetchProvider.Jina -> "Clean markdown, JavaScript pages included. Free for 20 pages a minute; keys raise that."
+        FetchProvider.Parallel -> "Parallel's free extractor: token-efficient markdown, keyless and rate limited."
+        FetchProvider.Direct -> "The device fetches the URL itself. Nothing third-party sees it, but JavaScript pages come back empty."
+      },
+      onSelect = viewModel::setFetchProvider
+    )
+
+    Spacer(modifier = Modifier.height(10.dp))
     SettingsRowGroup(
       listOf(
         SettingsItem(
-          id = "prefer_jina",
+          id = "web_fallback",
           group = SettingsGroup.Tools,
-          title = "Route web tools through Jina.ai",
+          title = "Fall back to other providers",
           icon = Icons.Outlined.Language,
-          detail = if (settings.preferJina) {
-            "On: cleaner markdown, and a paid budget is spent only once the free tier is used up."
+          detail = if (settings.fallback) {
+            "On: if the chosen provider cannot answer, the next one is tried."
           } else {
-            "Off: the URL is never sent to a third party — pages are fetched and scraped directly."
+            "Off: only the chosen provider is asked. A fetch still ends with a direct request."
           },
-          end = RowEnd.Switch(settings.preferJina, viewModel::setPreferJina, "switch_prefer_jina")
+          end = RowEnd.Switch(settings.fallback, viewModel::setWebFallback, "switch_web_fallback")
         )
       )
     )
@@ -132,7 +168,7 @@ internal fun WebAccessCard(viewModel: WorkspaceViewModel, modifier: Modifier = M
       horizontalArrangement = Arrangement.SpaceBetween,
       verticalAlignment = Alignment.CenterVertically
     ) {
-      Text("Your keys", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+      Text("Your Jina.ai keys", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
       Text(
         "rotation: ${handles.size + bundled}",
         color = AwakiTheme.extra.textMuted,
@@ -144,7 +180,7 @@ internal fun WebAccessCard(viewModel: WorkspaceViewModel, modifier: Modifier = M
     if (handles.isEmpty()) {
       Text(
         if (bundled > 0) "Trying with the public free tier. Visit https://jina.ai to create API Key!"
-        else "Visit https://jina.ai to create API Key! — the free tier and the direct route carry every call.",
+        else "Keys are optional: the free Jina.ai tier, Parallel and the direct route carry every call. Visit https://jina.ai for a key.",
         color = AwakiTheme.extra.textMuted,
         fontSize = 11.sp,
         lineHeight = 14.sp
@@ -227,7 +263,7 @@ internal fun WebAccessCard(viewModel: WorkspaceViewModel, modifier: Modifier = M
       Column(modifier = Modifier.weight(1f)) {
         Text("Test what answers now", color = MaterialTheme.colorScheme.onSurface, fontSize = 13.sp)
         Text(
-          "One reader call, plus one search call where a key is configured.",
+          "One real call for the chosen search provider and one for the chosen fetch provider.",
           color = AwakiTheme.extra.textMuted,
           fontSize = 10.sp,
           lineHeight = 13.sp
@@ -566,6 +602,50 @@ private fun ContactRow(
       contentDescription = null,
       tint = AwakiTheme.extra.textMuted,
       modifier = Modifier.size(16.dp)
+    )
+  }
+}
+
+/** A labelled row of choices for one web tool, with a line saying what the current choice does. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun <T> ProviderPicker(
+  title: String,
+  tagPrefix: String,
+  options: List<T>,
+  selected: T,
+  label: (T) -> String,
+  tagOf: (T) -> String,
+  detail: String,
+  onSelect: (T) -> Unit
+) {
+  Column(modifier = Modifier.fillMaxWidth()) {
+    Text(title, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+    Spacer(modifier = Modifier.height(6.dp))
+    FlowRow(
+      horizontalArrangement = Arrangement.spacedBy(6.dp),
+      verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+      options.forEach { option ->
+        FilterChip(
+          selected = option == selected,
+          onClick = { onSelect(option) },
+          label = { Text(label(option), fontSize = 12.sp) },
+          modifier = Modifier.testTag("chip_${tagPrefix}_${tagOf(option)}"),
+          colors = FilterChipDefaults.filterChipColors(
+            selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
+            selectedLabelColor = MaterialTheme.colorScheme.primary
+          )
+        )
+      }
+    }
+    Spacer(modifier = Modifier.height(4.dp))
+    Text(
+      detail,
+      color = AwakiTheme.extra.textMuted,
+      fontSize = 10.sp,
+      lineHeight = 13.sp,
+      modifier = Modifier.testTag("txt_${tagPrefix}_provider_detail")
     )
   }
 }

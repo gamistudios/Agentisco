@@ -461,10 +461,10 @@ private fun SettingsCatalog(
         group = SettingsGroup.Tools,
         title = "Web access",
         icon = Icons.Outlined.Language,
-        detail = "Which tier answers web tools",
-        keywords = listOf("jina", "reader", "search", "web_fetch", "web_search", "scrape", "duckduckgo", "key"),
+        detail = "Which provider searches and fetches for the agent",
+        keywords = listOf("jina", "reader", "search", "web_fetch", "web_search", "scrape", "duckduckgo", "parallel", "fallback", "key"),
         end = RowEnd.Value(
-          if (webAccess.preferJina) "Jina.ai first" else "Direct",
+          "${webAccess.searchProvider.label} · ${webAccess.fetchProvider.label}",
           ValueTone.Accent,
           "txt_web_access"
         ),

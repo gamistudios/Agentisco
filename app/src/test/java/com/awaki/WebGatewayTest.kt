@@ -7,6 +7,8 @@ import com.awaki.agent.web.isJinaHost
 import com.awaki.agent.web.parseReaderBody
 import com.awaki.agent.web.parseSearchHits
 import com.awaki.agent.web.readAppKeyList
+import com.awaki.data.local.FetchProvider
+import com.awaki.data.local.SearchProvider
 import com.awaki.data.local.WebAccessSettings
 import kotlinx.coroutines.runBlocking
 import okhttp3.Request
@@ -69,7 +71,13 @@ class WebGatewayTest {
     preferJina: Boolean = true
   ): WebGateway = WebGateway(
     client = stubHttpScripted(*answers, capture = { recorder.capture(it) }),
-    settings = { WebAccessSettings(preferJina = preferJina) },
+    settings = {
+      WebAccessSettings(
+        searchProvider = SearchProvider.Jina,
+        fetchProvider = if (preferJina) FetchProvider.Jina else FetchProvider.Direct,
+        fallback = preferJina
+      )
+    },
     userKeys = { userKeys },
     // Never left to the build's own value: CI may set JINA_API_KEYS, and a test that
     // asserts "no key configured" must not pass or fail on the environment.

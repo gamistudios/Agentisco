@@ -1053,7 +1053,7 @@ class WorkspaceViewModel(
 
   // ---- Web access (Settings: how the agent reaches the internet) ----
 
-  /** Whether a web tool may hand its URL to Jina.ai before fetching it itself. */
+  /** Which providers search and fetch for the agent, and whether the rest are tried on failure. */
   val webAccess: StateFlow<com.awaki.data.local.WebAccessSettings> = repository.webAccess
 
   /** The user's own keys, as handles only — the secret never reaches the UI layer. */
@@ -1062,7 +1062,11 @@ class WorkspaceViewModel(
   /** Whether the app itself was built with keys to rotate through. */
   val bundledJinaKeyCount: Int get() = com.awaki.agent.web.bundledAppKeyCount()
 
-  fun setPreferJina(enabled: Boolean) = repository.setPreferJina(enabled)
+  fun setSearchProvider(provider: com.awaki.data.local.SearchProvider) = repository.setSearchProvider(provider)
+
+  fun setFetchProvider(provider: com.awaki.data.local.FetchProvider) = repository.setFetchProvider(provider)
+
+  fun setWebFallback(enabled: Boolean) = repository.setWebFallback(enabled)
 
   /** Returns how many keys were stored, so the screen can report what landed. */
   fun addJinaKeys(raw: String): Int = repository.addJinaKeys(raw)

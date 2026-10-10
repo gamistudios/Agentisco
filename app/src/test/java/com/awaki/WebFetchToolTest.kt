@@ -129,7 +129,7 @@ class WebFetchToolTest {
     capture: (Request) -> Unit = {}
   ): WebGateway = WebGateway(
     client = stubHttpScripted(*answers, capture = capture),
-    settings = { WebAccessSettings(preferJina = true) },
+    settings = { WebAccessSettings(fallback = false) },
     userKeys = { userKeys },
     appKeys = { emptyList() }
   )
@@ -219,7 +219,7 @@ class WebFetchToolTest {
     val result = runBlocking {
       WebGateway(
         client = client,
-        settings = { WebAccessSettings(preferJina = true) },
+        settings = { WebAccessSettings(fallback = false) },
         appKeys = { emptyList() }
       ).let { WebFetchTool(it) }
         .execute(args("""{"url": "https://developer.android.com/room"}"""), contextFor(ws()))

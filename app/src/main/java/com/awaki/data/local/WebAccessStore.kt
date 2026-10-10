@@ -5,25 +5,61 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
+/** Where `web_search` asks first. The others answer only if this one cannot (see [WebAccessSettings.fallback]). */
+enum class SearchProvider(val label: String) {
+  /** Scrapes DuckDuckGo's HTML results. Keyless, fresh, and the default. */
+  DuckDuckGo("DuckDuckGo"),
+
+  /** Parallel's free hosted search MCP. Keyless, rate limited, returns ready-made excerpts. */
+  Parallel("Parallel (free)"),
+
+  /** s.jina.ai. Refuses an anonymous call, so it only runs when a Jina key is in hand. */
+  Jina("Jina.ai (key)");
+
+  companion object {
+    fun fromName(name: String?): SearchProvider? = values().firstOrNull { it.name == name }
+  }
+}
+
+/** Where `web_fetch` reads a page first. */
+enum class FetchProvider(val label: String) {
+  /** r.jina.ai: renders JavaScript pages and returns markdown. Free for 20 pages a minute. */
+  Jina("Jina.ai"),
+
+  /** Parallel's free hosted extractor: token-efficient markdown, no key. */
+  Parallel("Parallel (free)"),
+
+  /** The device fetches the URL itself. No third party sees it, but JavaScript pages come back empty. */
+  Direct("Direct");
+
+  companion object {
+    fun fromName(name: String?): FetchProvider? = values().firstOrNull { it.name == name }
+  }
+}
+
 /**
  * How the agent's web tools are allowed to reach the internet.
  *
- * - `preferJina = true` (the default): read pages through Jina.ai's reader, which
- *   returns clean markdown instead of stripped markup and answers 20 requests a
- *   minute with no key at all. Search is only sent to Jina when a key is usable,
- *   because that endpoint refuses an anonymous call. Either way the direct route
- *   stays underneath as the fallback.
- * - `preferJina = false`: no third party ever sees the URL. The tools fetch and
- *   scrape on their own, which is how they worked before the reader existed.
+ * - `searchProvider` (default DuckDuckGo): DuckDuckGo is keyless and returns the live
+ *   index, so recent pages show up. Jina's search is only worth choosing with a key,
+ *   because that endpoint refuses an anonymous call.
+ * - `fetchProvider` (default Jina): Jina's reader returns clean markdown and runs the
+ *   page's JavaScript, which a plain fetch cannot. It answers 20 requests a minute with
+ *   no key at all.
+ * - `fallback` (default on): when the chosen provider cannot answer, the others are tried
+ *   in a fixed order. Off means the chosen provider is the only third party ever asked;
+ *   a fetch still ends with the device's own direct request, which only the site sees.
  */
 data class WebAccessSettings(
-  val preferJina: Boolean = true
+  val searchProvider: SearchProvider = SearchProvider.DuckDuckGo,
+  val fetchProvider: FetchProvider = FetchProvider.Jina,
+  val fallback: Boolean = true
 )
 
 /**
- * Durable web-tool settings: the reader switch plus the user's own Jina.ai keys.
+ * Durable web-tool settings: the chosen providers plus the user's own Jina.ai keys.
  *
- * The switch lives in `web_access.json` and the keys in `web_credentials.json`,
+ * The choices live in `web_access.json` and the keys in `web_credentials.json`,
  * split for the same reason [ProviderConfigStore] splits its own two files — a
  * secret must never be read out beside ordinary configuration, and the config
  * file is the one a user would think to share when asking for help.
@@ -46,9 +82,7 @@ class WebAccessStore(private val context: Context? = null) {
   private fun load() {
     val cfg = configFile?.takeIf { it.isFile }?.readText()
     if (cfg != null) {
-      runCatching {
-        settingsCache = WebAccessSettings(preferJina = JSONObject(cfg).optBoolean("preferJina", true))
-      }
+      runCatching { settingsCache = readSettings(JSONObject(cfg)) }
     }
     val creds = credentialsFile?.takeIf { it.isFile }?.readText()
     if (creds != null) {
@@ -62,7 +96,13 @@ class WebAccessStore(private val context: Context? = null) {
     val file = configFile ?: return
     runCatching {
       file.parentFile?.mkdirs()
-      file.writeText(JSONObject().put("preferJina", settingsCache.preferJina).toString(2))
+      file.writeText(
+        JSONObject()
+          .put("searchProvider", settingsCache.searchProvider.name)
+          .put("fetchProvider", settingsCache.fetchProvider.name)
+          .put("fallback", settingsCache.fallback)
+          .toString(2)
+      )
     }
   }
 
@@ -124,6 +164,21 @@ class WebAccessStore(private val context: Context? = null) {
   }
 
   companion object {
+    /**
+     * Reads a stored config. Files written before providers existed carry only
+     * `preferJina`: `false` meant "never hand a URL to a third party", which is a direct
+     * fetch with no fallback; `true` meant the reader, which is now simply the default.
+     */
+    internal fun readSettings(json: JSONObject): WebAccessSettings {
+      val legacyDirect = json.has("preferJina") && !json.optBoolean("preferJina", true)
+      return WebAccessSettings(
+        searchProvider = SearchProvider.fromName(json.optString("searchProvider")) ?: SearchProvider.DuckDuckGo,
+        fetchProvider = FetchProvider.fromName(json.optString("fetchProvider"))
+          ?: if (legacyDirect) FetchProvider.Direct else FetchProvider.Jina,
+        fallback = json.optBoolean("fallback", !legacyDirect)
+      )
+    }
+
     /**
      * A key is an opaque token: trimmed, stripped of the `Bearer ` a user copied
      * from a curl example, and never split on internal characters. Length is not

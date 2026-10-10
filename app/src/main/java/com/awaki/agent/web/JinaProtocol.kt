@@ -161,7 +161,7 @@ private fun JSONArray?.toStructuredHits(): List<WebHit>? {
   }.usableHits()
 }
 
-private fun hitsFromMarkdown(markdown: String, limit: Int): List<WebHit> {
+internal fun hitsFromMarkdown(markdown: String, limit: Int): List<WebHit> {
   val lines = markdown.lines()
   val hits = ArrayList<WebHit>()
   val seen = HashSet<String>()
@@ -201,5 +201,5 @@ private fun List<WebHit>.usableHits(): List<WebHit> = distinctBy { it.url }.filt
     hit.url.toHttpUrlOrNull()?.encodedPath.let { it == null || it == "/" || it.isBlank() }
 }
 
-private fun hostOf(url: String): String =
+internal fun hostOf(url: String): String =
   url.toHttpUrlOrNull()?.host?.removePrefix("www.").orEmpty().ifBlank { url.take(60) }
