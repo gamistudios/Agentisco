@@ -20,7 +20,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * Parallel's free MCP as a third provider, and the settings that choose between
+ * Parallel's free MCP as the default provider, and the settings that choose between
  * providers. Nothing here reaches the network: the server's replies are scripted, in the
  * three shapes a Streamable HTTP server may answer with.
  */
@@ -164,25 +164,25 @@ class ParallelWebTest {
     WebGateway(settings = { settings }, userKeys = { keys }, appKeys = { emptyList() })
 
   @Test
-  fun `the defaults are DuckDuckGo to search and Jina to read`() {
+  fun `the defaults are Parallel for both tools`() {
     val defaults = WebAccessSettings()
-    assertEquals(SearchProvider.DuckDuckGo, defaults.searchProvider)
-    assertEquals(FetchProvider.Jina, defaults.fetchProvider)
+    assertEquals(SearchProvider.Parallel, defaults.searchProvider)
+    assertEquals(FetchProvider.Parallel, defaults.fetchProvider)
     assertTrue(defaults.fallback)
   }
 
   @Test
   fun `with fallback on every provider is tried, and a fetch always ends direct`() {
     val web = chains(WebAccessSettings())
-    assertEquals(listOf(SearchProvider.DuckDuckGo, SearchProvider.Parallel), web.searchChain())
-    assertEquals(listOf(FetchProvider.Jina, FetchProvider.Parallel, FetchProvider.Direct), web.fetchChain())
+    assertEquals(listOf(SearchProvider.Parallel, SearchProvider.DuckDuckGo), web.searchChain())
+    assertEquals(listOf(FetchProvider.Parallel, FetchProvider.Jina, FetchProvider.Direct), web.fetchChain())
   }
 
   @Test
   fun `a Jina key puts Jina search into the chain`() {
     val web = chains(WebAccessSettings(), keys = listOf("jina_user_key"))
     assertEquals(
-      listOf(SearchProvider.DuckDuckGo, SearchProvider.Parallel, SearchProvider.Jina),
+      listOf(SearchProvider.Parallel, SearchProvider.DuckDuckGo, SearchProvider.Jina),
       web.searchChain()
     )
   }

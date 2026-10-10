@@ -79,10 +79,10 @@ import com.awaki.ui.theme.AwakiTheme
 /**
  * Which provider answers the agent's web tools.
  *
- * `web_search` asks DuckDuckGo first by default — keyless, and the live index, so recent
- * pages turn up. `web_fetch` asks Jina.ai's reader first by default — it runs a page's
- * JavaScript, which a plain request cannot. Parallel's free MCP is a keyless option for
- * both. With fallback on, whatever the chosen provider cannot answer falls through to the
+ * Both tools ask Parallel's free MCP first by default — keyless, rate limited, and the
+ * answer arrives as excerpts or markdown ready for the model. DuckDuckGo is the live
+ * search index; Jina.ai's reader runs a page's JavaScript, which a plain request cannot.
+ * With fallback on, whatever the chosen provider cannot answer falls through to the
  * next; a fetch always ends with the device's own direct request.
  */
 @OptIn(ExperimentalLayoutApi::class)
@@ -106,8 +106,8 @@ internal fun WebAccessCard(viewModel: WorkspaceViewModel, modifier: Modifier = M
       modifier = Modifier.padding(bottom = 4.dp)
     )
     Text(
-      "Search defaults to DuckDuckGo (live results, no key). Fetch defaults to Jina.ai (reads JavaScript pages, " +
-        "20 a minute with no key). Parallel is a free, keyless option for both.",
+      "Both tools default to Parallel (free, keyless, rate limited). DuckDuckGo gives live " +
+        "search results with no key; Jina.ai reads JavaScript pages, 20 a minute free.",
       color = AwakiTheme.extra.textMuted,
       fontSize = 11.sp,
       lineHeight = 15.sp,

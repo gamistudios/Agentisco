@@ -7,10 +7,10 @@ import java.io.File
 
 /** Where `web_search` asks first. The others answer only if this one cannot (see [WebAccessSettings.fallback]). */
 enum class SearchProvider(val label: String) {
-  /** Scrapes DuckDuckGo's HTML results. Keyless, fresh, and the default. */
+  /** Scrapes DuckDuckGo's HTML results. Keyless and fresh: the live index. */
   DuckDuckGo("DuckDuckGo"),
 
-  /** Parallel's free hosted search MCP. Keyless, rate limited, returns ready-made excerpts. */
+  /** Parallel's free hosted search MCP. Keyless, rate limited, ready-made excerpts. The default. */
   Parallel("Parallel (free)"),
 
   /** s.jina.ai. Refuses an anonymous call, so it only runs when a Jina key is in hand. */
@@ -26,7 +26,7 @@ enum class FetchProvider(val label: String) {
   /** r.jina.ai: renders JavaScript pages and returns markdown. Free for 20 pages a minute. */
   Jina("Jina.ai"),
 
-  /** Parallel's free hosted extractor: token-efficient markdown, no key. */
+  /** Parallel's free hosted extractor: token-efficient markdown, no key. The default. */
   Parallel("Parallel (free)"),
 
   /** The device fetches the URL itself. No third party sees it, but JavaScript pages come back empty. */
@@ -40,19 +40,20 @@ enum class FetchProvider(val label: String) {
 /**
  * How the agent's web tools are allowed to reach the internet.
  *
- * - `searchProvider` (default DuckDuckGo): DuckDuckGo is keyless and returns the live
- *   index, so recent pages show up. Jina's search is only worth choosing with a key,
- *   because that endpoint refuses an anonymous call.
- * - `fetchProvider` (default Jina): Jina's reader returns clean markdown and runs the
- *   page's JavaScript, which a plain fetch cannot. It answers 20 requests a minute with
- *   no key at all.
+ * - `searchProvider` (default Parallel): Parallel's free MCP answers keyless with
+ *   excerpts already in the result. DuckDuckGo is the live index — keyless, but
+ *   scraped and occasionally challenged. Jina's search is only worth choosing with
+ *   a key, because that endpoint refuses an anonymous call.
+ * - `fetchProvider` (default Parallel): Parallel's extractor is keyless markdown.
+ *   Jina's reader runs the page's JavaScript and answers 20 requests a minute with
+ *   no key at all, which is why it stays one tap away rather than being removed.
  * - `fallback` (default on): when the chosen provider cannot answer, the others are tried
  *   in a fixed order. Off means the chosen provider is the only third party ever asked;
  *   a fetch still ends with the device's own direct request, which only the site sees.
  */
 data class WebAccessSettings(
-  val searchProvider: SearchProvider = SearchProvider.DuckDuckGo,
-  val fetchProvider: FetchProvider = FetchProvider.Jina,
+  val searchProvider: SearchProvider = SearchProvider.Parallel,
+  val fetchProvider: FetchProvider = FetchProvider.Parallel,
   val fallback: Boolean = true
 )
 
@@ -167,14 +168,16 @@ class WebAccessStore(private val context: Context? = null) {
     /**
      * Reads a stored config. Files written before providers existed carry only
      * `preferJina`: `false` meant "never hand a URL to a third party", which is a direct
-     * fetch with no fallback; `true` meant the reader, which is now simply the default.
+     * fetch with no fallback; `true` meant third-party reading was fine, which is simply
+     * whatever the shipped defaults are now.
      */
     internal fun readSettings(json: JSONObject): WebAccessSettings {
       val legacyDirect = json.has("preferJina") && !json.optBoolean("preferJina", true)
+      val defaults = WebAccessSettings()
       return WebAccessSettings(
-        searchProvider = SearchProvider.fromName(json.optString("searchProvider")) ?: SearchProvider.DuckDuckGo,
+        searchProvider = SearchProvider.fromName(json.optString("searchProvider")) ?: defaults.searchProvider,
         fetchProvider = FetchProvider.fromName(json.optString("fetchProvider"))
-          ?: if (legacyDirect) FetchProvider.Direct else FetchProvider.Jina,
+          ?: if (legacyDirect) FetchProvider.Direct else defaults.fetchProvider,
         fallback = json.optBoolean("fallback", !legacyDirect)
       )
     }

@@ -3,6 +3,7 @@ package com.awaki
 import com.awaki.agent.tool.WebFetchTool
 import com.awaki.agent.tool.stripHtml
 import com.awaki.agent.web.WebGateway
+import com.awaki.data.local.FetchProvider
 import com.awaki.data.local.WebAccessSettings
 import com.awaki.data.local.WebAccessStore
 import kotlinx.coroutines.runBlocking
@@ -122,6 +123,8 @@ class WebFetchToolTest {
   /**
    * A gateway over a scripted client. The app's own keys are forced empty: a build on CI
    * may carry them, and these tests are about which tier answers, not about the secret.
+   * Jina is picked explicitly because that is the route under test; the shipped default
+   * (Parallel) is proven separately, in ParallelWebTest and the default-provider tests.
    */
   private fun pool(
     vararg answers: StubAnswer,
@@ -129,7 +132,7 @@ class WebFetchToolTest {
     capture: (Request) -> Unit = {}
   ): WebGateway = WebGateway(
     client = stubHttpScripted(*answers, capture = capture),
-    settings = { WebAccessSettings(fallback = false) },
+    settings = { WebAccessSettings(fetchProvider = FetchProvider.Jina, fallback = false) },
     userKeys = { userKeys },
     appKeys = { emptyList() }
   )
@@ -202,6 +205,37 @@ class WebFetchToolTest {
   }
 
   @Test
+  fun `Parallel is the reader when nothing is configured`() {
+    val sent = mutableListOf<Request>()
+    val toolReply = """{"jsonrpc":"2.0","id":11,"result":{"content":[{"type":"text","text":"{\"results\":[{\"url\":\"https://developer.android.com/room\",\"title\":\"Room\",\"full_content\":\"# Room\\n\\nChange the schema.\"}]}"}]}}"""
+    val result = runBlocking {
+      WebFetchTool(
+        WebGateway(
+          client = stubHttpScripted(
+            StubAnswer(
+              200,
+              """{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-03-26","capabilities":{}}}""",
+              headers = mapOf("Mcp-Session-Id" to "session-1")
+            ),
+            StubAnswer(202, ""),
+            StubAnswer(200, toolReply),
+            capture = { sent.add(it) }
+          ),
+          settings = { WebAccessSettings() },
+          appKeys = { emptyList() }
+        )
+      ).execute(args("""{"url": "https://developer.android.com/room"}"""), contextFor(ws()))
+    }
+    assertTrue(result.output, result.success)
+    assertEquals(
+      listOf("search.parallel.ai", "search.parallel.ai", "search.parallel.ai"),
+      sent.map { it.url.host }
+    )
+    assertEquals("parallel", result.metadata["via"])
+    assertTrue(result.output.contains("Change the schema."))
+  }
+
+  @Test
   fun `when neither route reaches the page the model is told both reasons`() {
     val client = OkHttpClient.Builder().addInterceptor { chain ->
       val request = chain.request()
@@ -219,7 +253,7 @@ class WebFetchToolTest {
     val result = runBlocking {
       WebGateway(
         client = client,
-        settings = { WebAccessSettings(fallback = false) },
+        settings = { WebAccessSettings(fetchProvider = FetchProvider.Jina, fallback = false) },
         appKeys = { emptyList() }
       ).let { WebFetchTool(it) }
         .execute(args("""{"url": "https://developer.android.com/room"}"""), contextFor(ws()))

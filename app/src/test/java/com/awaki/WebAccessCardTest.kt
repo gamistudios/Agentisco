@@ -81,6 +81,8 @@ class WebAccessCardTest {
   /**
    * A repository over a scripted gateway. The build's own keys are left out, because the
    * screen a user of this build sees is the anonymous tier plus whatever they pasted.
+   * The probe scripts answer the Jina and DuckDuckGo shapes, so this fixture picks those
+   * providers; the shipped defaults (Parallel) are asserted separately, not probed here.
    */
   private fun viewModelWith(
     vararg answers: StubAnswer
@@ -88,7 +90,9 @@ class WebAccessCardTest {
     val sent = mutableListOf<Request>()
     val gateway = WebGateway(
       client = stubHttpScripted(*answers, capture = { sent.add(it) }),
-      settings = { WebAccessSettings() },
+      settings = {
+        WebAccessSettings(searchProvider = SearchProvider.DuckDuckGo, fetchProvider = FetchProvider.Jina)
+      },
       appKeys = { emptyList() }
     )
     val viewModel = held.hold(WorkspaceViewModel(WorkspaceRepository(context = null, web = gateway)))
@@ -102,15 +106,15 @@ class WebAccessCardTest {
 
     compose.onNodeWithText("Web Access").assertIsDisplayed()
     compose
-      .onNodeWithText("Search defaults to DuckDuckGo", substring = true)
+      .onNodeWithText("default to Parallel", substring = true)
       .assertIsDisplayed()
     compose.onNodeWithTag("chip_search_duckduckgo").assertIsDisplayed()
     compose.onNodeWithTag("chip_search_parallel").assertIsDisplayed()
     compose.onNodeWithTag("chip_fetch_jina").assertIsDisplayed()
     compose.onNodeWithTag("chip_fetch_direct").assertIsDisplayed()
     compose.onNodeWithTag("switch_web_fallback").assertIsDisplayed()
-    assertEquals(SearchProvider.DuckDuckGo, viewModel.webAccess.value.searchProvider)
-    assertEquals(FetchProvider.Jina, viewModel.webAccess.value.fetchProvider)
+    assertEquals(SearchProvider.Parallel, viewModel.webAccess.value.searchProvider)
+    assertEquals(FetchProvider.Parallel, viewModel.webAccess.value.fetchProvider)
     // The count the card reports is the rotation the build actually carries, so a CI
     // build that bakes keys in cannot fail a test written for a build that does not.
     compose.onNodeWithText("rotation: ${viewModel.bundledJinaKeyCount}").assertIsDisplayed()

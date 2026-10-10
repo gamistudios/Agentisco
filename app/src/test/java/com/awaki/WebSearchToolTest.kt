@@ -269,20 +269,31 @@ class WebSearchToolTest {
   }
 
   @Test
-  fun `DuckDuckGo is the engine when nothing is configured`() {
+  fun `Parallel is the engine when nothing is configured`() {
     val sent = mutableListOf<okhttp3.Request>()
+    val toolReply = """{"jsonrpc":"2.0","id":11,"result":{"content":[{"type":"text","text":"{\"results\":[{\"url\":\"https://developer.android.com/room/migrations\",\"title\":\"Room migrations\",\"excerpts\":[\"Change the schema across versions.\"]}]}"}]}}"""
     val result = runBlocking {
       WebSearchTool(
         WebGateway(
-          client = stubHttpScripted(StubAnswer(200, resultsPage, "text/html"), capture = { sent.add(it) }),
+          client = stubHttpScripted(
+            StubAnswer(
+              200,
+              """{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-03-26","capabilities":{}}}""",
+              headers = mapOf("Mcp-Session-Id" to "session-1")
+            ),
+            StubAnswer(202, ""),
+            StubAnswer(200, toolReply),
+            capture = { sent.add(it) }
+          ),
           settings = { WebAccessSettings() },
           appKeys = { emptyList() }
         )
       ).execute(args("""{"query": "room migration"}"""), contextFor(ws()))
     }
     assertTrue(result.output, result.success)
-    assertEquals(listOf("html.duckduckgo.com"), sent.map { it.url.host })
-    assertEquals("duckduckgo", result.metadata["via"])
+    assertEquals(listOf("search.parallel.ai", "search.parallel.ai", "search.parallel.ai"), sent.map { it.url.host })
+    assertEquals("parallel", result.metadata["via"])
+    assertTrue(result.output.contains("https://developer.android.com/room/migrations"))
   }
 
   @Test
@@ -302,7 +313,7 @@ class WebSearchToolTest {
             parallelResults,
             capture = { sent.add(it) }
           ),
-          settings = { WebAccessSettings() },
+          settings = { WebAccessSettings(searchProvider = SearchProvider.DuckDuckGo) },
           appKeys = { emptyList() }
         )
       ).execute(args("""{"query": "room migration"}"""), contextFor(ws()))
@@ -324,7 +335,7 @@ class WebSearchToolTest {
       WebSearchTool(
         WebGateway(
           client = stubHttpScripted(StubAnswer(403, "<html>blocked</html>", "text/html"), capture = { sent.add(it) }),
-          settings = { WebAccessSettings(fallback = false) },
+          settings = { WebAccessSettings(searchProvider = SearchProvider.DuckDuckGo, fallback = false) },
           appKeys = { emptyList() }
         )
       ).execute(args("""{"query": "room migration"}"""), contextFor(ws()))

@@ -31,7 +31,7 @@ import org.json.JSONObject
 class WebFetchTool(private val web: WebGateway) : AgentTool {
   override val name = "web_fetch"
   override val description =
-    "Fetch an http(s) URL and return its readable text: markdown from a reader service (Jina.ai or Parallel, as configured in Settings; these run JavaScript pages) where one answers, otherwise the page fetched directly with HTML tags stripped and script/style removed. Use it for documentation, error pages, changelogs and API responses. Binary bodies are refused, and a cut-off is always stated. To find a URL in the first place use web_search."
+    "Fetch an http(s) URL and return its readable text: markdown from a reader service (Parallel or Jina.ai, as configured in Settings; these run JavaScript pages) where one answers, otherwise the page fetched directly with HTML tags stripped and script/style removed. Use it for documentation, error pages, changelogs and API responses. Binary bodies are refused, and a cut-off is always stated. To find a URL in the first place use web_search."
   override val params = listOf(
     ToolParam("url", "Full URL to fetch, e.g. \"https://example.com/docs\"."),
     ToolParam(
@@ -163,16 +163,17 @@ class WebFetchTool(private val web: WebGateway) : AgentTool {
  * 404 and a second guess, so search is a separate step with its own honest
  * failure: no parsed results is reported as such rather than padded with guesses.
  *
- * DuckDuckGo's live result page is the default engine: keyless, and fresh enough to
- * find this week's release notes. Parallel's free search is the keyless alternative, and
- * Jina.ai answers with real titles, links and snippets but refuses an anonymous call, so
- * it only takes part when a key exists. Settings picks the first engine; when it cannot
+ * Parallel's free MCP is the default engine for both tools: keyless, and the answer
+ * arrives as excerpts or markdown ready for the model. DuckDuckGo's live result page is
+ * the keyless search alternative, and Jina.ai answers with real titles, links and
+ * snippets but refuses an anonymous call, so it only takes part when a key exists.
+ * Settings picks the first engine; when it cannot
  * answer, the gateway's chain names the next.
  */
 class WebSearchTool(private val web: WebGateway) : AgentTool {
   override val name = "web_search"
   override val description =
-    "Search the web and get back titles, URLs and short snippets (DuckDuckGo by default; Parallel or Jina.ai as configured in Settings, with the others as fallback). Use it to find the documentation, issue or changelog for an error message or library, then web_fetch the URL that looks right. Returns at most $MAX_RESULTS results; when the engine does not answer it says so instead of inventing links."
+    "Search the web and get back titles, URLs and short snippets (Parallel's free search by default; DuckDuckGo or Jina.ai as configured in Settings, with the others as fallback). Use it to find the documentation, issue or changelog for an error message or library, then web_fetch the URL that looks right. Returns at most $MAX_RESULTS results; when the engine does not answer it says so instead of inventing links."
   override val params = listOf(
     ToolParam("query", "Search terms, e.g. \"Room android database migration UNIQUE constraint\"."),
     ToolParam(

@@ -245,8 +245,8 @@ class WorkspaceRepository(
 
   // ---- Web access (Settings → Web access) ----
   /**
-   * The agent's front door to the web: the providers chosen in Settings (DuckDuckGo to
-   * search and Jina.ai to read by default), with whatever Jina keys this device can
+   * The agent's front door to the web: the providers chosen in Settings (Parallel's
+   * free MCP for both tools by default), with whatever Jina keys this device can
    * spend, and the URL itself after. One instance for the whole repository, so the
    * request budget the tools are spending is the same one the settings screen reports.
    */

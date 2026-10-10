@@ -87,10 +87,11 @@ fun bundledAppKeyCount(): Int = bundledAppKeys().size
 /**
  * The agent's front door to the web: three providers behind two tools.
  *
- * `web_search` asks DuckDuckGo by default and `web_fetch` asks Jina.ai's reader by
- * default; Settings can change either, and [searchChain] / [fetchChain] say in what
- * order the providers are tried when the first one cannot answer. Parallel's free MCP is
- * the keyless third option for both. The direct request is always the end of a fetch.
+ * Both tools ask Parallel's free MCP by default; Settings can change either, and
+ * [searchChain] / [fetchChain] say in what order the providers are tried when the first
+ * one cannot answer. DuckDuckGo is the keyless live-index search alternative and
+ * Jina.ai's reader the JavaScript-running fetch alternative. The direct request is
+ * always the end of a fetch.
  *
  * Within Jina.ai the policy is spend-nothing-first: an anonymous reader call costs the app nothing and
  * answers 20 times a minute, so it is tried before any key. A key — the user's own, or
