@@ -17,6 +17,12 @@ data class UserPreferences(
     /** Timestamp of the one-time notification permission ask, so it is not nagged. */
     val notificationsAskedAt: Long = 0,
     /**
+     * Timestamp of the one-time storage ask the user declined. While access is missing
+     * every launch would otherwise jump to the system settings page again; this marks
+     * "seen and refused", and the settings checklist row stays the way back.
+     */
+    val storageAskedAt: Long = 0,
+    /**
      * Alerts the user may silence. Each gates exactly one notification the app really
      * posts; the ongoing foreground-service notice is not among them because Android
      * requires it while a foreground service is up, and hiding it is not this app's

@@ -36,6 +36,7 @@ import com.awaki.background.WorkNotifications
 import com.awaki.core.model.AppDestination
 import com.awaki.data.repository.UpdateRepository
 import com.awaki.data.repository.WorkspaceRepository
+import com.awaki.storage.StorageAccess
 import com.awaki.ui.UpdateViewModel
 import com.awaki.ui.WorkspaceViewModel
 import com.awaki.ui.components.*
@@ -170,6 +171,37 @@ fun AgentIDEApp(
       requestNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
     } else {
       viewModel.markNotificationsAsked()
+    }
+  }
+
+  // Storage access is the opposite case: Android never raises its own prompt for it,
+  // and without it every read of /storage/emulated/0 simply fails. Ask once per
+  // install on a cold start — the "All files access" page on Android 11+, the
+  // runtime dialog below — and record a refusal so it cannot interrupt again;
+  // the Battery & permissions checklist row is the way back.
+  val preferencesStore = app.userPreferencesStore
+  val recordStorageOutcome = {
+    if (StorageAccess.hasAccess(app)) {
+      if (preferencesStore.preferences.value.storageAskedAt != 0L) {
+        preferencesStore.updatePreferences { it.copy(storageAskedAt = 0L) }
+      }
+    } else if (preferencesStore.preferences.value.storageAskedAt == 0L) {
+      preferencesStore.updatePreferences { it.copy(storageAskedAt = System.currentTimeMillis()) }
+    }
+  }
+  val requestStorageSettings = rememberLauncherForActivityResult(
+    ActivityResultContracts.StartActivityForResult()
+  ) { recordStorageOutcome() }
+  val requestStorageLegacy = rememberLauncherForActivityResult(
+    ActivityResultContracts.RequestMultiplePermissions()
+  ) { recordStorageOutcome() }
+  LaunchedEffect(Unit) {
+    if (StorageAccess.hasAccess(app)) return@LaunchedEffect
+    if (preferencesStore.preferences.value.storageAskedAt > 0L) return@LaunchedEffect
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+      requestStorageSettings.launch(StorageAccess.accessIntent(app))
+    } else {
+      requestStorageLegacy.launch(StorageAccess.missingLegacyPermissions(app))
     }
   }
 

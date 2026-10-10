@@ -1,5 +1,6 @@
 package com.awaki.ui.screens.settings
 
+import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -57,12 +58,15 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import com.awaki.agent.model.PermissionMode
 import com.awaki.background.RequirementAction
+import com.awaki.background.RequirementKey
 import com.awaki.background.RequirementStatus
 import com.awaki.core.model.AppDestination
 import com.awaki.data.repository.UpdateRepository
 import com.awaki.editor.syntax.SyntaxTheme
+import com.awaki.storage.StorageAccess
 import com.awaki.ui.WorkspaceViewModel
 import com.awaki.ui.UpdateViewModel
 import com.awaki.ui.components.AgentTeamSection
@@ -594,9 +598,33 @@ private fun BackgroundChecksBody(viewModel: WorkspaceViewModel) {
     if (granted) viewModel.dismissNotificationsPrompt() else viewModel.markNotificationsAsked()
   }
 
+  // File access lives outside the app, so it is only known after the user comes back
+  // from the system page: re-read it on every resume rather than trusting a click.
+  var storageGranted by remember { mutableStateOf(StorageAccess.hasAccess(context)) }
+  LifecycleResumeEffect(context) {
+    storageGranted = StorageAccess.hasAccess(context)
+    onPauseOrDispose { }
+  }
+  val requestStorageLegacy = rememberLauncherForActivityResult(
+    ActivityResultContracts.RequestMultiplePermissions()
+  ) { storageGranted = StorageAccess.hasAccess(context) }
+
+  val storageRow = com.awaki.background.BackgroundRequirement(
+    key = RequirementKey.STORAGE,
+    title = "File access",
+    description = if (storageGranted) {
+      "Allowed. Projects, model files and the terminal can read /storage/emulated/0 directly."
+    } else {
+      "Blocked. Android never asks for this on its own; until it is allowed, every read of shared storage fails."
+    },
+    status = if (storageGranted) RequirementStatus.GRANTED else RequirementStatus.ACTION_REQUIRED,
+    action = RequirementAction.OPEN_STORAGE_SETTINGS,
+    blocking = !storageGranted
+  )
+
   SheetHeading(
     title = "Battery & permissions",
-    subtitle = "Four things only you can grant. Awaki cannot switch any of them from inside itself, so each " +
+    subtitle = "Five things only you can grant. Awaki cannot switch any of them from inside itself, so each " +
       "row opens the system screen that can."
   )
   Column(
@@ -607,18 +635,25 @@ private fun BackgroundChecksBody(viewModel: WorkspaceViewModel) {
       .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(14.dp))
       .padding(horizontal = 12.dp)
   ) {
-    requirements.forEachIndexed { index, requirement ->
+    val rows = listOf(storageRow) + requirements
+    rows.forEachIndexed { index, requirement ->
       RequirementRow(
         requirement = requirement,
         onAction = { action ->
-          if (action == RequirementAction.REQUEST_NOTIFICATIONS) {
-            requestNotifications.launch(android.Manifest.permission.POST_NOTIFICATIONS)
-          } else {
-            viewModel.performBackgroundAction(context, action)
+          when (action) {
+            RequirementAction.REQUEST_NOTIFICATIONS ->
+              requestNotifications.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+            RequirementAction.OPEN_STORAGE_SETTINGS ->
+              if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                StorageAccess.openAccessSettings(context)
+              } else {
+                requestStorageLegacy.launch(StorageAccess.missingLegacyPermissions(context))
+              }
+            else -> viewModel.performBackgroundAction(context, action)
           }
         }
       )
-      if (index < requirements.lastIndex) {
+      if (index < rows.lastIndex) {
         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant, thickness = 0.5.dp)
       }
     }

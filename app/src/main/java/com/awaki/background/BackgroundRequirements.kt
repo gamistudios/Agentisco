@@ -28,10 +28,12 @@ enum class RequirementAction {
   REQUEST_BATTERY_EXEMPTION,
   OPEN_BATTERY_SETTINGS,
   OPEN_BACKGROUND_DATA_SETTINGS,
-  OPEN_APP_SETTINGS
+  OPEN_APP_SETTINGS,
+  /** All-files access on Android 11+, legacy runtime dialog below; both are one user step. */
+  OPEN_STORAGE_SETTINGS
 }
 
-enum class RequirementKey { NOTIFICATIONS, FOREGROUND_SERVICE, BATTERY_EXEMPTION, BACKGROUND_DATA }
+enum class RequirementKey { NOTIFICATIONS, FOREGROUND_SERVICE, BATTERY_EXEMPTION, BACKGROUND_DATA, STORAGE }
 
 data class BackgroundRequirement(
   val key: RequirementKey,

@@ -120,6 +120,8 @@ object BackgroundPermissions {
     RequirementAction.OPEN_BATTERY_SETTINGS -> openBatteryOptimizationList(context)
     RequirementAction.OPEN_BACKGROUND_DATA_SETTINGS -> openBackgroundDataSettings(context)
     RequirementAction.OPEN_APP_SETTINGS -> openAppSettings(context)
+    RequirementAction.OPEN_STORAGE_SETTINGS ->
+      com.awaki.storage.StorageAccess.openAccessSettings(context)
   }
 
   private fun startIntent(context: Context, intent: Intent): Boolean = runCatching {
